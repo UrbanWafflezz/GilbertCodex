@@ -40,7 +40,7 @@
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "color-name-list": "^14.36.0",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.14.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
