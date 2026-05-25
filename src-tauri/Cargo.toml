@@ -16,7 +16,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 base64 = "0.22"
 ed25519-dalek = "2"
-reqwest = { version = "0.13.3", features = ["json"] }
+reqwest = { version = "0.13.4", features = ["json"] }
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
