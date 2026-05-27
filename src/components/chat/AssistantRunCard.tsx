@@ -478,7 +478,7 @@ function RunFileLane({ items }: { items: RunFileItem[] }) {
             <span className="assistant-run-file-action">{item.action}</span>
             <span className="assistant-run-file-path" title={item.path}>{formatActivityPath(item.path)}</span>
             {typeof item.additions === "number" || typeof item.deletions === "number" ? (
-              <span className="assistant-run-file-diff">+{formatNumber(item.additions ?? 0)} / -{formatNumber(item.deletions ?? 0)}</span>
+              <span className="assistant-run-file-diff">+{formatNumber(item.additions ?? 0)} -{formatNumber(item.deletions ?? 0)}</span>
             ) : item.detail ? (
               <small>{item.detail}</small>
             ) : null}
@@ -1002,6 +1002,24 @@ function formatTerminalInlineTitle(items: RunTerminalItem[]) {
   return `${running ? "Running" : "Ran"} ${formatCount(items.length, "command")}`;
 }
 
+function formatMcpInlineTitle(items: RunMcpItem[]) {
+  const running = items.some((item) => item.status === "active" || item.status === "waiting_approval");
+
+  if (items.length === 1) {
+    return `${running ? "Calling" : "Called"} MCP`;
+  }
+
+  return `${running ? "Calling" : "Called"} ${formatCount(items.length, "MCP tool")}`;
+}
+
+function formatMcpInlineDetail(items: RunMcpItem[]) {
+  const first = items[0];
+  if (!first) return "";
+
+  const label = [first.server, first.tool].filter(Boolean).join(" / ");
+  return items.length > 1 ? `${label} +${items.length - 1}` : label;
+}
+
 function formatCount(count: number, noun: string) {
   return `${formatNumber(count)} ${noun}${count === 1 ? "" : "s"}`;
 }
@@ -1405,6 +1423,40 @@ function parseToolInput(input: string | undefined): Record<string, unknown> | nu
   }
 }
 
+function getMcpServerName(toolCall: ChatToolCall, input: Record<string, unknown> | null) {
+  const server = stringValue(input?.server) ||
+    stringValue(input?.serverId) ||
+    stringValue(input?.server_id) ||
+    stringValue(input?.mcpServer) ||
+    stringValue(input?.mcp_server) ||
+    stringValue(input?.connector) ||
+    stringValue(input?.app);
+
+  if (server) return cleanInlineText(server);
+
+  const match = cleanInlineText(toolCall.label).match(/\b(?:MCP|server)\s+([A-Za-z0-9_.:-]+)/i);
+  return match?.[1] ?? "";
+}
+
+function getMcpToolName(toolCall: ChatToolCall, input: Record<string, unknown> | null) {
+  const explicit = stringValue(input?.tool) ||
+    stringValue(input?.toolName) ||
+    stringValue(input?.tool_name) ||
+    stringValue(input?.name) ||
+    stringValue(input?.method) ||
+    stringValue(input?.action);
+
+  if (explicit) return cleanInlineText(explicit);
+
+  const toolId = toolCall.toolId?.replace(/^mcp[._-]/i, "").replace(/[._-]+/g, " ").trim();
+  return cleanInlineText(toolId || toolCall.label || "MCP tool");
+}
+
+function createMcpOutputPreview(output: string | undefined) {
+  if (!output) return "";
+  return limitText(output, 120);
+}
+
 function isFileReadingToolCall(toolCall: ChatToolCall) {
   const key = getToolKey(toolCall);
   return /\bfiles[._-](?:read|read_many|read_range|list|search|tree_summary|stat|count_lines)\b/.test(key)
@@ -1455,6 +1507,11 @@ function isBrowserToolCall(toolCall: ChatToolCall) {
 function isWebToolCall(toolCall: ChatToolCall) {
   const key = getToolKey(toolCall);
   return /\bweb[._-]search\b|\bduckduckgo\b|\bbrave\b|\bsearch web\b/.test(key);
+}
+
+function isMcpToolCall(toolCall: ChatToolCall) {
+  const key = getToolKey(toolCall);
+  return /^mcp[._-]/.test(toolCall.toolId ?? "") || /\bmcp\b|\bserver-backed\b|\bconnector\b/.test(key);
 }
 
 function getEditingAction(toolCall: ChatToolCall) {
@@ -1529,6 +1586,43 @@ function formatStageDetail(key: RunStageKey) {
 
 function formatApprovalTarget(approval: AgentApproval) {
   return approval.path || approval.command || approval.tool || approval.kind;
+}
+
+function formatInlineFileVerb(file: RunFileItem) {
+  const active = file.status === "active" || file.status === "waiting_approval";
+
+  switch (file.action) {
+    case "created":
+      return active ? "Creating" : "Created";
+    case "wrote":
+      return active ? "Writing" : "Wrote";
+    case "edited":
+      return active ? "Editing" : "Edited";
+    case "deleted":
+      return active ? "Deleting" : "Deleted";
+    case "moved":
+      return active ? "Moving" : "Moved";
+    case "copied":
+      return active ? "Copying" : "Copied";
+    case "searched":
+      return active ? "Searching" : "Searched";
+    case "read":
+      return active ? "Reading" : "Read";
+    case "checked":
+    case "unchanged":
+      return active ? "Checking" : "Checked";
+    case "skipped":
+      return "Skipped";
+    default:
+      return active ? "Working" : "Updated";
+  }
+}
+
+function formatInlineMcpVerb(status: RunLaneStatus) {
+  if (status === "active" || status === "waiting_approval") return "Calling";
+  if (status === "error") return "Failed";
+  if (status === "skipped") return "Skipped";
+  return "Called";
 }
 
 function formatRiskLabel(risk: AgentApproval["risk"]) {
