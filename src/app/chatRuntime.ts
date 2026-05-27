@@ -214,11 +214,6 @@ export function looksLikeUnappliedFileEditAnswer(content: string, toolCalls: Cha
     return false;
   }
 
-  const hasWorkspaceToolEvidence = toolCalls.some((toolCall) => toolCall.status === "complete" || toolCall.status === "error" || toolCall.status === "skipped");
-  if (!hasWorkspaceToolEvidence) {
-    return false;
-  }
-
   const claimsFileChange =
     /\b(?:updated|modified|changed|implemented|integrated|added|wired|created|replaced|refactored)\b[\s\S]{0,220}\b(?:file|app|component|page|css|jsx|tsx|js|ts|code)\b/i.test(trimmed) ||
     /(?:\u66f4\u65b0\u540e\u7684|\u4fee\u6539\u540e\u7684|\u6539\u52a8\u8bf4\u660e|\u6211\u53ea\u4fee\u6539|\u5df2\u7ecf\u521b\u5efa|\u5df2\u7ecf\u5305\u542b|\u76f4\u63a5\u3001\u5b89\u5168\u5730.*\u6574\u5408|\u5df2.*(?:\u4fee\u6539|\u6574\u5408|\u66f4\u65b0|\u521b\u5efa))/iu.test(trimmed);
@@ -241,8 +236,10 @@ export function looksLikeUnappliedFileEditAnswer(content: string, toolCalls: Cha
 
   return namesEditableFile && (
     hasChangedFilesImplementationSummary ||
-    claimsFileChange && (hasUpdatedFileHeader || hasCodeDump) ||
-    hasReplacementInstructionHeader && hasCodeDump
+    toolCalls.some((toolCall) => toolCall.status === "complete" || toolCall.status === "error" || toolCall.status === "skipped") && (
+      claimsFileChange && (hasUpdatedFileHeader || hasCodeDump) ||
+      hasReplacementInstructionHeader && hasCodeDump
+    )
   );
 }
 
