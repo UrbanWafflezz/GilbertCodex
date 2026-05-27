@@ -425,10 +425,6 @@ function isReasoningReserveIncludedInMaxOutput(settings: ProviderSettings, body:
     return true;
   }
 
-  if (body.thinking && typeof body.thinking === "object" && "budget_tokens" in body.thinking) {
-    return true;
-  }
-
   if (settings.provider === "openai" && "max_output_tokens" in body) {
     return true;
   }

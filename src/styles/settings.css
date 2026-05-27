@@ -1368,6 +1368,18 @@
   background: var(--surface-raised);
 }
 
+.provider-picker-grid button:disabled,
+.provider-picker-grid button[data-locked="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.provider-picker-grid button[data-locked="true"]:hover {
+  color: var(--text-muted);
+  border-color: var(--field-border);
+  background: var(--field-bg);
+}
+
 .provider-picker-grid strong,
 .provider-picker-grid small {
   min-width: 0;
@@ -1619,6 +1631,7 @@
 
 .settings-secret-row button,
 .settings-primary-button,
+.settings-secondary-button,
 .settings-ghost-button {
   display: inline-flex;
   align-items: center;
@@ -1668,9 +1681,17 @@
 }
 
 .settings-primary-button:disabled,
+.settings-secondary-button:disabled,
 .send-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.settings-secondary-button {
+  padding: 0 14px;
+  color: var(--text);
+  border: 1px solid var(--composer-focus-border);
+  background: var(--surface-raised);
 }
 
 .settings-ghost-button {
@@ -1682,6 +1703,9 @@
 }
 
 .settings-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   color: #9db7ff;
   font-size: var(--font-size-13, 13px);
@@ -1698,6 +1722,138 @@
 
 .settings-status[data-kind="warning"] {
   color: #ffd27a;
+}
+
+.billing-current-card {
+  gap: 16px;
+}
+
+.billing-current-metrics,
+.billing-stripe-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.billing-metric {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field-bg);
+}
+
+.billing-metric span {
+  color: var(--text-dim);
+  font-size: var(--font-size-11, 11px);
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.billing-metric strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--font-size-14, 14px);
+  overflow-wrap: anywhere;
+}
+
+.billing-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.billing-plan-card {
+  gap: 14px;
+  min-height: 430px;
+}
+
+.billing-plan-card[data-selected="true"] {
+  border-color: var(--composer-focus-border);
+  background: color-mix(in srgb, var(--surface-raised) 78%, var(--blue-soft) 22%);
+}
+
+.billing-plan-card[data-disabled="true"] {
+  opacity: 0.68;
+}
+
+.billing-plan-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.billing-plan-card h2,
+.billing-plan-card p {
+  margin: 0;
+}
+
+.billing-plan-card h2 {
+  color: var(--text);
+  font-size: var(--font-size-18, 18px);
+}
+
+.billing-plan-card-top p,
+.billing-plan-description {
+  color: var(--text-dim);
+  font-size: var(--font-size-12, 12px);
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.billing-plan-price {
+  color: var(--text);
+  font-size: var(--font-size-24, 24px);
+  letter-spacing: 0;
+}
+
+.billing-feature-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.billing-feature-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-12, 12px);
+  font-weight: 680;
+  line-height: 1.35;
+}
+
+.billing-feature-list svg {
+  margin-top: 1px;
+  color: var(--success);
+}
+
+.billing-plan-limits {
+  display: grid;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.billing-plan-limits span {
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field-bg);
+  font-size: var(--font-size-11, 11px);
+  font-weight: 720;
+  overflow-wrap: anywhere;
 }
 
 .settings-model-chip-list {
@@ -4822,6 +4978,8 @@
 
   .database-metric-grid,
   .database-context-grid,
+  .billing-current-metrics,
+  .billing-stripe-grid,
   .usage-metric-grid,
   .usage-insight-grid,
   .usage-quality-grid,
@@ -4849,6 +5007,10 @@
   }
 
   .provider-picker-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .billing-plan-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -5029,6 +5191,12 @@
 
   .weather-source-provider-grid,
   .weather-source-registry {
+    grid-template-columns: 1fr;
+  }
+
+  .billing-current-metrics,
+  .billing-plan-grid,
+  .billing-stripe-grid {
     grid-template-columns: 1fr;
   }
 

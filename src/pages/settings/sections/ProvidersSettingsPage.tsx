@@ -1,5 +1,6 @@
 import { CheckCircle2, Eye, EyeOff, KeyRound, Trash2 } from "lucide-react";
 import { MODEL_PROVIDERS, getDefaultBaseUrlForProvider, type ModelProviderCatalogItem } from "../../../lib/models";
+import { getBillingPlanAccessDecision, getBillingPlanTier, isProviderAvailableForBillingTier } from "../../../lib/subscriptionTiers";
 import type { ModelProviderId, ProviderSettings } from "../../../types/settings";
 import type { SettingsStatusMessage } from "../types";
 import { SettingsSectionHeading } from "../components/SettingsSectionHeading";
@@ -37,7 +38,10 @@ export function ProvidersSettingsPage({
   testing,
   testStatus,
 }: ProvidersSettingsPageProps) {
+  const billingTier = getBillingPlanTier(settings.billingPlan);
   const isSubscriptionsProvider = settings.provider === "9router";
+  const activeProviderAvailable = isProviderAvailableForBillingTier(billingTier, settings.provider);
+  const activeModelAccess = getBillingPlanAccessDecision(billingTier, settings.provider, settings.model);
   const providerDetail = isSubscriptionsProvider
     ? "Subscription account routes. No API key is used for these models."
     : activeProvider.requiresApiKey
@@ -60,19 +64,26 @@ export function ProvidersSettingsPage({
           </div>
 
           <div className="provider-picker-grid" role="radiogroup" aria-label="Default model provider">
-            {MODEL_PROVIDERS.map((provider) => (
-              <button
-                key={provider.id}
-                type="button"
-                role="radio"
-                aria-checked={settings.provider === provider.id}
-                data-selected={settings.provider === provider.id}
-                onClick={() => onSelectProvider(provider.id)}
-              >
-                <strong>{provider.label}</strong>
-                <small>{formatProviderCredentialHint(provider)}</small>
-              </button>
-            ))}
+            {MODEL_PROVIDERS.map((provider) => {
+              const providerAvailable = isProviderAvailableForBillingTier(billingTier, provider.id);
+
+              return (
+                <button
+                  key={provider.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={settings.provider === provider.id}
+                  data-locked={!providerAvailable}
+                  data-selected={settings.provider === provider.id}
+                  disabled={!providerAvailable}
+                  title={providerAvailable ? provider.detail : "Upgrade to Plus to use hosted API provider routes."}
+                  onClick={() => onSelectProvider(provider.id)}
+                >
+                  <strong>{provider.label}</strong>
+                  <small>{formatProviderCredentialHint(provider, billingTier)}</small>
+                </button>
+              );
+            })}
           </div>
 
           {!isSubscriptionsProvider ? (
@@ -114,7 +125,7 @@ export function ProvidersSettingsPage({
           ) : null}
 
           <div className="settings-actions-row">
-            <button className="settings-primary-button" type="button" disabled={testing} onClick={onTestConnection}>
+            <button className="settings-primary-button" type="button" disabled={testing || !activeProviderAvailable || !activeModelAccess.allowed} onClick={onTestConnection}>
               <CheckCircle2 size={16} aria-hidden="true" />
               {testing ? "Checking" : isSubscriptionsProvider ? "Test subscriptions" : "Test provider"}
             </button>
@@ -130,9 +141,13 @@ export function ProvidersSettingsPage({
   );
 }
 
-function formatProviderCredentialHint(provider: ModelProviderCatalogItem) {
+function formatProviderCredentialHint(provider: ModelProviderCatalogItem, billingTier: string) {
+  if (billingTier === "free" && (provider.id === "anthropic" || provider.id === "deepseek" || provider.id === "google" || provider.id === "groq" || provider.id === "mistral" || provider.id === "openai" || provider.id === "xai")) {
+    return "Plus route";
+  }
+
   if (provider.id === "9router") {
-    return "Subscription accounts";
+    return billingTier === "free" ? "Free route only" : "Subscription accounts";
   }
 
   if (provider.requiresApiKey) {

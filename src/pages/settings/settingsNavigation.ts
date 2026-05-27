@@ -1,4 +1,5 @@
 import {
+  BadgeDollarSign,
   CloudSun,
   BarChart3,
   Compass,
@@ -19,6 +20,7 @@ import type { SettingsNavItem, SettingsSectionId } from "./types";
 export const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
   { icon: Settings2, id: "general", label: "General", meta: "Profile" },
   { icon: Palette, id: "appearance", label: "Appearance", meta: "Theme" },
+  { icon: BadgeDollarSign, id: "billing", label: "Plans", meta: "Billing" },
   { icon: ServerCog, id: "model", label: "AI & Providers", meta: "Models" },
   { icon: KeyRound, id: "keys", label: "Keys", meta: "Vault" },
   { icon: Route, id: "nineRouter", label: "Subscriptions", meta: "Accounts" },

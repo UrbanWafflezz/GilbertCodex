@@ -7,6 +7,7 @@ import type { AppAppearanceSettings, AppGeneralSettings, AppPersonalizationSetti
 
 export type SettingsSectionId =
   | "appearance"
+  | "billing"
   | "browser"
   | "braveSearch"
   | "configuration"

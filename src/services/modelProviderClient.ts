@@ -8,6 +8,7 @@ import {
 } from "../lib/contextWindow";
 import { applyLocalSamplingParameters } from "../lib/generationSettings";
 import { extractInternalReasoningTags } from "../lib/internalReasoningTags";
+import { assertBillingPlanAllowsModel } from "../lib/subscriptionTiers";
 import {
   getDefaultModelForProvider,
   getEffectiveProviderModelContextWindowTokens,
@@ -58,6 +59,7 @@ import {
   upsertNineRouterCombo,
 } from "./nineRouterFallbackRouting";
 import { loadNineRouterModels, NINE_ROUTER_DASHBOARD_FALLBACK } from "./nineRouterClient";
+import { recordManagedPlanUsage } from "./planUsageLimiter";
 
 const STREAM_FLUSH_MS = 140;
 const MAX_STREAM_REASONING_CHARS = 500_000;
@@ -70,13 +72,6 @@ const OPENROUTER_APP_TITLE = "Gilbert Codex";
 const OPENROUTER_APP_CATEGORIES = "programming-app,personal-agent";
 const STREAM_OPTIONS_PROVIDER_IDS = new Set<ModelProviderId>(["deepseek", "groq", "openai", "openrouter", "xai"]);
 const MEDIA_FALLBACK_CONTEXT_LABEL = "Media analysis";
-const MAX_REASONING_BUDGET_TOKENS = 35_000;
-const MIN_REASONING_FINAL_OUTPUT_TOKENS = 4_096;
-const REASONING_BUDGET_BY_EFFORT: Record<ReasoningEffort, number> = {
-  low: 4_096,
-  medium: 16_384,
-  high: MAX_REASONING_BUDGET_TOKENS,
-};
 const MODEL_AUTHORED_REASONING_PROTOCOL = [
   "# Public reasoning summary",
   "When reasoning mode is enabled, begin each assistant turn with one concise model-authored reasoning summary inside an opening <reasoning> tag and a closing </reasoning> tag, then write the normal answer or tool call after the closing tag.",
@@ -1037,6 +1032,12 @@ function appendMediaFallbackContext(content: string, context: string) {
   return body ? `${body}\n\n${mediaContext}` : mediaContext;
 }
 
+function estimateProviderRequestTokens(messages: ChatMessage[]) {
+  const estimated = messages.reduce((total, message) => total + estimateTextTokens(message.content || ""), 0);
+
+  return Math.max(1, Math.ceil(estimated));
+}
+
 export async function sendProviderMessage(settings: ProviderSettings, messages: ChatMessage[], options: ProviderRequestOptions = {}): Promise<ProviderMessageResult> {
   const provider = getModelProvider(settings.provider);
   const apiKey = getProviderApiKey(settings);
@@ -1045,6 +1046,9 @@ export async function sendProviderMessage(settings: ProviderSettings, messages: 
   const conversationCacheKey = createProviderConversationCacheKey(settings, preparedMessages, model);
 
   assertUsableSettings(settings.provider, apiKey, model);
+  assertBillingPlanAllowsModel(settings, model);
+  recordManagedPlanUsage(settings, "chatRequests");
+  recordManagedPlanUsage(settings, "tokens", estimateProviderRequestTokens(preparedMessages));
   const nineRouterRuntimeStatus = await ensureProviderRuntimeReady(settings, options.signal);
   await ensureNineRouterSelectedAutoRoute(settings, model, nineRouterRuntimeStatus, options.signal);
 
@@ -1172,6 +1176,9 @@ export async function streamProviderMessage(
   };
 
   assertUsableSettings(settings.provider, apiKey, model);
+  assertBillingPlanAllowsModel(settings, model);
+  recordManagedPlanUsage(settings, "chatRequests");
+  recordManagedPlanUsage(settings, "tokens", estimateProviderRequestTokens(preparedMessages));
   const nineRouterRuntimeStatus = await ensureProviderRuntimeReady(settings, options.signal);
   await ensureNineRouterSelectedAutoRoute(settings, model, nineRouterRuntimeStatus, options.signal);
 
@@ -1402,6 +1409,7 @@ export async function validateProviderSettings(settings: ProviderSettings) {
   const model = settings.model.trim();
 
   assertUsableSettings(settings.provider, apiKey, model);
+  assertBillingPlanAllowsModel(settings, model);
 
   const { payload, response } = await fetchProviderJson<ProviderModelsResponse>(
     settings.provider,
@@ -1557,7 +1565,7 @@ export function createResponsesRequestBody(
       role: message.role,
     })),
     instructions: systemPrompt.prompt,
-    max_output_tokens: resolveThinkingAwareMaxOutputTokens(settings, model),
+    max_output_tokens: settings.maxTokens,
     model,
     stream,
   };
@@ -1617,29 +1625,10 @@ export function getProviderRequestMaxOutputTokens(body: Record<string, unknown>,
 }
 
 export function estimateProviderRequestReasoningReserveTokens(settings: ProviderSettings, body: Record<string, unknown>) {
+  void body;
+
   if (!settings.thinking.enabled) {
     return 0;
-  }
-
-  const thinkingBudget = readNestedNumber(body.thinking, "budget_tokens");
-  if (thinkingBudget) {
-    // Anthropic's thinking budget is part of max_tokens, so it is tracked as a
-    // lane but not added again to the request total.
-    return thinkingBudget;
-  }
-
-  const explicitReasoningBudget = readReasoningMaxTokens(body);
-  if (explicitReasoningBudget) {
-    return explicitReasoningBudget;
-  }
-
-  const googleThinkingBudget = readGoogleThinkingBudget(body.extra_body);
-  if (googleThinkingBudget) {
-    return googleThinkingBudget;
-  }
-
-  if (body.reasoning || body.reasoning_effort || body.include_reasoning || body.thinking) {
-    return estimateReasoningReserveFromEffort(settings.thinking.effort);
   }
 
   return 0;
@@ -1661,11 +1650,7 @@ function applyContextWindowPreflightToBody(settings: ProviderSettings, body: Rec
   const requestedMaxOutput = getProviderRequestMaxOutputTokens(body, settings.maxTokens);
   const manualMaxOutput = getManualMaxOutputOverride(settings, model);
   const metadataMaxOutput = manualMaxOutput ?? getFallbackMaxOutputTokens(model, settings.provider, boundedContextWindow);
-  const thinkingBudget = readNestedNumber(body.thinking, "budget_tokens");
-  const explicitReasoningBudget = thinkingBudget || readReasoningMaxTokens(body) || readGoogleThinkingBudget(body.extra_body);
-  const minimumAcceptedOutput = explicitReasoningBudget
-    ? explicitReasoningBudget + MIN_REASONING_FINAL_OUTPUT_TOKENS
-    : 256;
+  const minimumAcceptedOutput = 256;
   const safetyMarginTokens = getContextWindowSafetyMarginTokens(boundedContextWindow);
   const outputCappedByMetadata = Math.max(
     minimumAcceptedOutput,
@@ -1705,47 +1690,7 @@ function estimateProviderRequestInputTokens(body: Record<string, unknown>) {
 }
 
 function estimateAdditionalProviderReasoningReserveTokens(settings: ProviderSettings, body: Record<string, unknown>) {
-  const thinkingBudget = readNestedNumber(body.thinking, "budget_tokens");
-  if (thinkingBudget) {
-    return 0;
-  }
-
-  if (settings.provider === "openai" && "max_output_tokens" in body) {
-    return 0;
-  }
-
   return estimateProviderRequestReasoningReserveTokens(settings, body);
-}
-
-function estimateReasoningReserveFromEffort(effort: ReasoningEffort) {
-  return getReasoningBudgetForEffort(effort);
-}
-
-function readReasoningMaxTokens(body: Record<string, unknown>) {
-  return readNestedNumber(body.reasoning, "max_tokens");
-}
-
-function readGoogleThinkingBudget(value: unknown) {
-  if (!value || typeof value !== "object") {
-    return 0;
-  }
-
-  const google = (value as { google?: unknown }).google;
-  if (!google || typeof google !== "object") {
-    return 0;
-  }
-
-  const config = (google as { thinking_config?: unknown }).thinking_config;
-  return readNestedNumber(config, "thinking_budget");
-}
-
-function readNestedNumber(value: unknown, key: string) {
-  if (!value || typeof value !== "object") {
-    return 0;
-  }
-
-  const candidate = (value as Record<string, unknown>)[key];
-  return typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0 ? Math.round(candidate) : 0;
 }
 
 function normalizePositiveRequestInteger(value: unknown, fallback: number) {
@@ -2034,7 +1979,8 @@ function hashStableText(value: string) {
 }
 
 function applyChatMaxTokens(settings: ProviderSettings, body: Record<string, unknown>, model: string) {
-  const maxOutputTokens = resolveThinkingAwareMaxOutputTokens(settings, model);
+  void model;
+  const maxOutputTokens = settings.maxTokens;
 
   if (usesMaxCompletionTokens(settings.provider)) {
     body.max_completion_tokens = maxOutputTokens;
@@ -2103,44 +2049,6 @@ function usesResponsesApi(settings: ProviderSettings, model: string) {
   return settings.provider === "openai" && settings.thinking.enabled && supportsProviderThinking(settings.provider, settings.thinking.effort, model);
 }
 
-function resolveThinkingAwareMaxOutputTokens(settings: ProviderSettings, model: string) {
-  const reasoningBudget = getProviderReasoningBudget(settings, model);
-
-  if (!reasoningBudget) {
-    return settings.maxTokens;
-  }
-
-  return Math.max(settings.maxTokens, reasoningBudget + MIN_REASONING_FINAL_OUTPUT_TOKENS);
-}
-
-function getProviderReasoningBudget(settings: ProviderSettings, model: string) {
-  if (!settings.thinking.enabled || !supportsProviderThinking(settings.provider, settings.thinking.effort, model)) {
-    return 0;
-  }
-
-  if (settings.provider === "google") {
-    return getGoogleThinkingBudget(settings.thinking.effort, model);
-  }
-
-  return getReasoningBudgetForEffort(settings.thinking.effort);
-}
-
-function getReasoningBudgetForEffort(effort: ReasoningEffort) {
-  return REASONING_BUDGET_BY_EFFORT[effort] ?? REASONING_BUDGET_BY_EFFORT.medium;
-}
-
-function getGoogleThinkingBudget(effort: ReasoningEffort, model: string) {
-  const normalizedModel = model.toLowerCase();
-  const requestedBudget = getReasoningBudgetForEffort(effort);
-
-  if (!normalizedModel.startsWith("gemini-2.5")) {
-    return requestedBudget;
-  }
-
-  const maxBudget = normalizedModel.includes("pro") ? 32_768 : 24_576;
-  return Math.min(requestedBudget, maxBudget);
-}
-
 function createAnthropicThinkingConfig(settings: ProviderSettings, model: string) {
   if (!settings.thinking.enabled || !supportsProviderThinking(settings.provider, settings.thinking.effort, model)) {
     return { maxTokens: settings.maxTokens };
@@ -2148,7 +2056,7 @@ function createAnthropicThinkingConfig(settings: ProviderSettings, model: string
 
   if (usesAnthropicAdaptiveThinking(model)) {
     return {
-      maxTokens: resolveThinkingAwareMaxOutputTokens(settings, model),
+      maxTokens: settings.maxTokens,
       outputConfig: {
         effort: mapAnthropicEffort(settings.thinking.effort),
       },
@@ -2159,17 +2067,8 @@ function createAnthropicThinkingConfig(settings: ProviderSettings, model: string
     };
   }
 
-  const budgetTokens = createAnthropicThinkingBudget(settings, model);
-
   return {
-    maxTokens: budgetTokens ? Math.max(resolveThinkingAwareMaxOutputTokens(settings, model), budgetTokens + MIN_REASONING_FINAL_OUTPUT_TOKENS) : settings.maxTokens,
-    thinking: budgetTokens
-      ? {
-          type: "enabled",
-          budget_tokens: budgetTokens,
-          display: "summarized",
-        }
-      : undefined,
+    maxTokens: settings.maxTokens,
   };
 }
 
@@ -2179,25 +2078,6 @@ function usesAnthropicAdaptiveThinking(model: string) {
 
 function mapAnthropicEffort(effort: ReasoningEffort) {
   return effort;
-}
-
-function createAnthropicThinkingBudget(settings: ProviderSettings, model: string) {
-  if (!settings.thinking.enabled || !supportsProviderThinking(settings.provider, settings.thinking.effort, model)) {
-    return 0;
-  }
-
-  // Anthropic requires `budget_tokens` >= 1024. The Low/Medium/High labels in the
-  // UI map to the shared reasoning budget ladder with a 35k high ceiling:
-  //   Low    4k  - quick but not starved
-  //   Medium 16k - balanced problem solving
-  //   High   35k - deep reasoning for hard coding and planning
-  const effortBudget: Record<ReasoningEffort, number> = {
-    low: REASONING_BUDGET_BY_EFFORT.low,
-    medium: REASONING_BUDGET_BY_EFFORT.medium,
-    high: REASONING_BUDGET_BY_EFFORT.high,
-  };
-
-  return effortBudget[settings.thinking.effort] ?? effortBudget.medium;
 }
 
 function applyReasoningToRequestBody(settings: ProviderSettings, body: Record<string, unknown>) {
@@ -2232,7 +2112,7 @@ function applyReasoningToRequestBody(settings: ProviderSettings, body: Record<st
   if (provider.reasoningMode === "openrouter") {
     const reasoning: Record<string, unknown> = {
       enabled: true,
-      max_tokens: getProviderReasoningBudget(settings, model),
+      effort: mapReasoningEffort(settings.provider, settings.thinking.effort),
       exclude: false,
     };
     if (settings.provider === "9router" && isNineRouterCodexModelId(model)) {
@@ -2245,7 +2125,7 @@ function applyReasoningToRequestBody(settings: ProviderSettings, body: Record<st
   if (provider.reasoningMode === "google-thinking") {
     body.extra_body = {
       google: {
-        thinking_config: createGoogleThinkingConfig(settings.thinking.effort, model, getProviderReasoningBudget(settings, model)),
+        thinking_config: createGoogleThinkingConfig(settings.thinking.effort, model),
       },
     };
     return;
@@ -2300,14 +2180,13 @@ function applyResponsesReasoningToRequestBody(settings: ProviderSettings, body: 
   };
 }
 
-function createGoogleThinkingConfig(effort: ReasoningEffort, model: string, budget = getGoogleThinkingBudget(effort, model)) {
+function createGoogleThinkingConfig(effort: ReasoningEffort, model: string) {
   const normalizedModel = model.toLowerCase();
   const includeThoughts = true;
 
   if (normalizedModel.startsWith("gemini-2.5")) {
     return {
       include_thoughts: includeThoughts,
-      thinking_budget: budget,
     };
   }
 

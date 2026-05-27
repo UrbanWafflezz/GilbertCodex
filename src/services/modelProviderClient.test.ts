@@ -40,6 +40,11 @@ function createSettings(): ProviderSettings {
       ...defaultProviderSettings.apiKeys,
       openai: "test-key",
     },
+    billingPlan: {
+      source: "local-preview",
+      status: "active",
+      tier: "pro",
+    },
     model: "gpt-test",
     provider: "openai",
     thinking: {
@@ -356,7 +361,7 @@ describe("provider structured output request bodies", () => {
       },
     });
     expect(body.response_format).toBeUndefined();
-    expect(body.max_output_tokens).toBe(20_480);
+    expect(body.max_output_tokens).toBe(createSettings().maxTokens);
   });
 
   it("applies output_config.format for Anthropic Messages requests", () => {
@@ -467,6 +472,11 @@ describe("subscription route request errors", () => {
   function createNineRouterSettings(model: string): ProviderSettings {
     return {
       ...defaultProviderSettings,
+      billingPlan: {
+        source: "local-preview",
+        status: "active",
+        tier: "pro",
+      },
       model,
       provider: "9router",
       thinking: {
@@ -1115,8 +1125,8 @@ describe("streamProviderMessage tool call parsing", () => {
     ) as Record<string, unknown>;
 
     expect(body.reasoning).toMatchObject({
+      effort: "medium",
       exclude: false,
-      max_tokens: 16_384,
       summary: "auto",
     });
   });
@@ -1283,6 +1293,11 @@ describe("streamProviderMessage tool call parsing", () => {
 
     const response = await streamProviderMessage({
       ...defaultProviderSettings,
+      billingPlan: {
+        source: "local-preview",
+        status: "active",
+        tier: "pro",
+      },
       model: "cx/gpt-5.5",
       provider: "9router",
       thinking: {
@@ -1351,13 +1366,18 @@ describe("streamProviderMessage tool call parsing", () => {
   });
 });
 
-describe("Anthropic thinking budget mapping", () => {
+describe("Anthropic thinking request mapping", () => {
   function anthropicSettings(effort: ReasoningEffort, enabled = true, model = "claude-sonnet-4-6"): ProviderSettings {
     return {
       ...defaultProviderSettings,
       apiKeys: {
         ...defaultProviderSettings.apiKeys,
         anthropic: "test-key",
+      },
+      billingPlan: {
+        source: "local-preview",
+        status: "active",
+        tier: "pro",
       },
       model,
       provider: "anthropic",
@@ -1408,19 +1428,17 @@ describe("Anthropic thinking budget mapping", () => {
     });
   });
 
-  it("maps Low/Medium/High effort to distinct, increasing budget_tokens for manual-thinking Claude models", () => {
+  it("does not send manual budget_tokens for non-adaptive Claude thinking models", () => {
     const lowBody = createProviderRequestBody(anthropicSettings("low", true, "claude-haiku-4-5-20251001"), [userMessage()]) as Record<string, unknown>;
     const medBody = createProviderRequestBody(anthropicSettings("medium", true, "claude-haiku-4-5-20251001"), [userMessage()]) as Record<string, unknown>;
     const highBody = createProviderRequestBody(anthropicSettings("high", true, "claude-haiku-4-5-20251001"), [userMessage()]) as Record<string, unknown>;
 
-    const low = (lowBody.thinking as { budget_tokens: number }).budget_tokens;
-    const med = (medBody.thinking as { budget_tokens: number }).budget_tokens;
-    const high = (highBody.thinking as { budget_tokens: number }).budget_tokens;
-
-    // Distinct, strictly increasing, Anthropic minimum honored.
-    expect(low).toBe(4_096);
-    expect(med).toBe(16_384);
-    expect(high).toBe(35_000);
+    expect(lowBody.thinking).toBeUndefined();
+    expect(medBody.thinking).toBeUndefined();
+    expect(highBody.thinking).toBeUndefined();
+    expect(lowBody.max_tokens).toBe(defaultProviderSettings.maxTokens);
+    expect(medBody.max_tokens).toBe(defaultProviderSettings.maxTokens);
+    expect(highBody.max_tokens).toBe(defaultProviderSettings.maxTokens);
   });
 
   it("omits the thinking parameter entirely when thinking is disabled", () => {
@@ -1429,12 +1447,10 @@ describe("Anthropic thinking budget mapping", () => {
     expect(body.thinking).toBeUndefined();
   });
 
-  it("guarantees max_tokens leaves answer room above the thinking budget", () => {
+  it("keeps Anthropic max_tokens at the configured output cap when thinking is enabled", () => {
     const body = createProviderRequestBody(anthropicSettings("high", true, "claude-haiku-4-5-20251001"), [userMessage()]) as Record<string, unknown>;
-    const budget = (body.thinking as { budget_tokens: number }).budget_tokens;
-    const maxTokens = body.max_tokens as number;
 
-    expect(maxTokens).toBeGreaterThanOrEqual(budget + 4_096);
+    expect(body.max_tokens).toBe(defaultProviderSettings.maxTokens);
   });
 
   it("keeps Anthropic thinking blocks as opaque reasoning state without exposing private placeholders", async () => {
@@ -1514,21 +1530,21 @@ describe("provider reasoning request parameters", () => {
 
       return (body.reasoning as { effort?: string } | undefined)?.effort;
     });
-    const openRouterBudgets = efforts.map((effort) => {
+    const openRouterEfforts = efforts.map((effort) => {
       const body = createProviderRequestBody(withThinking(createOpenRouterSettings(), effort), [createMessage()], undefined, false) as Record<string, unknown>;
 
-      return (body.reasoning as { max_tokens?: number } | undefined)?.max_tokens;
+      return (body.reasoning as { effort?: string } | undefined)?.effort;
     });
-    const googleBudgets = efforts.map((effort) => {
+    const googleThinkingConfigs = efforts.map((effort) => {
       const body = createProviderRequestBody(withThinking({
         ...createSettings(),
         apiKeys: { ...defaultProviderSettings.apiKeys, google: "google-key" },
         model: "gemini-2.5-pro",
         provider: "google",
       }, effort), [createMessage()], undefined, false) as Record<string, unknown>;
-      const extraBody = body.extra_body as { google?: { thinking_config?: { thinking_budget?: number } } } | undefined;
+      const extraBody = body.extra_body as { google?: { thinking_config?: Record<string, unknown> } } | undefined;
 
-      return extraBody?.google?.thinking_config?.thinking_budget ?? 0;
+      return extraBody?.google?.thinking_config;
     });
     const groqEfforts = efforts.map((effort) => {
       const body = createProviderRequestBody(withThinking({
@@ -1567,20 +1583,22 @@ describe("provider reasoning request parameters", () => {
     });
     expect((createProviderRequestBody(withThinking(createOpenRouterSettings()), [createMessage()], undefined, false) as Record<string, unknown>).reasoning).toMatchObject({
       enabled: true,
+      effort: "medium",
       exclude: false,
-      max_tokens: 16_384,
     });
     expect(openAiEfforts).toEqual(efforts);
-    expect(openRouterBudgets).toEqual([4_096, 16_384, 35_000]);
+    expect(openRouterEfforts).toEqual(efforts);
     expect(groqEfforts).toEqual(efforts);
     expect(mistralEfforts).toEqual(efforts);
     expect(deepSeekEfforts).toEqual(efforts);
-    expect(googleBudgets[0]).toBeGreaterThan(0);
-    expect(googleBudgets[1]).toBeGreaterThan(googleBudgets[0] ?? 0);
-    expect(googleBudgets[2]).toBeGreaterThan(googleBudgets[1] ?? 0);
+    expect(googleThinkingConfigs).toEqual([
+      { include_thoughts: true },
+      { include_thoughts: true },
+      { include_thoughts: true },
+    ]);
   });
 
-  it("raises total output caps enough for high thinking plus a visible answer", () => {
+  it("keeps output caps at the configured value when high thinking is enabled", () => {
     const openAiBody = createProviderRequestBody(withThinking({
       ...createSettings(),
       model: "gpt-5.5",
@@ -1593,9 +1611,9 @@ describe("provider reasoning request parameters", () => {
       provider: "google",
     }, "high"), [createMessage()], undefined, false) as Record<string, unknown>;
 
-    expect(openAiBody.max_output_tokens).toBe(39_096);
-    expect(openRouterBody.max_completion_tokens).toBe(39_096);
-    expect(googleBody.max_tokens).toBe(36_864);
+    expect(openAiBody.max_output_tokens).toBe(defaultProviderSettings.maxTokens);
+    expect(openRouterBody.max_completion_tokens).toBe(defaultProviderSettings.maxTokens);
+    expect(googleBody.max_tokens).toBe(defaultProviderSettings.maxTokens);
   });
 
   it("uses provider-specific documented thinking controls without exposing UI reasoning text", () => {
@@ -1647,6 +1665,7 @@ describe("provider reasoning request parameters", () => {
         },
       },
     });
+    expect(JSON.stringify(googleBody.extra_body)).not.toContain("thinking_budget");
     expect(groqBody).toMatchObject({
       include_reasoning: true,
       reasoning_effort: "medium",

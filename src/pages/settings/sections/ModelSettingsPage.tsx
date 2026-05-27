@@ -1,7 +1,8 @@
-import { BadgeDollarSign, Check, Eye, EyeOff, ServerCog, SlidersHorizontal } from "lucide-react";
+import { BadgeDollarSign, Check, Eye, EyeOff, LockKeyhole, ServerCog, SlidersHorizontal } from "lucide-react";
 import { DEFAULT_LOCAL_CONTEXT_WINDOW_TOKENS, getAutomaticHostedMaxOutputTokens, isLocalModelProvider } from "../../../lib/generationSettings";
 import { formatTokenCount } from "../../../lib/contextWindow";
 import { MODEL_PROVIDERS, formatModelCapabilitySummary, formatModelPricingSummary, formatModelPricingTitle, getEffectiveProviderModelContextWindowTokens, getModelRouteSourceInfo, isNineRouterCodexModelId, type ChatModelOption, type ModelProviderCatalogItem } from "../../../lib/models";
+import { getBillingPlanAccessDecision, getBillingPlanTier, getBillingTierConfig } from "../../../lib/subscriptionTiers";
 import type { ModelProviderId, ProviderSettings, SubscriptionCodexContextWindow } from "../../../types/settings";
 import type { LiveModelCatalogStatus } from "../types";
 import { SettingsSectionHeading } from "../components/SettingsSectionHeading";
@@ -39,9 +40,12 @@ export function ModelSettingsPage({
   settings,
   showHeading = true,
 }: ModelSettingsPageProps) {
+  const billingTier = getBillingPlanTier(settings.billingPlan);
+  const billingTierConfig = getBillingTierConfig(billingTier);
   const localGenerationControls = isLocalModelProvider(settings.provider);
   const disabledModelSet = new Set(activeProviderDisabledModels);
   const activeModelOption = activeProviderAllModels.find((option) => option.value === settings.model);
+  const activeModelAccess = getBillingPlanAccessDecision(billingTier, settings.provider, settings.model);
   const activeModelContextTokens = getSettingsAwareModelContextTokens(settings, activeModelOption);
   const automaticHostedMaxTokens = getAutomaticHostedMaxOutputTokens(settings, activeModelContextTokens);
   const enabledModelCount = activeProviderAllModels.filter((option) => !disabledModelSet.has(option.value)).length;
@@ -101,9 +105,15 @@ export function ModelSettingsPage({
             <ServerCog size={19} aria-hidden="true" />
             <div>
               <h2>Default model</h2>
-              <p>{activeRouteSource.sourceLabel} - {enabledModelCount} of {activeProviderAllModels.length} enabled</p>
+              <p>{activeRouteSource.sourceLabel} - {enabledModelCount} of {activeProviderAllModels.length} enabled - {billingTierConfig.name}</p>
             </div>
           </div>
+          {!activeModelAccess.allowed ? (
+            <div className="settings-status" data-kind="warning">
+              <LockKeyhole size={15} aria-hidden="true" />
+              {activeModelAccess.reason}
+            </div>
+          ) : null}
           <div className="settings-model-summary">
             <div>
               <strong>{activeModelOption?.label ?? (settings.model || "Choose model")}</strong>

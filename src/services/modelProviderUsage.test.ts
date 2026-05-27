@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { annotateProviderPayloadSpike, countAutoCompactedProviderMessages, estimateModelProviderPayloadUsage, preserveContextUsageHighWaterMark } from "./modelProviderUsage";
 import type { ChatMessage } from "../types/chat";
+import { DEFAULT_BILLING_PLAN } from "../lib/subscriptionTiers";
 import { DEFAULT_BRAVE_SEARCH_SETTINGS } from "../types/settings";
 import type { ProviderSettings } from "../types/settings";
 import { DEFAULT_TOOL_REGISTRY_SETTINGS } from "../types/tools";
@@ -8,6 +9,7 @@ import { DEFAULT_TOOL_REGISTRY_SETTINGS } from "../types/tools";
 const settings: ProviderSettings = {
   apiKeys: {},
   baseUrls: {},
+  billingPlan: DEFAULT_BILLING_PLAN,
   contextWindowTokens: {},
   disabledModels: {},
   maxTokens: 4096,

@@ -314,6 +314,7 @@ export interface AppAppearanceSettings {
 export interface ProviderSettings {
   apiKeys: ProviderSecretMap;
   baseUrls: ProviderSecretMap;
+  billingPlan: BillingPlanSettings;
   contextWindowTokens: ProviderContextWindowMap;
   disabledModels: ProviderModelVisibilityMap;
   maxTokens: number;
@@ -334,6 +335,22 @@ export interface ProviderSettings {
   agentEnvironment?: AppAgentEnvironment;
   workMode?: AppWorkMode;
   workspaceDependencies: WorkspaceDependencySettings;
+}
+
+export type BillingTierId = "free" | "plus" | "pro" | "teams";
+export type BillingPlanStatus = "active" | "canceled" | "incomplete" | "none" | "past_due" | "trialing";
+export type BillingPlanSource = "admin" | "local-preview" | "stripe";
+
+export interface BillingPlanSettings {
+  checkoutUrls?: Partial<Record<Exclude<BillingTierId, "free" | "teams">, string>>;
+  currentPeriodEnd?: string;
+  customerPortalUrl?: string;
+  source: BillingPlanSource;
+  status: BillingPlanStatus;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  tier: BillingTierId;
+  updatedAt?: string;
 }
 
 export interface WorkspaceDependencySettings {

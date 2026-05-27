@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { defaultProviderSettings } from "../../lib/appStorage";
-import { NINE_ROUTER_ALWAYS_FREE_MODEL, NINE_ROUTER_CODEX_MODEL_IDS, NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS, OPENROUTER_FREE_AUTO_MODEL, getModelRouteSourceInfo } from "../../lib/models";
+import {
+  NINE_ROUTER_ALWAYS_FREE_MODEL,
+  NINE_ROUTER_ANTIGRAVITY_MODEL_IDS,
+  NINE_ROUTER_CLAUDE_CODE_MODEL_IDS,
+  NINE_ROUTER_CLINE_MODEL_IDS,
+  NINE_ROUTER_CODEX_MODEL_IDS,
+  NINE_ROUTER_GEMINI_CLI_MODEL_IDS,
+  NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS,
+  NINE_ROUTER_IFLOW_MODEL_IDS,
+  NINE_ROUTER_KILO_CODE_MODEL_IDS,
+  NINE_ROUTER_KIMI_CODING_MODEL_IDS,
+  NINE_ROUTER_KIRO_MODEL_IDS,
+  NINE_ROUTER_QWEN_CODE_MODEL_IDS,
+  OPENROUTER_FREE_AUTO_MODEL,
+  getModelRouteSourceInfo,
+} from "../../lib/models";
 import type { ProviderSettings } from "../../types/settings";
 import { buildSelectorEntries, createModelSelectorGroups, type LiveModelCatalogStatus } from "./ModelSelectorPopover";
 
@@ -47,7 +62,16 @@ describe("model selector subscription models", () => {
   const subscriptionDefaults = [
     NINE_ROUTER_ALWAYS_FREE_MODEL,
     ...NINE_ROUTER_CODEX_MODEL_IDS,
+    ...NINE_ROUTER_CLAUDE_CODE_MODEL_IDS,
+    ...NINE_ROUTER_GEMINI_CLI_MODEL_IDS,
+    ...NINE_ROUTER_ANTIGRAVITY_MODEL_IDS,
     ...NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS,
+    ...NINE_ROUTER_KIRO_MODEL_IDS,
+    ...NINE_ROUTER_KILO_CODE_MODEL_IDS,
+    ...NINE_ROUTER_CLINE_MODEL_IDS,
+    ...NINE_ROUTER_QWEN_CODE_MODEL_IDS,
+    ...NINE_ROUTER_IFLOW_MODEL_IDS,
+    ...NINE_ROUTER_KIMI_CODING_MODEL_IDS,
   ];
 
   it("keeps Free Auto and subscription routes selectable while the live catalog is unavailable", () => {

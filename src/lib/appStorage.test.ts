@@ -535,6 +535,33 @@ describe("app storage", () => {
     });
   });
 
+  it("persists the billing plan without trusting invalid checkout URLs", () => {
+    saveProviderSettings({
+      ...defaultProviderSettings,
+      billingPlan: {
+        checkoutUrls: {
+          plus: "https://checkout.stripe.com/c/pay-plus",
+          pro: "http://localhost/not-a-stripe-session",
+        },
+        source: "stripe",
+        status: "active",
+        tier: "plus",
+      },
+    });
+
+    const loadedSettings = loadProviderSettings();
+
+    expect(loadedSettings.billingPlan).toMatchObject({
+      checkoutUrls: {
+        plus: "https://checkout.stripe.com/c/pay-plus",
+        pro: undefined,
+      },
+      source: "stripe",
+      status: "active",
+      tier: "plus",
+    });
+  });
+
   it("reenables reasoning once for the rebuilt thinking mode while preserving later manual toggles", () => {
     savePersistentString("gilbert-codex.thinking-settings.v1", JSON.stringify({ enabled: false, effort: "low" }));
 

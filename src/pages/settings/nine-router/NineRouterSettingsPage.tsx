@@ -1,4 +1,4 @@
-import { CheckCircle2, Cloud, Download, ExternalLink, Gauge, KeyRound, LogOut, Play, RefreshCcw, Route, ServerCog, ShieldCheck, SlidersHorizontal, TerminalSquare, Trash2, UserCheck } from "lucide-react";
+import { CheckCircle2, Cloud, Download, ExternalLink, Gauge, KeyRound, LockKeyhole, LogOut, Play, RefreshCcw, Route, ServerCog, ShieldCheck, SlidersHorizontal, TerminalSquare, Trash2, UserCheck } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ensureNineRouterLocal,
@@ -16,6 +16,7 @@ import {
 } from "../../../app/tauriClient";
 import { formatModelCapabilitySummary, getChatModelOption, getDefaultBaseUrlForProvider, getDefaultModelForProvider, getModelRouteSourceInfo, NINE_ROUTER_ALWAYS_FREE_MODEL, NINE_ROUTER_SMART_SAVER_MODEL } from "../../../lib/models";
 import { scheduleIdleTask } from "../../../lib/idleTask";
+import { getBillingPlanTier } from "../../../lib/subscriptionTiers";
 import { headersToRecord, normalizeNativeRequestBody, normalizeNativeRequestMethod } from "../../../services/nativeHttp";
 import {
   buildNineRouterFallbackModels,
@@ -213,6 +214,8 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
   const isNineRouterActive = settings.provider === NINE_ROUTER_PROVIDER_ID;
   const nineRouterBaseUrl = settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim() || status?.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID);
   const nineRouterDashboardUrl = status?.dashboardUrl || NINE_ROUTER_DASHBOARD_FALLBACK;
+  const billingTier = getBillingPlanTier(settings.billingPlan);
+  const subscriptionAccountsLocked = billingTier === "free";
   const primaryLanBaseUrl = status?.lanBaseUrls?.[0] ?? "";
   const primaryLanDashboardUrl = status?.lanDashboardUrls?.[0] ?? "";
   const accountRows = useMemo(
@@ -1362,6 +1365,11 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
   return (
     <>
       <SettingsSectionHeading detail="Connect the provider accounts you already pay for and keep their quota visible." icon={Route} title="Subscriptions" />
+      {subscriptionAccountsLocked ? (
+        <div className="settings-status-banner" data-kind="warning" role="status">
+          Free uses OpenRouter free models and local Ollama, LM Studio, or vLLM. Upgrade to Plus before connecting subscription accounts.
+        </div>
+      ) : null}
       {displayStatusMessage ? (
         <div className="settings-status-banner" data-kind={displayStatusMessage.kind} role="status" aria-live="polite">
           {displayStatusMessage.text}
@@ -1422,11 +1430,11 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
               <button
                 className="settings-primary-button"
                 type="button"
-                disabled={busy !== null || !status || Boolean(helperInstallBlocked)}
+                disabled={subscriptionAccountsLocked || busy !== null || !status || Boolean(helperInstallBlocked)}
                 onClick={status?.installed ? () => startNineRouter() : installAndStartNineRouter}
               >
-                {status?.installed ? <Play size={16} aria-hidden="true" /> : <Download size={16} aria-hidden="true" />}
-                {helperInstalling || helperStarting ? helperActionBusyLabel : helperActionLabel}
+                {subscriptionAccountsLocked ? <LockKeyhole size={16} aria-hidden="true" /> : status?.installed ? <Play size={16} aria-hidden="true" /> : <Download size={16} aria-hidden="true" />}
+                {subscriptionAccountsLocked ? "Plus required" : helperInstalling || helperStarting ? helperActionBusyLabel : helperActionLabel}
               </button>
               <button className="settings-ghost-button" type="button" disabled={busy !== null} onClick={() => refreshStatus()}>
                 <RefreshCcw size={16} aria-hidden="true" />
@@ -1492,7 +1500,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
                         type="button"
                         aria-label={connected ? `Sign out from ${provider.name}` : `Sign in with ${provider.name}`}
                         title={connected ? `Sign out from ${provider.name}` : `Sign in with ${provider.name}`}
-                        disabled={busy !== null}
+                        disabled={subscriptionAccountsLocked || busy !== null}
                         onClick={() => {
                           if (connected) {
                             setDisconnectTarget({ connections, provider });
@@ -1502,8 +1510,8 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
                           void connectProviderAccount(provider);
                         }}
                       >
-                        {connected ? <LogOut size={16} aria-hidden="true" /> : provider.flow === "device_code" ? <ExternalLink size={16} aria-hidden="true" /> : <KeyRound size={16} aria-hidden="true" />}
-                        {providerDisconnecting ? "Signing out" : providerBusy ? "Waiting for sign-in" : connected ? "Sign out" : `Sign in with ${provider.name}`}
+                        {subscriptionAccountsLocked ? <LockKeyhole size={16} aria-hidden="true" /> : connected ? <LogOut size={16} aria-hidden="true" /> : provider.flow === "device_code" ? <ExternalLink size={16} aria-hidden="true" /> : <KeyRound size={16} aria-hidden="true" />}
+                        {subscriptionAccountsLocked ? "Plus required" : providerDisconnecting ? "Signing out" : providerBusy ? "Waiting for sign-in" : connected ? "Sign out" : `Sign in with ${provider.name}`}
                       </button>
                     </section>
                   );
@@ -1572,13 +1580,14 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
                 ) : null}
                 <div className="settings-row">
                   <span>Image generation</span>
-                  <strong>{settings.tools.imageGeneration ? "Available in chat" : "Disabled"}</strong>
+                  <strong>{subscriptionAccountsLocked ? "Plus required" : settings.tools.imageGeneration ? "Available in chat" : "Disabled"}</strong>
                   <button
                     className="settings-switch"
                     type="button"
                     role="switch"
                     aria-checked={settings.tools.imageGeneration}
                     data-on={settings.tools.imageGeneration}
+                    disabled={subscriptionAccountsLocked}
                     onClick={() =>
                       onSettingsChange({
                         ...settings,
@@ -1606,6 +1615,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
                         key={option.mode}
                         title={option.detail}
                         type="button"
+                        disabled={subscriptionAccountsLocked}
                         onClick={() => updateCodexContextWindow(option.mode)}
                       >
                         {option.label}
@@ -1619,13 +1629,13 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
                   Saved model {savedNineRouterModel} is not in the live catalog. Gilbert will use {selectedNineRouterModel} when you switch.
                 </span>
               ) : null}
-              <button className="settings-ghost-button settings-full-width-button" type="button" onClick={() => useNineRouterProvider()}>
-                <CheckCircle2 size={16} aria-hidden="true" />
-                Use subscription routing
+              <button className="settings-ghost-button settings-full-width-button" type="button" disabled={subscriptionAccountsLocked} onClick={() => useNineRouterProvider()}>
+                {subscriptionAccountsLocked ? <LockKeyhole size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}
+                {subscriptionAccountsLocked ? "Plus required" : "Use subscription routing"}
               </button>
-              <button className="settings-ghost-button settings-full-width-button" type="button" disabled={modelTestBusy} onClick={testSelectedModel}>
-                <CheckCircle2 size={16} aria-hidden="true" />
-                {modelTestBusy ? "Testing" : "Test selected model"}
+              <button className="settings-ghost-button settings-full-width-button" type="button" disabled={subscriptionAccountsLocked || modelTestBusy} onClick={testSelectedModel}>
+                {subscriptionAccountsLocked ? <LockKeyhole size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}
+                {subscriptionAccountsLocked ? "Plus required" : modelTestBusy ? "Testing" : "Test selected model"}
               </button>
               </article>
             ) : null}

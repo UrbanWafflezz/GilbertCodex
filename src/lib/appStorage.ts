@@ -11,6 +11,7 @@ import {
   normalizeTopP,
 } from "./generationSettings";
 import { getDefaultTerminalShell, isTerminalShellId } from "./terminalShells";
+import { DEFAULT_BILLING_PLAN, normalizeBillingPlanSettings } from "./subscriptionTiers";
 import {
   DEFAULT_CHAT_MODEL,
   DEFAULT_PROVIDER_ID,
@@ -177,6 +178,7 @@ interface PendingDeviceStorageWrite {
 export const defaultProviderSettings: ProviderSettings = {
   apiKeys: {},
   baseUrls: getDefaultProviderBaseUrls(),
+  billingPlan: DEFAULT_BILLING_PLAN,
   contextWindowTokens: {},
   disabledModels: {},
   maxTokens: DEFAULT_LOCAL_MAX_TOKENS,
@@ -463,6 +465,7 @@ export function loadProviderSettings(): ProviderSettings {
     ...storedSettings,
     apiKeys,
     baseUrls,
+    billingPlan: normalizeBillingPlanSettings(storedSettings?.billingPlan),
     contextWindowTokens,
     disabledModels,
     maxTokens: normalizeMaxTokens(storedSettings?.maxTokens, defaultProviderSettings.maxTokens),
@@ -505,6 +508,7 @@ export function saveProviderSettings(settings: ProviderSettings) {
     ...settings,
     apiKeys,
     baseUrls,
+    billingPlan: normalizeBillingPlanSettings(settings.billingPlan),
     contextWindowTokens,
     disabledModels,
     modelBudgetOverrides,

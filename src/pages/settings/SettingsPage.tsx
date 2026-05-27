@@ -35,6 +35,14 @@ import {
   usesLiveModelCatalog,
   type ProviderModelMetadata,
 } from "../../lib/models";
+import {
+  filterModelOptionsForBillingTier,
+  getBillingPlanAccessDecision,
+  getBillingPlanTier,
+  getDefaultAllowedModelForProvider,
+  getDefaultProviderForBillingTier,
+  isProviderAvailableForBillingTier,
+} from "../../lib/subscriptionTiers";
 import { fetchProviderModels, validateProviderSettings } from "../../services/modelProviderClient";
 import type { GithubConnectionState, GithubDeviceLoginSession, GithubRepository } from "../../types/github";
 import type { LocalPermissionMode, LocalWorkspaceScope, LocalWorkspaceSettings } from "../../types/localWorkspace";
@@ -46,6 +54,7 @@ import { MapboxSettingsPage } from "./mapbox/MapboxSettingsPage";
 import { MobilePairingSettingsPage } from "./mobile/MobilePairingSettingsPage";
 import { NineRouterSettingsPage } from "./nine-router/NineRouterSettingsPage";
 import { AppearanceSettingsPage } from "./sections/AppearanceSettingsPage";
+import { BillingPlansSettingsPage } from "./sections/BillingPlansSettingsPage";
 import { ConfigurationSettingsPage } from "./sections/ConfigurationSettingsPage";
 import { DatabaseSettingsPage } from "./sections/DatabaseSettingsPage";
 import { DiscordSettingsPage } from "./sections/DiscordSettingsPage";
@@ -159,9 +168,14 @@ function SettingsPageComponent({
   const activeProviderBaseUrl = getProviderBaseUrl(settings);
   const activeProviderUsesLiveCatalog = usesLiveModelCatalog(settings.provider);
   const activeProviderPrefersLiveCatalog = prefersLiveModelCatalog(settings.provider);
-  const activeProviderAllModels = useMemo(
+  const billingTier = getBillingPlanTier(settings.billingPlan);
+  const activeProviderAllModelsRaw = useMemo(
     () => buildProviderModelOptions(settings.provider, activeProviderUsesLiveCatalog ? liveProviderModels : undefined, settings.model),
     [activeProviderUsesLiveCatalog, liveProviderModels, settings.model, settings.provider],
+  );
+  const activeProviderAllModels = useMemo(
+    () => filterModelOptionsForBillingTier(billingTier, activeProviderAllModelsRaw),
+    [activeProviderAllModelsRaw, billingTier],
   );
   const activeProviderDisabledModels = settings.disabledModels[settings.provider] ?? EMPTY_DISABLED_MODELS;
   const activeProviderModels = useMemo(
@@ -191,6 +205,32 @@ function SettingsPageComponent({
       validationRunRef.current += 1;
     };
   }, []);
+
+  useEffect(() => {
+    const decision = getBillingPlanAccessDecision(billingTier, settings.provider, settings.model);
+
+    if (decision.allowed) {
+      return;
+    }
+
+    const fallbackProvider = getDefaultProviderForBillingTier(billingTier);
+    const fallbackModel = getDefaultAllowedModelForProvider(billingTier, fallbackProvider) ?? getDefaultModelForProvider(fallbackProvider);
+
+    onSettingsChange({
+      ...settings,
+      disabledModels: {
+        ...settings.disabledModels,
+        [fallbackProvider]: (settings.disabledModels[fallbackProvider] ?? []).filter((model) => model !== fallbackModel),
+      },
+      model: fallbackModel,
+      provider: fallbackProvider,
+      providerModels: {
+        ...settings.providerModels,
+        [settings.provider]: settings.model,
+        [fallbackProvider]: fallbackModel,
+      },
+    });
+  }, [billingTier, onSettingsChange, settings]);
 
   useEffect(() => {
     let disposed = false;
@@ -508,9 +548,18 @@ function SettingsPageComponent({
   }
 
   function selectProvider(provider: ModelProviderId) {
+    if (!isProviderAvailableForBillingTier(billingTier, provider)) {
+      setTestStatus({ kind: "warning", text: "Upgrade to Plus to use hosted API provider routes." });
+      return;
+    }
+
     const rememberedModel = settings.providerModels[provider]?.trim();
     const providerDisabledModels = new Set(settings.disabledModels[provider] ?? []);
-    const nextModel = rememberedModel && !providerDisabledModels.has(rememberedModel) ? rememberedModel : getDefaultModelForProvider(provider);
+    const allowedRememberedModel =
+      rememberedModel && !providerDisabledModels.has(rememberedModel) && getBillingPlanAccessDecision(billingTier, provider, rememberedModel).allowed
+        ? rememberedModel
+        : "";
+    const nextModel = allowedRememberedModel || getDefaultAllowedModelForProvider(billingTier, provider) || getDefaultModelForProvider(provider);
     providerDisabledModels.delete(nextModel);
     const nextDisabledModels = {
       ...settings.disabledModels,
@@ -555,6 +604,13 @@ function SettingsPageComponent({
 
   function updateActiveProviderModel(model: string) {
     const normalizedModel = model.trim();
+    const accessDecision = getBillingPlanAccessDecision(billingTier, settings.provider, normalizedModel);
+
+    if (!accessDecision.allowed) {
+      setTestStatus({ kind: "warning", text: accessDecision.reason || "Your current plan does not include this model route." });
+      return;
+    }
+
     const disabledValues = (settings.disabledModels[settings.provider] ?? []).filter((value) => value !== normalizedModel);
     const disabledModels = {
       ...settings.disabledModels,
@@ -686,6 +742,13 @@ function SettingsPageComponent({
   }
 
   async function testConnection() {
+    const accessDecision = getBillingPlanAccessDecision(billingTier, settings.provider, settings.model);
+
+    if (!accessDecision.allowed) {
+      setTestStatus({ kind: "warning", text: accessDecision.reason || "Your current plan does not include this model route." });
+      return;
+    }
+
     const validationRun = validationRunRef.current + 1;
     const settingsSnapshot = settings;
 
@@ -792,6 +855,10 @@ function SettingsPageComponent({
           onAppearanceSettingsChange={onAppearanceSettingsChange}
         />
       );
+    }
+
+    if (displaySection === "billing") {
+      return <BillingPlansSettingsPage settings={settings} onSettingsPatch={updateSettings} />;
     }
 
     if (displaySection === "configuration") {

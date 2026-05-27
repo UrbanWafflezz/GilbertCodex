@@ -5,6 +5,7 @@ import type { AgentRuntimeDecision } from "../../../agentRuntime/codingAgent";
 import type { LocalComputerToolExecutionPolicy, LocalSubagentResult, LocalSubagentTask } from "../../../localWorkspace/localToolRuntimeDisabled";
 import type { ContextCompactionNotice, ContextWindowUsage, ModelContextWindowMap, compactMessagesForContext } from "../../../lib/contextWindow";
 import { mergeVisibleReasoningSummaries } from "../../../lib/reasoningSummary";
+import { getBillingPlanTier } from "../../../lib/subscriptionTiers";
 import type { PlanningProviderRequest } from "../../../services/planningClient";
 import type { ProviderToolBridgeOptions, ToolBridgeExecutionBatch, ToolBridgeToolFamily, ToolCallRequest, ToolCapabilityPlan, ToolDefinition, ToolExecutionContext, ToolIntent, ToolMemorySearchRequest, ToolResultMessage } from "../../../toolBridge";
 import type { AppInfo } from "../../../types/app";
@@ -1495,6 +1496,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       const resumeBridgeContext: ToolExecutionContext = {
         agentEnvironment: baseRuntimeSettings.agentEnvironment ?? generalSettings.agentEnvironment,
         automationScope,
+        billingPlan: baseRuntimeSettings.billingPlan,
         memorySearch,
         model: baseRuntimeSettings.model,
         permissionMode: workspaceSettings.permissionMode,
@@ -1746,6 +1748,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       const bridgeContext: ToolExecutionContext = {
         agentEnvironment: passSettings.agentEnvironment ?? generalSettings.agentEnvironment,
         automationScope,
+        billingPlan: passSettings.billingPlan,
         memorySearch,
         model: passSettings.model,
         permissionMode: workspaceSettings.permissionMode,
@@ -1798,7 +1801,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         editingEnabled: passSettings.tools.codeEdit || passSettings.tools.codeGeneration || passSettings.tools.fileCreation,
         fileToolsEnabled: passSettings.tools.fileBrowser || passSettings.tools.fileSearch || passSettings.tools.codeView,
         gitEnabled: passSettings.tools.sourceControl,
-        imageGenerationEnabled: passSettings.tools.imageGeneration,
+        imageGenerationEnabled: passSettings.tools.imageGeneration && getBillingPlanTier(passSettings.billingPlan) !== "free",
         mcpServersEnabled: passSettings.tools.mcpServers,
         memoryEnabled: memoryToolsEnabled && !approvedPlanNeedsToolExecution && !workspaceMutationIncomplete && !freshLocalEvidenceRequiredForPass && !workspaceToolCallRequiredForPass,
         terminalEnabled: passSettings.tools.terminal,
