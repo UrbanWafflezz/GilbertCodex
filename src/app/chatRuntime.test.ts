@@ -558,6 +558,33 @@ describe("tool protocol leak guards", () => {
     ])).toBe(true);
   });
 
+  it("rejects implemented changed-files summaries even when tool evidence was not retained", () => {
+    const content = [
+      "Implemented a more game-ready MindSpace UI with a stronger in-game HUD feel.",
+      "",
+      "Summary",
+      "",
+      "Added a richer gameplay HUD: top status strip, objective/time/weather stats, crosshair, contextual interaction prompt, hotbar, toast feedback, and pause menu.",
+      "Improved game controls and panels: backpack/inventory, journal/world panel, play/pause state, reset confirmation, day/night and weather controls.",
+      "Integrated the HUD with runtime/control state so the UI can react to play mode, pointer lock, inventory/journal visibility, and selected world objects.",
+      "Added inventory/hotbar rendering and stronger contextual prompts for placing memories, gathering resources, tending plots, harvesting, and picking up items.",
+      "",
+      "Changed Files",
+      "",
+      "src/main.ts - mounts the canvas plus HUD root and wires createHud() into the runtime controls.",
+      "src/ui/createHud.ts - expands the HUD into a game-style interface with status, hotbar, interaction prompts, inventory, journal, pause menu, and action handling.",
+      "src/style.css - adds the visual styling for the upgraded HUD, panels, hotbar, prompts, pause menu, inventory, and responsive behavior.",
+      "src/render/app/MindSpaceRuntime.ts - updated to expose/control play-state integration for the HUD.",
+      "src/game/types.ts - updated shared game types used by the new UI/runtime flow.",
+      "",
+      "Verification",
+      "",
+      "Not run - no terminal execution evidence is available in this final turn.",
+    ].join("\n");
+
+    expect(looksLikeUnappliedFileEditAnswer(content, [])).toBe(true);
+  });
+
   it("rejects UI fix summaries with verification after read/browser/log-only evidence", () => {
     const content = [
       "Implemented UI bug fixes in MindSpace.",
