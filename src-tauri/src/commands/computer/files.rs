@@ -359,7 +359,10 @@ pub struct ComputerGitChangedFile {
     pub diff_truncated: bool,
     pub old_path: Option<String>,
     pub path: String,
+    pub staged: bool,
     pub status: String,
+    pub unstaged: bool,
+    pub untracked: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -389,7 +392,10 @@ pub struct ComputerGitStatus {
     pub head_sha: Option<String>,
     pub remote_url: Option<String>,
     pub repository_root: Option<String>,
+    pub staged_files: usize,
     pub upstream: Option<String>,
+    pub unstaged_files: usize,
+    pub untracked_files: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1071,10 +1077,7 @@ fn get_git_status_blocking(request: ComputerGitStatusRequest) -> Result<Computer
         Ok(output) => output,
         Err(error) => return Ok(create_unavailable_git_status(Some(error))),
     };
-    let changed_files = status_output
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .count();
+    let status_summary = summarize_git_status_entries(&status_output);
     let tracked_stats = parse_git_numstat_entries(
         &run_git_quick(&repository_path, &["diff", "--numstat", "HEAD"]).unwrap_or_default(),
     );
@@ -1114,8 +1117,8 @@ fn get_git_status_blocking(request: ComputerGitStatusRequest) -> Result<Computer
         available: true,
         behind,
         branch,
-        changed_files,
-        clean: changed_files == 0,
+        changed_files: status_summary.changed_files,
+        clean: status_summary.changed_files == 0,
         deletions,
         error: None,
         files,
@@ -1124,7 +1127,10 @@ fn get_git_status_blocking(request: ComputerGitStatusRequest) -> Result<Computer
         head_sha,
         remote_url,
         repository_root: Some(repository_root),
+        staged_files: status_summary.staged_files,
         upstream,
+        unstaged_files: status_summary.unstaged_files,
+        untracked_files: status_summary.untracked_files,
     })
 }
 
@@ -1248,6 +1254,10 @@ fn git_push_blocking(request: ComputerGitPushRequest) -> Result<ComputerGitActio
 
     validate_git_remote_name(&remote)?;
 
+    let before_status = get_git_status_blocking(ComputerGitStatusRequest {
+        include_diff_preview: None,
+        path: path_to_string(&repository_path),
+    })?;
     let upstream = run_git(
         &repository_path,
         &[
@@ -1259,21 +1269,79 @@ fn git_push_blocking(request: ComputerGitPushRequest) -> Result<ComputerGitActio
     )
     .ok()
     .filter(|value| !value.trim().is_empty());
-    let output = if upstream.is_some() {
-        run_git(&repository_path, &["push"])?
+    let upstream_target = upstream.as_deref().and_then(split_git_upstream);
+    let pushes_upstream = upstream_target
+        .as_ref()
+        .map(|(upstream_remote, _branch)| upstream_remote == &remote)
+        .unwrap_or(false);
+    let target_branch = if pushes_upstream {
+        upstream_target
+            .as_ref()
+            .map(|(_remote, upstream_branch)| upstream_branch.clone())
+            .unwrap_or_else(|| branch.clone())
     } else {
+        branch.clone()
+    };
+
+    if pushes_upstream && before_status.ahead == 0 && before_status.changed_files > 0 {
+        return Err(
+            "No commits to push. Stage and commit local changes before pushing this branch."
+                .to_string(),
+        );
+    }
+
+    let output = if upstream.is_none() {
         run_git(
             &repository_path,
             &["push", "--set-upstream", &remote, &branch],
         )?
+    } else {
+        let refspec = format!("HEAD:refs/heads/{}", target_branch);
+        run_git_owned(
+            &repository_path,
+            &["push".to_string(), remote.clone(), refspec],
+        )?
     };
-    let status = get_git_status_blocking(ComputerGitStatusRequest {
+    let local_head = git_head_sha(&repository_path)?;
+    let remote_head = git_remote_head_sha(&repository_path, &remote, &target_branch)?;
+
+    if remote_head.as_deref() != Some(local_head.as_str()) {
+        return Err(match remote_head {
+            Some(remote_sha) => format!(
+                "Git push finished, but {}/{} is at {} instead of local HEAD {}.",
+                remote, target_branch, remote_sha, local_head
+            ),
+            None => format!(
+                "Git push finished, but {}/{} was not found on the remote.",
+                remote, target_branch
+            ),
+        });
+    }
+
+    let mut status = get_git_status_blocking(ComputerGitStatusRequest {
         include_diff_preview: None,
         path: path_to_string(&repository_path),
     })?;
+    if status
+        .upstream
+        .as_deref()
+        .and_then(split_git_upstream)
+        .map(|(upstream_remote, upstream_branch)| {
+            upstream_remote == remote && upstream_branch == target_branch
+        })
+        .unwrap_or(false)
+    {
+        status.ahead = 0;
+        status.behind = 0;
+    }
+    let message = if pushes_upstream && before_status.ahead == 0 {
+        format!("{}/{} already matches {}.", remote, target_branch, branch)
+    } else {
+        format!("Pushed {} to {}/{}.", branch, remote, target_branch)
+    };
 
     Ok(ComputerGitActionResult {
-        message: format!("Pushed {}.", branch),
+        message,
         output: optional_git_output(output),
         status,
     })
@@ -1281,6 +1349,7 @@ fn git_push_blocking(request: ComputerGitPushRequest) -> Result<ComputerGitActio
 
 fn git_pull_blocking(request: ComputerGitPullRequest) -> Result<ComputerGitActionResult, String> {
     let repository_path = resolve_git_repository_path(&request.path)?;
+    let before_head = git_head_sha(&repository_path)?;
     let remote = request
         .remote
         .as_deref()
@@ -1309,15 +1378,23 @@ fn git_pull_blocking(request: ComputerGitPullRequest) -> Result<ComputerGitActio
     } else {
         run_git(&repository_path, &["pull", "--ff-only"])?
     };
+    let after_head = git_head_sha(&repository_path)?;
     let status = get_git_status_blocking(ComputerGitStatusRequest {
         include_diff_preview: None,
         path: path_to_string(&repository_path),
     })?;
+    let pulled_changes = before_head != after_head;
 
     Ok(ComputerGitActionResult {
-        message: branch
-            .map(|branch_name| format!("Pulled {} from {}.", branch_name, remote))
-            .unwrap_or_else(|| "Pulled current branch.".to_string()),
+        message: if pulled_changes {
+            branch
+                .map(|branch_name| format!("Pulled {} from {}.", branch_name, remote))
+                .unwrap_or_else(|| "Pulled current branch.".to_string())
+        } else {
+            branch
+                .map(|branch_name| format!("Already up to date with {}/{}.", remote, branch_name))
+                .unwrap_or_else(|| "Already up to date.".to_string())
+        },
         output: optional_git_output(output),
         status,
     })
@@ -1326,6 +1403,26 @@ fn git_pull_blocking(request: ComputerGitPullRequest) -> Result<ComputerGitActio
 fn git_stage_blocking(request: ComputerGitStageRequest) -> Result<ComputerGitActionResult, String> {
     let repository_path = resolve_git_repository_path(&request.path)?;
     let pathspecs = normalize_git_pathspecs(&repository_path, request.paths.as_deref())?;
+    let before_status = get_git_status_blocking(ComputerGitStatusRequest {
+        include_diff_preview: None,
+        path: path_to_string(&repository_path),
+    })?;
+    let stageable_files = count_stageable_git_files(&before_status, &pathspecs);
+
+    if stageable_files == 0 {
+        return Ok(ComputerGitActionResult {
+            message: if before_status.staged_files > 0 {
+                "All matching changes are already staged.".to_string()
+            } else if pathspecs.is_empty() {
+                "No local changes to stage.".to_string()
+            } else {
+                "No matching local changes to stage.".to_string()
+            },
+            output: None,
+            status: before_status,
+        });
+    }
+
     let mut args = vec!["add".to_string(), "-A".to_string(), "--".to_string()];
 
     args.extend(pathspecs.iter().cloned());
@@ -1335,9 +1432,17 @@ fn git_stage_blocking(request: ComputerGitStageRequest) -> Result<ComputerGitAct
         path: path_to_string(&repository_path),
     })?;
 
+    if pathspecs.is_empty() && status.unstaged_files + status.untracked_files > 0 {
+        return Err("Git did not stage every local change. Review the remaining unstaged files and try again.".to_string());
+    }
+
     Ok(ComputerGitActionResult {
         message: if pathspecs.is_empty() {
-            "Staged all local changes.".to_string()
+            format!(
+                "Staged {} file{}.",
+                stageable_files,
+                if stageable_files == 1 { "" } else { "s" }
+            )
         } else {
             format!(
                 "Staged {} path{}.",
@@ -2293,7 +2398,15 @@ fn atomic_write_with_retry(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 /// Writes one text file after checking it stays inside enabled roots.
 #[tauri::command]
-pub fn computer_write_text_file(
+pub async fn computer_write_text_file(
+    request: ComputerWriteFileRequest,
+) -> Result<ComputerWriteFileResult, String> {
+    tauri::async_runtime::spawn_blocking(move || computer_write_text_file_blocking(request))
+        .await
+        .map_err(|error| format!("The file write worker stopped unexpectedly: {}", error))?
+}
+
+fn computer_write_text_file_blocking(
     request: ComputerWriteFileRequest,
 ) -> Result<ComputerWriteFileResult, String> {
     let roots = normalize_roots(request.roots);
@@ -2531,7 +2644,7 @@ fn write_text_files_item(
     roots: &[String],
 ) -> ComputerWriteFilesItemResult {
     let requested_path = item.path.clone();
-    let result = computer_write_text_file(ComputerWriteFileRequest {
+    let result = computer_write_text_file_blocking(ComputerWriteFileRequest {
         content: item.content,
         create_parent_dirs: item.create_parent_dirs,
         expected_sha256: item.expected_sha256,
@@ -2559,7 +2672,20 @@ fn write_text_files_item(
 
 /// Creates a directory after checking it stays inside enabled roots.
 #[tauri::command]
-pub fn computer_create_directory(
+pub async fn computer_create_directory(
+    request: ComputerCreateDirectoryRequest,
+) -> Result<ComputerCreateDirectoryResult, String> {
+    tauri::async_runtime::spawn_blocking(move || computer_create_directory_blocking(request))
+        .await
+        .map_err(|error| {
+            format!(
+                "The directory creation worker stopped unexpectedly: {}",
+                error
+            )
+        })?
+}
+
+fn computer_create_directory_blocking(
     request: ComputerCreateDirectoryRequest,
 ) -> Result<ComputerCreateDirectoryResult, String> {
     let roots = normalize_roots(request.roots);
@@ -2615,7 +2741,15 @@ pub fn computer_create_directory(
 
 /// Deletes one file after checking it stays inside enabled roots.
 #[tauri::command]
-pub fn computer_delete_file(
+pub async fn computer_delete_file(
+    request: ComputerDeleteFileRequest,
+) -> Result<ComputerDeleteFileResult, String> {
+    tauri::async_runtime::spawn_blocking(move || computer_delete_file_blocking(request))
+        .await
+        .map_err(|error| format!("The file delete worker stopped unexpectedly: {}", error))?
+}
+
+fn computer_delete_file_blocking(
     request: ComputerDeleteFileRequest,
 ) -> Result<ComputerDeleteFileResult, String> {
     let roots = normalize_roots(request.roots);
@@ -2653,7 +2787,15 @@ pub fn computer_delete_file(
 
 /// Moves or renames a file or folder after checking both paths stay inside enabled roots.
 #[tauri::command]
-pub fn computer_move_path(
+pub async fn computer_move_path(
+    request: ComputerMovePathRequest,
+) -> Result<ComputerMovePathResult, String> {
+    tauri::async_runtime::spawn_blocking(move || computer_move_path_blocking(request))
+        .await
+        .map_err(|error| format!("The path move worker stopped unexpectedly: {}", error))?
+}
+
+fn computer_move_path_blocking(
     request: ComputerMovePathRequest,
 ) -> Result<ComputerMovePathResult, String> {
     let roots = normalize_roots(request.roots);
@@ -2734,7 +2876,15 @@ pub fn computer_move_path(
 
 /// Copies a file or folder after checking both paths stay inside enabled roots.
 #[tauri::command]
-pub fn computer_copy_path(
+pub async fn computer_copy_path(
+    request: ComputerCopyPathRequest,
+) -> Result<ComputerCopyPathResult, String> {
+    tauri::async_runtime::spawn_blocking(move || computer_copy_path_blocking(request))
+        .await
+        .map_err(|error| format!("The path copy worker stopped unexpectedly: {}", error))?
+}
+
+fn computer_copy_path_blocking(
     request: ComputerCopyPathRequest,
 ) -> Result<ComputerCopyPathResult, String> {
     let roots = normalize_roots(request.roots);
@@ -3715,7 +3865,10 @@ fn create_unavailable_git_status(error: Option<String>) -> ComputerGitStatus {
         head_sha: None,
         remote_url: None,
         repository_root: None,
+        staged_files: 0,
         upstream: None,
+        unstaged_files: 0,
+        untracked_files: 0,
     }
 }
 
@@ -4217,6 +4370,78 @@ fn get_git_ahead_behind(repository_path: &Path) -> Option<(usize, usize)> {
     Some((behind, ahead))
 }
 
+fn split_git_upstream(upstream: &str) -> Option<(String, String)> {
+    let (remote, branch) = upstream.split_once('/')?;
+
+    if remote.trim().is_empty() || branch.trim().is_empty() {
+        return None;
+    }
+
+    Some((remote.to_string(), branch.to_string()))
+}
+
+fn git_head_sha(repository_path: &Path) -> Result<String, String> {
+    run_git(repository_path, &["rev-parse", "HEAD"]).map(|value| value.trim().to_string())
+}
+
+fn git_remote_head_sha(
+    repository_path: &Path,
+    remote: &str,
+    branch: &str,
+) -> Result<Option<String>, String> {
+    let ref_name = format!("refs/heads/{}", branch);
+    let output = run_git_owned(
+        repository_path,
+        &[
+            "ls-remote".to_string(),
+            "--heads".to_string(),
+            remote.to_string(),
+            ref_name.clone(),
+        ],
+    )?;
+
+    for line in output.lines() {
+        let mut parts = line.split_whitespace();
+        let Some(sha) = parts.next() else {
+            continue;
+        };
+        let Some(remote_ref) = parts.next() else {
+            continue;
+        };
+
+        if remote_ref == ref_name {
+            return Ok(Some(sha.to_string()));
+        }
+    }
+
+    Ok(None)
+}
+
+fn count_stageable_git_files(status: &ComputerGitStatus, pathspecs: &[String]) -> usize {
+    status
+        .files
+        .iter()
+        .filter(|file| file.unstaged || file.untracked)
+        .filter(|file| {
+            pathspecs.is_empty()
+                || pathspecs
+                    .iter()
+                    .any(|pathspec| git_path_matches_pathspec(&file.path, pathspec))
+        })
+        .count()
+}
+
+fn git_path_matches_pathspec(path: &str, pathspec: &str) -> bool {
+    let path = git_status_path_key(path);
+    let pathspec = git_status_path_key(pathspec).trim_matches('/').to_string();
+
+    if pathspec.starts_with(':') || pathspec.contains('*') || pathspec.contains('?') {
+        return true;
+    }
+
+    path == pathspec || path.starts_with(&format!("{}/", pathspec))
+}
+
 fn build_git_diff_previews(
     repository_path: &Path,
     status_output: &str,
@@ -4562,7 +4787,19 @@ fn parse_git_changed_files(
                 return None;
             }
 
-            let status = trimmed.get(0..2)?.trim().to_string();
+            let status_code = trimmed.get(0..2)?;
+            let untracked = status_code == "??";
+            let staged = !untracked
+                && status_code
+                    .as_bytes()
+                    .first()
+                    .is_some_and(|value| *value != b' ');
+            let unstaged = untracked
+                || status_code
+                    .as_bytes()
+                    .get(1)
+                    .is_some_and(|value| *value != b' ');
+            let status = status_code.trim().to_string();
             let raw_path = trimmed.get(3..)?.trim();
             let (old_path, path) = split_git_status_path(raw_path);
             let key = git_status_path_key(&path);
@@ -4582,10 +4819,64 @@ fn parse_git_changed_files(
                     .unwrap_or(false),
                 old_path,
                 path,
+                staged,
                 status,
+                unstaged,
+                untracked,
             })
         })
         .collect()
+}
+
+#[derive(Default)]
+struct GitStatusEntrySummary {
+    changed_files: usize,
+    staged_files: usize,
+    unstaged_files: usize,
+    untracked_files: usize,
+}
+
+fn summarize_git_status_entries(status_output: &str) -> GitStatusEntrySummary {
+    let mut summary = GitStatusEntrySummary::default();
+
+    for line in status_output.lines() {
+        let trimmed = line.trim_end();
+
+        if trimmed.len() < 2 {
+            continue;
+        }
+
+        let Some(status_code) = trimmed.get(0..2) else {
+            continue;
+        };
+        let untracked = status_code == "??";
+        let staged = !untracked
+            && status_code
+                .as_bytes()
+                .first()
+                .is_some_and(|value| *value != b' ');
+        let unstaged = untracked
+            || status_code
+                .as_bytes()
+                .get(1)
+                .is_some_and(|value| *value != b' ');
+
+        summary.changed_files += 1;
+
+        if staged {
+            summary.staged_files += 1;
+        }
+
+        if unstaged {
+            summary.unstaged_files += 1;
+        }
+
+        if untracked {
+            summary.untracked_files += 1;
+        }
+    }
+
+    summary
 }
 
 fn split_git_status_path(raw_path: &str) -> (Option<String>, String) {
@@ -4683,6 +4974,52 @@ mod tests {
         ));
         fs::create_dir_all(&root).expect("create temp index root");
         root
+    }
+
+    fn init_test_repository(label: &str) -> PathBuf {
+        let root = temp_index_root(label);
+
+        run_git(&root, &["init"]).expect("initialize test repository");
+        run_git(&root, &["checkout", "-b", "main"]).expect("create main branch");
+        configure_test_git_identity(&root);
+        root
+    }
+
+    fn configure_test_git_identity(repository_path: &Path) {
+        run_git(repository_path, &["config", "user.name", "Gilbert Test"])
+            .expect("set test git user name");
+        run_git(
+            repository_path,
+            &["config", "user.email", "gilbert-test@example.com"],
+        )
+        .expect("set test git user email");
+        run_git(repository_path, &["config", "core.autocrlf", "false"])
+            .expect("disable test git line ending conversion");
+    }
+
+    fn commit_test_file(repository_path: &Path, path: &str, content: &str, message: &str) {
+        let file_path = repository_path.join(path);
+
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).expect("create test file parent");
+        }
+
+        fs::write(&file_path, content).expect("write test file");
+        run_git(repository_path, &["add", path]).expect("stage test file");
+        run_git(repository_path, &["commit", "-m", message]).expect("commit test file");
+    }
+
+    fn create_test_remote(label: &str) -> PathBuf {
+        let remote = temp_index_root(label);
+
+        run_git(&remote, &["init", "--bare"]).expect("initialize bare test remote");
+        remote
+    }
+
+    fn attach_test_origin(repository_path: &Path, remote_path: &Path) {
+        let remote = path_to_string(remote_path);
+
+        run_git(repository_path, &["remote", "add", "origin", &remote]).expect("add test origin");
     }
 
     #[test]
@@ -4791,7 +5128,7 @@ mod tests {
         let base = temp_index_root("write-parents");
         let path = base.join("hello").join("src").join("App.jsx");
 
-        let result = computer_write_text_file(ComputerWriteFileRequest {
+        let result = computer_write_text_file_blocking(ComputerWriteFileRequest {
             content: "export default function App() {\n  return null;\n}\n".to_string(),
             create_parent_dirs: None,
             expected_sha256: None,
@@ -4817,7 +5154,7 @@ mod tests {
         let base = temp_index_root("write-no-parents");
         let path = base.join("hello").join("src").join("App.jsx");
 
-        let error = computer_write_text_file(ComputerWriteFileRequest {
+        let error = computer_write_text_file_blocking(ComputerWriteFileRequest {
             content: "export default null;\n".to_string(),
             create_parent_dirs: Some(false),
             expected_sha256: None,
@@ -4839,7 +5176,7 @@ mod tests {
         let base = temp_index_root("create-directory");
         let path = base.join("src").join("features").join("chat");
 
-        let result = computer_create_directory(ComputerCreateDirectoryRequest {
+        let result = computer_create_directory_blocking(ComputerCreateDirectoryRequest {
             path: path_to_string(&path),
             recursive: None,
             roots: vec![path_to_string(&base)],
@@ -4850,7 +5187,7 @@ mod tests {
         assert_eq!(path_to_string(&path), result.path);
         assert!(path.is_dir());
 
-        let second = computer_create_directory(ComputerCreateDirectoryRequest {
+        let second = computer_create_directory_blocking(ComputerCreateDirectoryRequest {
             path: path_to_string(&path),
             recursive: None,
             roots: vec![path_to_string(&base)],
@@ -4909,7 +5246,7 @@ mod tests {
         let base = temp_index_root("write-missing-sha");
         let path = base.join("src").join("App.jsx");
 
-        let error = computer_write_text_file(ComputerWriteFileRequest {
+        let error = computer_write_text_file_blocking(ComputerWriteFileRequest {
             content: "export default null;\n".to_string(),
             create_parent_dirs: None,
             expected_sha256: Some("deadbeef".to_string()),
@@ -4962,6 +5299,128 @@ mod tests {
         assert_eq!(count_text_file_lines(&path), 0);
 
         let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn git_stage_blocking_stages_unstaged_changes() {
+        let repository = init_test_repository("git-stage");
+        commit_test_file(&repository, "app.txt", "one\n", "initial commit");
+        fs::write(repository.join("app.txt"), "one\ntwo\n").expect("modify tracked file");
+
+        let result = git_stage_blocking(ComputerGitStageRequest {
+            path: path_to_string(&repository),
+            paths: None,
+        })
+        .expect("stage changes");
+
+        assert_eq!(result.message, "Staged 1 file.");
+        assert_eq!(result.status.staged_files, 1);
+        assert_eq!(result.status.unstaged_files, 0);
+        assert_eq!(
+            run_git(&repository, &["diff", "--cached", "--name-only"]).expect("read staged files"),
+            "app.txt"
+        );
+
+        let _ = fs::remove_dir_all(repository);
+    }
+
+    #[test]
+    fn git_push_blocking_refuses_uncommitted_only_changes() {
+        let repository = init_test_repository("git-push-uncommitted");
+        let remote = create_test_remote("git-push-uncommitted-remote");
+        commit_test_file(&repository, "app.txt", "one\n", "initial commit");
+        attach_test_origin(&repository, &remote);
+
+        git_push_blocking(ComputerGitPushRequest {
+            path: path_to_string(&repository),
+            remote: None,
+        })
+        .expect("push initial commit");
+        fs::write(repository.join("app.txt"), "one\ntwo\n").expect("modify tracked file");
+
+        let error = git_push_blocking(ComputerGitPushRequest {
+            path: path_to_string(&repository),
+            remote: None,
+        })
+        .expect_err("uncommitted-only changes should not be reported as pushed");
+
+        assert!(error.contains("No commits to push"));
+
+        let _ = fs::remove_dir_all(repository);
+        let _ = fs::remove_dir_all(remote);
+    }
+
+    #[test]
+    fn git_push_blocking_verifies_remote_head_after_push() {
+        let repository = init_test_repository("git-push-verify");
+        let remote = create_test_remote("git-push-verify-remote");
+        commit_test_file(&repository, "app.txt", "one\n", "initial commit");
+        attach_test_origin(&repository, &remote);
+
+        git_push_blocking(ComputerGitPushRequest {
+            path: path_to_string(&repository),
+            remote: None,
+        })
+        .expect("push initial commit");
+        commit_test_file(&repository, "app.txt", "one\ntwo\n", "second commit");
+
+        let result = git_push_blocking(ComputerGitPushRequest {
+            path: path_to_string(&repository),
+            remote: None,
+        })
+        .expect("push second commit");
+        let local_head = git_head_sha(&repository).expect("read local head");
+        let remote_head = git_remote_head_sha(&repository, "origin", "main")
+            .expect("read remote head")
+            .expect("remote main exists");
+
+        assert_eq!(result.message, "Pushed main to origin/main.");
+        assert_eq!(local_head, remote_head);
+        assert_eq!(result.status.ahead, 0);
+
+        let _ = fs::remove_dir_all(repository);
+        let _ = fs::remove_dir_all(remote);
+    }
+
+    #[test]
+    fn git_pull_blocking_reports_fast_forward_updates() {
+        let repository = init_test_repository("git-pull-local");
+        let remote = create_test_remote("git-pull-remote");
+        commit_test_file(&repository, "app.txt", "one\n", "initial commit");
+        attach_test_origin(&repository, &remote);
+        git_push_blocking(ComputerGitPushRequest {
+            path: path_to_string(&repository),
+            remote: None,
+        })
+        .expect("push initial commit");
+        run_git(&remote, &["symbolic-ref", "HEAD", "refs/heads/main"])
+            .expect("point bare remote head at main");
+
+        let clone_parent = temp_index_root("git-pull-clone-parent");
+        let remote_path = path_to_string(&remote);
+        run_git(&clone_parent, &["clone", &remote_path, "peer"]).expect("clone peer repo");
+        let peer = clone_parent.join("peer");
+        configure_test_git_identity(&peer);
+        commit_test_file(&peer, "app.txt", "one\ntwo\n", "remote update");
+        run_git(&peer, &["push"]).expect("push peer update");
+
+        let result = git_pull_blocking(ComputerGitPullRequest {
+            branch: None,
+            path: path_to_string(&repository),
+            remote: None,
+        })
+        .expect("pull remote update");
+
+        assert_eq!(result.message, "Pulled current branch.");
+        assert_eq!(
+            fs::read_to_string(repository.join("app.txt")).expect("read pulled file"),
+            "one\ntwo\n"
+        );
+        assert_eq!(result.status.behind, 0);
+
+        let _ = fs::remove_dir_all(repository);
+        let _ = fs::remove_dir_all(remote);
+        let _ = fs::remove_dir_all(clone_parent);
     }
 
     #[test]

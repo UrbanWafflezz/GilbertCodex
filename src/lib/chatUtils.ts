@@ -47,8 +47,8 @@ export function hasComposerDraftContent(draft?: ChatComposerDraft | null): draft
   return Boolean(draft && (draft.content.trim() || draft.attachments.length > 0));
 }
 
-export function isDiscardableEmptyChat(chat: Pick<ChatSummary, "composerDraft" | "messages"> & Pick<Partial<ChatSummary>, "messagesLoaded">) {
-  return isEmptyChat(chat) && !hasComposerDraftContent(chat.composerDraft);
+export function isDiscardableEmptyChat(chat: Pick<ChatSummary, "composerDraft" | "messages"> & Pick<Partial<ChatSummary>, "messagesClearedAt" | "messagesLoaded">) {
+  return isEmptyChat(chat) && !hasComposerDraftContent(chat.composerDraft) && !chat.messagesClearedAt;
 }
 
 export function isPlainResearchChat(chat: Pick<ChatSummary, "archived" | "id" | "messages" | "project">, activeChatId?: string) {
@@ -62,12 +62,12 @@ export function createMessage(
   reasoning?: string,
   attachments?: ChatAttachment[],
 ): ChatMessage {
-  void reasoning;
   return {
     attachments: attachments && attachments.length > 0 ? attachments : undefined,
     content,
     createdAt: new Date().toISOString(),
     id: createId("message"),
+    reasoning: reasoning?.trim() || undefined,
     role,
     status,
   };

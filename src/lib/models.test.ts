@@ -14,11 +14,20 @@ import {
   NEMOTRON_3_NANO_OMNI_MODEL,
   NEMOTRON_3_SUPER_MODEL,
   NINE_ROUTER_ALWAYS_FREE_MODEL,
+  NINE_ROUTER_ANTIGRAVITY_MODEL_IDS,
+  NINE_ROUTER_CLAUDE_CODE_MODEL_IDS,
+  NINE_ROUTER_CLINE_MODEL_IDS,
   NINE_ROUTER_CODEX_EXTENDED_CONTEXT_TOKENS,
   NINE_ROUTER_CODEX_MODEL_IDS,
   NINE_ROUTER_CODEX_STANDARD_CONTEXT_TOKENS,
+  NINE_ROUTER_GEMINI_CLI_MODEL_IDS,
   NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS,
+  NINE_ROUTER_IFLOW_MODEL_IDS,
+  NINE_ROUTER_KILO_CODE_MODEL_IDS,
+  NINE_ROUTER_KIMI_CODING_MODEL_IDS,
+  NINE_ROUTER_KIRO_MODEL_IDS,
   NINE_ROUTER_OPEN_CODE_FREE_MODEL_IDS,
+  NINE_ROUTER_QWEN_CODE_MODEL_IDS,
   NINE_ROUTER_SMART_SAVER_MODEL,
   OPENROUTER_AUTO_MODEL,
   OPENROUTER_CURATED_FREE_MODELS,
@@ -164,7 +173,16 @@ describe("model catalog", () => {
     const subscriptionDefaults = [
       NINE_ROUTER_ALWAYS_FREE_MODEL,
       ...NINE_ROUTER_CODEX_MODEL_IDS,
+      ...NINE_ROUTER_CLAUDE_CODE_MODEL_IDS,
+      ...NINE_ROUTER_GEMINI_CLI_MODEL_IDS,
+      ...NINE_ROUTER_ANTIGRAVITY_MODEL_IDS,
       ...NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS,
+      ...NINE_ROUTER_KIRO_MODEL_IDS,
+      ...NINE_ROUTER_KILO_CODE_MODEL_IDS,
+      ...NINE_ROUTER_CLINE_MODEL_IDS,
+      ...NINE_ROUTER_QWEN_CODE_MODEL_IDS,
+      ...NINE_ROUTER_IFLOW_MODEL_IDS,
+      ...NINE_ROUTER_KIMI_CODING_MODEL_IDS,
     ];
 
     expect(getDefaultModelForProvider("9router")).toBe("cx/gpt-5.5");
@@ -172,6 +190,8 @@ describe("model catalog", () => {
     expect(getChatModelOption("cx/gpt-5.5", "9router")).toMatchObject({
       contextWindowTokens: NINE_ROUTER_CODEX_STANDARD_CONTEXT_TOKENS,
     });
+    expect(NINE_ROUTER_CODEX_MODEL_IDS).toContain("cx/gpt-5.3-codex-spark");
+    expect(getChatModelOption("cx/gpt-5.3-codex-spark", "9router")?.pricing?.note).toContain("5-hour and weekly");
     expect(getEffectiveProviderModelContextWindowTokens("9router", "cx/gpt-5.5", 1_000_000, { codexContextWindow: "standard" })).toBe(NINE_ROUTER_CODEX_STANDARD_CONTEXT_TOKENS);
     expect(getEffectiveProviderModelContextWindowTokens("9router", "cx/gpt-5.5", 262_144, { codexContextWindow: "extended" })).toBe(NINE_ROUTER_CODEX_EXTENDED_CONTEXT_TOKENS);
     expect(buildProviderModelOptions("9router", [
@@ -185,7 +205,16 @@ describe("model catalog", () => {
     expect(buildProviderModelOptions("9router", undefined, "free-combo").map((option) => option.value)).toEqual([
       NINE_ROUTER_ALWAYS_FREE_MODEL,
       ...NINE_ROUTER_CODEX_MODEL_IDS,
+      ...NINE_ROUTER_CLAUDE_CODE_MODEL_IDS,
+      ...NINE_ROUTER_GEMINI_CLI_MODEL_IDS,
+      ...NINE_ROUTER_ANTIGRAVITY_MODEL_IDS,
       ...NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS,
+      ...NINE_ROUTER_KIRO_MODEL_IDS,
+      ...NINE_ROUTER_KILO_CODE_MODEL_IDS,
+      ...NINE_ROUTER_CLINE_MODEL_IDS,
+      ...NINE_ROUTER_QWEN_CODE_MODEL_IDS,
+      ...NINE_ROUTER_IFLOW_MODEL_IDS,
+      ...NINE_ROUTER_KIMI_CODING_MODEL_IDS,
       "free-combo",
     ]);
   });
@@ -213,6 +242,7 @@ describe("model catalog", () => {
     expect(supportsModelInputModality("openai", "gpt-4o", "image")).toBe(true);
     expect(supportsModelInputModality("9router", "cx/gpt-5.5", "image")).toBe(true);
     expect(supportsModelInputModality("9router", "cx/gpt-5.3-codex-xhigh", "image")).toBe(true);
+    expect(supportsModelInputModality("9router", "cx/gpt-5.3-codex-spark", "image")).toBe(true);
     expect(supportsModelInputModality("9router", NINE_ROUTER_ALWAYS_FREE_MODEL, "image")).toBe(false);
     expect(supportsModelInputModality("openrouter", GPT_OSS_120B_FREE_MODEL, "image")).toBe(false);
   });
@@ -245,7 +275,16 @@ describe("model catalog", () => {
     ]).map((option) => option.value)).toEqual([
       NINE_ROUTER_ALWAYS_FREE_MODEL,
       ...NINE_ROUTER_CODEX_MODEL_IDS,
+      ...NINE_ROUTER_CLAUDE_CODE_MODEL_IDS,
+      ...NINE_ROUTER_GEMINI_CLI_MODEL_IDS,
+      ...NINE_ROUTER_ANTIGRAVITY_MODEL_IDS,
       ...NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS,
+      ...NINE_ROUTER_KIRO_MODEL_IDS,
+      ...NINE_ROUTER_KILO_CODE_MODEL_IDS,
+      ...NINE_ROUTER_CLINE_MODEL_IDS,
+      ...NINE_ROUTER_QWEN_CODE_MODEL_IDS,
+      ...NINE_ROUTER_IFLOW_MODEL_IDS,
+      ...NINE_ROUTER_KIMI_CODING_MODEL_IDS,
     ]);
   });
 

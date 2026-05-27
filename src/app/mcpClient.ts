@@ -56,6 +56,12 @@ export async function callMcpTool(request: McpCallToolRequest): Promise<McpToolC
   return invoke<McpToolCallResponse>("mcp_call_tool", { request });
 }
 
+export async function callMcpToolWithProgress(request: McpCallToolRequest, onEvent: (event: McpServerProgressEvent) => void): Promise<McpToolCallResponse> {
+  assertMcpDesktop();
+  const onEventChannel = new Channel<McpServerProgressEvent>(onEvent);
+  return invoke<McpToolCallResponse>("mcp_call_tool_stream", { onEvent: onEventChannel, request });
+}
+
 export async function searchMcpRegistry(request: McpRegistrySearchRequest): Promise<McpRegistrySearchResponse> {
   assertMcpDesktop();
   return invoke<McpRegistrySearchResponse>("mcp_search_registry", { request });

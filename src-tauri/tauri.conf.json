@@ -59,6 +59,7 @@
       "icons/icon.ico"
     ],
     "resources": {
+      "../plugins/*": "plugins/",
       "../resources/models/whisper/*": "models/whisper/"
     },
     "windows": {

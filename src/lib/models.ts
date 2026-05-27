@@ -54,6 +54,10 @@ export const NINE_ROUTER_CODEX_MODEL_IDS = [
   "cx/gpt-5.4",
   "cx/gpt-5.3-codex",
   "cx/gpt-5.3-codex-xhigh",
+  "cx/gpt-5.3-codex-high",
+  "cx/gpt-5.3-codex-low",
+  "cx/gpt-5.3-codex-none",
+  "cx/gpt-5.3-codex-spark",
 ] as const;
 const NINE_ROUTER_CODEX_MODEL_ID_SET = new Set<string>(NINE_ROUTER_CODEX_MODEL_IDS);
 export const NINE_ROUTER_CODEX_STANDARD_CONTEXT_TOKENS = 262_144;
@@ -70,6 +74,51 @@ export const NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS = [
   "gh/gpt-4.1",
   "gh/gpt-4o",
   "gh/claude-haiku-4.5",
+] as const;
+export const NINE_ROUTER_CLAUDE_CODE_MODEL_IDS = [
+  "cc/claude-opus-4-7",
+  "cc/claude-opus-4-6",
+  "cc/claude-sonnet-4-6",
+  "cc/claude-haiku-4-5-20251001",
+] as const;
+export const NINE_ROUTER_GEMINI_CLI_MODEL_IDS = [
+  "gc/gemini-3-flash-preview",
+  "gc/gemini-3-pro-preview",
+] as const;
+export const NINE_ROUTER_ANTIGRAVITY_MODEL_IDS = [
+  "ag/gemini-3-flash",
+  "ag/gemini-pro-agent",
+  "ag/claude-sonnet-4-6",
+] as const;
+export const NINE_ROUTER_KIRO_MODEL_IDS = [
+  "kr/claude-sonnet-4.5",
+  "kr/claude-haiku-4.5",
+  "kr/deepseek-3.2",
+] as const;
+export const NINE_ROUTER_KILO_CODE_MODEL_IDS = [
+  "kc/anthropic/claude-sonnet-4-20250514",
+  "kc/google/gemini-2.5-pro",
+  "kc/openai/gpt-4.1",
+] as const;
+export const NINE_ROUTER_CLINE_MODEL_IDS = [
+  "cl/anthropic/claude-opus-4.7",
+  "cl/anthropic/claude-sonnet-4.6",
+  "cl/openai/gpt-5.3-codex",
+] as const;
+export const NINE_ROUTER_QWEN_CODE_MODEL_IDS = [
+  "qw/qwen3-coder-plus",
+  "qw/qwen3-coder-flash",
+  "qw/coder-model",
+] as const;
+export const NINE_ROUTER_IFLOW_MODEL_IDS = [
+  "if/qwen3-coder-plus",
+  "if/qwen3-max",
+  "if/kimi-k2",
+] as const;
+export const NINE_ROUTER_KIMI_CODING_MODEL_IDS = [
+  "kmc/kimi-k2.6",
+  "kmc/kimi-k2.5",
+  "kmc/kimi-latest",
 ] as const;
 const NINE_ROUTER_GITHUB_COPILOT_MODEL_ID_SET = new Set<string>(NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS);
 export const NINE_ROUTER_GITHUB_COPILOT_FALLBACK_MODEL = "gh/gpt-5-mini";
@@ -120,7 +169,16 @@ const NINE_ROUTER_GITHUB_COPILOT_MODEL_PREFIXES = [
 const NINE_ROUTER_MODEL_PRIORITY_ORDER = [
   NINE_ROUTER_ALWAYS_FREE_MODEL,
   ...NINE_ROUTER_CODEX_MODEL_IDS,
+  ...NINE_ROUTER_CLAUDE_CODE_MODEL_IDS,
+  ...NINE_ROUTER_GEMINI_CLI_MODEL_IDS,
+  ...NINE_ROUTER_ANTIGRAVITY_MODEL_IDS,
   ...NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS,
+  ...NINE_ROUTER_KIRO_MODEL_IDS,
+  ...NINE_ROUTER_KILO_CODE_MODEL_IDS,
+  ...NINE_ROUTER_CLINE_MODEL_IDS,
+  ...NINE_ROUTER_QWEN_CODE_MODEL_IDS,
+  ...NINE_ROUTER_IFLOW_MODEL_IDS,
+  ...NINE_ROUTER_KIMI_CODING_MODEL_IDS,
 ] as const;
 
 type ModelProviderApiStyle = "anthropic-messages" | "openai-compatible";
@@ -636,6 +694,30 @@ export const CHAT_MODEL_OPTIONS: ChatModelOption[] = [
     pricing: routedPricing("Usage comes from the user's connected Codex subscription and plan limits.", "9router"),
     useCase: "Use for harder coding turns where the Codex xHigh route is available through the subscription account.",
   }),
+  modelOption("9router", "9router-codex-gpt-53-codex-high", "Codex GPT-5.3 Codex High", "cx/gpt-5.3-codex-high", "Codex coding route with high reasoning through the connected account.", NINE_ROUTER_CODEX_STANDARD_CONTEXT_TOKENS, {
+    capabilities: ["Local gateway", "Subscription", "Coding", "High reasoning", "Multimodal"],
+    category: "reasoning",
+    pricing: routedPricing("Usage comes from the user's connected Codex subscription and plan limits.", "9router"),
+    useCase: "Use for hard coding turns where high reasoning is enough and xHigh is not needed.",
+  }),
+  modelOption("9router", "9router-codex-gpt-53-codex-low", "Codex GPT-5.3 Codex Low", "cx/gpt-5.3-codex-low", "Codex coding route with lower reasoning through the connected account.", NINE_ROUTER_CODEX_STANDARD_CONTEXT_TOKENS, {
+    capabilities: ["Local gateway", "Subscription", "Coding", "Multimodal"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Codex subscription and plan limits.", "9router"),
+    useCase: "Use for routine coding turns where lower reasoning keeps subscription usage lighter.",
+  }),
+  modelOption("9router", "9router-codex-gpt-53-codex-none", "Codex GPT-5.3 Codex None", "cx/gpt-5.3-codex-none", "Codex coding route without extra reasoning through the connected account.", NINE_ROUTER_CODEX_STANDARD_CONTEXT_TOKENS, {
+    capabilities: ["Local gateway", "Subscription", "Coding", "Fast", "Multimodal"],
+    category: "fast",
+    pricing: routedPricing("Usage comes from the user's connected Codex subscription and plan limits.", "9router"),
+    useCase: "Use for fast edits and direct coding turns through the connected Codex account.",
+  }),
+  modelOption("9router", "9router-codex-gpt-53-codex-spark", "Codex GPT-5.3 Spark", "cx/gpt-5.3-codex-spark", "Codex Spark route with separate short-window and weekly quota buckets.", NINE_ROUTER_CODEX_STANDARD_CONTEXT_TOKENS, {
+    capabilities: ["Local gateway", "Subscription", "Coding", "Fast", "Multimodal"],
+    category: "fast",
+    pricing: routedPricing("Usage comes from the user's connected Codex subscription. GPT-5.3 Spark has its own 5-hour and weekly rate-limit windows when reported by Codex.", "9router"),
+    useCase: "Use for faster Codex work while keeping Spark usage visible as a separate subscription bucket.",
+  }),
   modelOption("9router", "9router-always-free", "Free Auto", NINE_ROUTER_ALWAYS_FREE_MODEL, "Automatic free route for the current OpenCode Free routes.", undefined, {
     capabilities: ["Local gateway", "Auto", "Free", "Fallback"],
     category: "free",
@@ -665,6 +747,168 @@ export const CHAT_MODEL_OPTIONS: ChatModelOption[] = [
     category: "fast",
     pricing: routedPricing("Usage comes from the user's connected GitHub Copilot account and plan limits.", "9router"),
     useCase: "Use for quick edits and fast chat through a connected GitHub Copilot subscription.",
+  }),
+  modelOption("9router", "9router-claude-opus-47", "Claude Code Opus 4.7", "cc/claude-opus-4-7", "Claude Code subscription route for complex coding tasks.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding", "Reasoning"],
+    category: "reasoning",
+    pricing: routedPricing("Usage comes from the user's connected Claude Code subscription and shared plan limits.", "9router"),
+    useCase: "Use for complex coding, architecture, and review through a connected Claude Code account.",
+  }),
+  modelOption("9router", "9router-claude-opus-46", "Claude Code Opus 4.6", "cc/claude-opus-4-6", "Claude Code subscription route for high-quality coding tasks.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding", "Reasoning"],
+    category: "reasoning",
+    pricing: routedPricing("Usage comes from the user's connected Claude Code subscription and shared plan limits.", "9router"),
+    useCase: "Use for high-quality coding and codebase reasoning through Claude Code.",
+  }),
+  modelOption("9router", "9router-claude-sonnet-46", "Claude Code Sonnet 4.6", "cc/claude-sonnet-4-6", "Claude Code subscription route for balanced coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Claude Code subscription and shared plan limits.", "9router"),
+    useCase: "Use for balanced Claude Code editing, chat, and review.",
+  }),
+  modelOption("9router", "9router-claude-haiku-45", "Claude Code Haiku 4.5", "cc/claude-haiku-4-5-20251001", "Claude Code subscription route for fast coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Fast"],
+    category: "fast",
+    pricing: routedPricing("Usage comes from the user's connected Claude Code subscription and shared plan limits.", "9router"),
+    useCase: "Use for quick Claude Code responses through a connected subscription.",
+  }),
+  modelOption("9router", "9router-gemini-cli-flash", "Gemini CLI Flash", "gc/gemini-3-flash-preview", "Gemini CLI subscription route for fast Google-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Fast", "Multimodal"],
+    category: "fast",
+    pricing: routedPricing("Usage comes from the user's connected Gemini CLI or Cloud Code quota.", "9router"),
+    useCase: "Use for fast Gemini CLI turns through a connected Google account.",
+  }),
+  modelOption("9router", "9router-gemini-cli-pro", "Gemini CLI Pro", "gc/gemini-3-pro-preview", "Gemini CLI subscription route for complex Google-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding", "Multimodal"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Gemini CLI or Cloud Code quota.", "9router"),
+    useCase: "Use for harder Gemini CLI coding and analysis turns through a connected Google account.",
+  }),
+  modelOption("9router", "9router-antigravity-gemini-flash", "Antigravity Gemini Flash", "ag/gemini-3-flash", "Antigravity subscription route for fast Google-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Fast", "Multimodal"],
+    category: "fast",
+    pricing: routedPricing("Usage comes from the user's connected Antigravity account and quota.", "9router"),
+    useCase: "Use for fast Antigravity turns through a connected Google account.",
+  }),
+  modelOption("9router", "9router-antigravity-gemini-pro", "Antigravity Gemini Pro", "ag/gemini-pro-agent", "Antigravity subscription route for stronger agentic coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding", "Multimodal"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Antigravity account and quota.", "9router"),
+    useCase: "Use for stronger Antigravity coding and agent work.",
+  }),
+  modelOption("9router", "9router-antigravity-claude-sonnet", "Antigravity Claude Sonnet", "ag/claude-sonnet-4-6", "Antigravity subscription route for Claude-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding", "Reasoning"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Antigravity account and quota.", "9router"),
+    useCase: "Use for Claude-backed Antigravity coding turns.",
+  }),
+  modelOption("9router", "9router-kiro-sonnet", "Kiro Claude Sonnet", "kr/claude-sonnet-4.5", "Kiro subscription route for Claude-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Kiro account and quota.", "9router"),
+    useCase: "Use for Kiro coding turns through a connected account.",
+  }),
+  modelOption("9router", "9router-kiro-haiku", "Kiro Claude Haiku", "kr/claude-haiku-4.5", "Kiro subscription route for fast coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Fast"],
+    category: "fast",
+    pricing: routedPricing("Usage comes from the user's connected Kiro account and quota.", "9router"),
+    useCase: "Use for fast Kiro turns through a connected account.",
+  }),
+  modelOption("9router", "9router-kiro-deepseek", "Kiro DeepSeek 3.2", "kr/deepseek-3.2", "Kiro subscription route for DeepSeek-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Kiro account and quota.", "9router"),
+    useCase: "Use for Kiro coding turns on DeepSeek.",
+  }),
+  modelOption("9router", "9router-kilo-claude-sonnet", "Kilo Code Claude Sonnet", "kc/anthropic/claude-sonnet-4-20250514", "Kilo Code subscription route for Claude-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Kilo Code account and quota.", "9router"),
+    useCase: "Use for Kilo Code editing through a connected account.",
+  }),
+  modelOption("9router", "9router-kilo-gemini-pro", "Kilo Code Gemini Pro", "kc/google/gemini-2.5-pro", "Kilo Code subscription route for Gemini-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding", "Multimodal"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Kilo Code account and quota.", "9router"),
+    useCase: "Use for Kilo Code analysis and coding through Gemini.",
+  }),
+  modelOption("9router", "9router-kilo-gpt-41", "Kilo Code GPT-4.1", "kc/openai/gpt-4.1", "Kilo Code subscription route for OpenAI-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Kilo Code account and quota.", "9router"),
+    useCase: "Use for Kilo Code editing through GPT-4.1.",
+  }),
+  modelOption("9router", "9router-cline-claude-opus", "Cline Claude Opus", "cl/anthropic/claude-opus-4.7", "Cline subscription route for high-quality Claude-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding", "Reasoning"],
+    category: "reasoning",
+    pricing: routedPricing("Usage comes from the user's connected Cline account and quota.", "9router"),
+    useCase: "Use for complex Cline coding turns through Claude Opus.",
+  }),
+  modelOption("9router", "9router-cline-claude-sonnet", "Cline Claude Sonnet", "cl/anthropic/claude-sonnet-4.6", "Cline subscription route for balanced Claude-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Cline account and quota.", "9router"),
+    useCase: "Use for balanced Cline coding and review.",
+  }),
+  modelOption("9router", "9router-cline-gpt-53-codex", "Cline GPT-5.3 Codex", "cl/openai/gpt-5.3-codex", "Cline subscription route for OpenAI-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Cline account and quota.", "9router"),
+    useCase: "Use for Cline coding turns through GPT-5.3 Codex.",
+  }),
+  modelOption("9router", "9router-qwen-plus", "Qwen Code Plus", "qw/qwen3-coder-plus", "Qwen Code subscription route for coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Qwen Code account and quota.", "9router"),
+    useCase: "Use for Qwen Code editing and generation.",
+  }),
+  modelOption("9router", "9router-qwen-flash", "Qwen Code Flash", "qw/qwen3-coder-flash", "Qwen Code subscription route for fast coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Fast"],
+    category: "fast",
+    pricing: routedPricing("Usage comes from the user's connected Qwen Code account and quota.", "9router"),
+    useCase: "Use for quick Qwen Code turns.",
+  }),
+  modelOption("9router", "9router-qwen-coder-model", "Qwen Code Coder", "qw/coder-model", "Qwen Code subscription route for current coder-model traffic.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Qwen Code account and quota.", "9router"),
+    useCase: "Use for the current Qwen coder-model route.",
+  }),
+  modelOption("9router", "9router-iflow-qwen-plus", "iFlow Qwen Coder Plus", "if/qwen3-coder-plus", "iFlow subscription route for Qwen-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected iFlow account and quota.", "9router"),
+    useCase: "Use for iFlow coding turns backed by Qwen.",
+  }),
+  modelOption("9router", "9router-iflow-qwen-max", "iFlow Qwen Max", "if/qwen3-max", "iFlow subscription route for stronger Qwen-backed work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Reasoning"],
+    category: "reasoning",
+    pricing: routedPricing("Usage comes from the user's connected iFlow account and quota.", "9router"),
+    useCase: "Use for stronger iFlow reasoning and coding turns.",
+  }),
+  modelOption("9router", "9router-iflow-kimi", "iFlow Kimi K2", "if/kimi-k2", "iFlow subscription route for Kimi-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected iFlow account and quota.", "9router"),
+    useCase: "Use for iFlow coding turns backed by Kimi.",
+  }),
+  modelOption("9router", "9router-kimi-coding-k26", "Kimi Coding K2.6", "kmc/kimi-k2.6", "Kimi Coding subscription route for Kimi-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Kimi Coding account and quota.", "9router"),
+    useCase: "Use for Kimi Coding turns through a connected account.",
+  }),
+  modelOption("9router", "9router-kimi-coding-k25", "Kimi Coding K2.5", "kmc/kimi-k2.5", "Kimi Coding subscription route for stable Kimi-backed coding work.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Kimi Coding account and quota.", "9router"),
+    useCase: "Use for stable Kimi Coding turns.",
+  }),
+  modelOption("9router", "9router-kimi-coding-latest", "Kimi Coding Latest", "kmc/kimi-latest", "Kimi Coding subscription route for the account's latest Kimi model.", undefined, {
+    capabilities: ["Local gateway", "Subscription", "Coding"],
+    category: "coding",
+    pricing: routedPricing("Usage comes from the user's connected Kimi Coding account and quota.", "9router"),
+    useCase: "Use for Kimi Coding latest-model routing.",
   }),
   modelOption("openrouter", "openrouter-free-auto", "Auto Route Free", DEFAULT_CHAT_MODEL, "Speed-biased free routing across reliable OpenRouter free coding and reasoning models.", 262_144, {
     capabilities: ["Free", "Structured", "Reasoning"],
@@ -1250,7 +1494,7 @@ function getNineRouterRouteSourceInfo(model: string): ModelRouteSourceInfo {
       chipLabel: "Gemini subscription",
       groupId: "9router-gemini-cli",
       groupLabel: "Gemini subscription",
-      prefixes: ["gemini-cli/", "gemini/", "google/", "cloud-code/"],
+      prefixes: ["gc/", "gemini-cli/", "gemini/", "google/", "cloud-code/"],
       searchTags: ["Subscriptions", "Gemini CLI", "Cloud Code", "Google subscription"],
       sourceLabel: "Gemini subscription",
     },
@@ -1274,7 +1518,7 @@ function getNineRouterRouteSourceInfo(model: string): ModelRouteSourceInfo {
       chipLabel: "Kiro subscription",
       groupId: "9router-kiro",
       groupLabel: "Kiro subscription",
-      prefixes: ["kiro/"],
+      prefixes: ["kr/", "kiro/"],
       searchTags: ["Subscriptions", "Kiro"],
       sourceLabel: "Kiro subscription",
     },
@@ -1282,7 +1526,7 @@ function getNineRouterRouteSourceInfo(model: string): ModelRouteSourceInfo {
       chipLabel: "Kilo Code subscription",
       groupId: "9router-kilo-code",
       groupLabel: "Kilo Code subscription",
-      prefixes: ["kilocode/", "kilo-code/", "kilo/"],
+      prefixes: ["kc/", "kilocode/", "kilo-code/", "kilo/"],
       searchTags: ["Subscriptions", "Kilo Code"],
       sourceLabel: "Kilo Code subscription",
     },
@@ -1290,7 +1534,7 @@ function getNineRouterRouteSourceInfo(model: string): ModelRouteSourceInfo {
       chipLabel: "Cline subscription",
       groupId: "9router-cline",
       groupLabel: "Cline subscription",
-      prefixes: ["cline/"],
+      prefixes: ["cl/", "cline/"],
       searchTags: ["Subscriptions", "Cline"],
       sourceLabel: "Cline subscription",
     },
@@ -1298,7 +1542,7 @@ function getNineRouterRouteSourceInfo(model: string): ModelRouteSourceInfo {
       chipLabel: "Qwen Code subscription",
       groupId: "9router-qwen-code",
       groupLabel: "Qwen Code subscription",
-      prefixes: ["qwen/", "qwen-code/"],
+      prefixes: ["qw/", "qwen/", "qwen-code/"],
       searchTags: ["Subscriptions", "Qwen Code"],
       sourceLabel: "Qwen Code subscription",
     },
@@ -1306,7 +1550,7 @@ function getNineRouterRouteSourceInfo(model: string): ModelRouteSourceInfo {
       chipLabel: "iFlow subscription",
       groupId: "9router-iflow",
       groupLabel: "iFlow subscription",
-      prefixes: ["iflow/"],
+      prefixes: ["if/", "iflow/"],
       searchTags: ["Subscriptions", "iFlow"],
       sourceLabel: "iFlow subscription",
     },
@@ -1322,7 +1566,7 @@ function getNineRouterRouteSourceInfo(model: string): ModelRouteSourceInfo {
       chipLabel: "Kimi Coding subscription",
       groupId: "9router-kimi-coding",
       groupLabel: "Kimi Coding subscription",
-      prefixes: ["kimi/", "kimi-coding/"],
+      prefixes: ["kmc/", "kimi/", "kimi-coding/"],
       searchTags: ["Subscriptions", "Kimi Coding"],
       sourceLabel: "Kimi Coding subscription",
     },

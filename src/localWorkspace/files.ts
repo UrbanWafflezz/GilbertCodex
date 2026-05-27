@@ -1376,6 +1376,9 @@ function createUnavailableGitStatus(error?: string): ComputerGitStatus {
     deletions: 0,
     error,
     files: [],
+    stagedFiles: 0,
+    unstagedFiles: 0,
+    untrackedFiles: 0,
   };
 }
 
@@ -1407,8 +1410,11 @@ function formatGitChangeSummary(status: ComputerGitStatus) {
   const changed = status.changedFiles === 1 ? "1 file changed" : `${status.changedFiles} files changed`;
   const additions = status.additions > 0 ? `+${status.additions}` : "";
   const deletions = status.deletions > 0 ? `-${status.deletions}` : "";
+  const staged = typeof status.stagedFiles === "number" && status.stagedFiles > 0 ? `${status.stagedFiles} staged` : "";
+  const unstaged = typeof status.unstagedFiles === "number" && status.unstagedFiles > 0 ? `${status.unstagedFiles} unstaged` : "";
+  const untracked = typeof status.untrackedFiles === "number" && status.untrackedFiles > 0 ? `${status.untrackedFiles} untracked` : "";
 
-  return [changed, additions, deletions].filter(Boolean).join(" ");
+  return [changed, additions, deletions, staged, unstaged, untracked].filter(Boolean).join(" ");
 }
 
 function formatGitStatusFiles(status: ComputerGitStatus) {

@@ -287,12 +287,6 @@ export function stopStreamingAssistantMessage(deps: WorkspaceRuntimeDeps, messag
       agentRunStatus: message.agentRunStatus === "running" || message.agentRunStatus === "queued" ? "cancelled" : message.agentRunStatus,
       isStreaming: false,
       progress: completeActiveProgress(message.progress),
-      thinking: message.thinking
-        ? {
-            ...message.thinking,
-            completedAt: message.thinking.completedAt ?? stoppedAt,
-          }
-        : undefined,
       toolCalls: message.toolCalls?.map((toolCall) =>
         toolCall.status === "active"
           ? {

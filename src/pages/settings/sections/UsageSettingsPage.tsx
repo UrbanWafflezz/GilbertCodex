@@ -1376,7 +1376,7 @@ function summarizeUsageQuality({
 
   if (reasoningTokens > 0) {
     watchlist.push({
-      detail: `${formatCompactTokens(reasoningTokens)} reasoning tokens are tracked. High-thinking models can change cost even when visible output is small.`,
+      detail: `${formatCompactTokens(reasoningTokens)} reasoning tokens are tracked. Reasoning-capable models can change cost even when visible output is small.`,
       title: "Reasoning token visibility",
     });
   }

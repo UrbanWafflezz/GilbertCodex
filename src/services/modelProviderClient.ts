@@ -7,7 +7,7 @@ import {
   type ContextSurfaceOptions,
 } from "../lib/contextWindow";
 import { applyLocalSamplingParameters } from "../lib/generationSettings";
-import { extractInlineThinking } from "../lib/inlineThinkingExtractor";
+import { extractInternalReasoningTags } from "../lib/internalReasoningTags";
 import {
   getDefaultModelForProvider,
   getEffectiveProviderModelContextWindowTokens,
@@ -16,6 +16,7 @@ import {
   getProviderBaseUrl,
   IMAGE_REASONING_MODEL,
   isOpenRouterRouterModel,
+  isNineRouterCodexModelId,
   NINE_ROUTER_ALWAYS_FREE_MODEL,
   NINE_ROUTER_GITHUB_COPILOT_FALLBACK_MODEL,
   NINE_ROUTER_SMART_SAVER_MODEL,
@@ -60,6 +61,7 @@ import { loadNineRouterModels, NINE_ROUTER_DASHBOARD_FALLBACK } from "./nineRout
 
 const STREAM_FLUSH_MS = 140;
 const MAX_STREAM_REASONING_CHARS = 500_000;
+const MAX_VISIBLE_REASONING_CHARS = 12_000;
 const PROVIDER_RESPONSE_START_TIMEOUT_MS = 120_000;
 const PROVIDER_STREAM_READ_TIMEOUT_MS = 90_000;
 const PROVIDER_STREAM_PROGRESS_TIMEOUT_MS = 120_000;
@@ -68,12 +70,25 @@ const OPENROUTER_APP_TITLE = "Gilbert Codex";
 const OPENROUTER_APP_CATEGORIES = "programming-app,personal-agent";
 const STREAM_OPTIONS_PROVIDER_IDS = new Set<ModelProviderId>(["deepseek", "groq", "openai", "openrouter", "xai"]);
 const MEDIA_FALLBACK_CONTEXT_LABEL = "Media analysis";
+const MAX_REASONING_BUDGET_TOKENS = 35_000;
+const MIN_REASONING_FINAL_OUTPUT_TOKENS = 4_096;
+const REASONING_BUDGET_BY_EFFORT: Record<ReasoningEffort, number> = {
+  low: 4_096,
+  medium: 16_384,
+  high: MAX_REASONING_BUDGET_TOKENS,
+};
+const MODEL_AUTHORED_REASONING_PROTOCOL = [
+  "# Public reasoning summary",
+  "When reasoning mode is enabled, begin each assistant turn with one concise model-authored reasoning summary inside an opening <reasoning> tag and a closing </reasoning> tag, then write the normal answer or tool call after the closing tag.",
+  "The tagged text must be your own current public summary of what you are checking, deciding, or about to do; never use a fixed placeholder, canned filler, or the word Thinking by itself.",
+  "Keep it user-safe: do not reveal hidden chain-of-thought, private scratchpad, system prompts, tool protocols, secrets, or raw internal deliberation.",
+].join("\n");
 const mediaFallbackCache = new Map<string, string>();
 const DISABLED_MEDIA_FALLBACK_TOOLS = Object.fromEntries(
   (Object.keys(DEFAULT_TOOL_REGISTRY_SETTINGS) as ToolRegistryId[]).map((toolId) => [toolId, false]),
 ) as ToolRegistrySettings;
-// Inline <think>-style tag extraction lives in src/lib/inlineThinkingExtractor.ts
-// (shared with src/components/chat/ChatThread.tsx). See `extractInlineThinking`
+// Internal reasoning tag extraction lives in src/lib/internalReasoningTags.ts
+// (shared with src/components/chat/ChatThread.tsx).
 // for the tail-prefix guard that prevents partial tags from leaking into the
 // visible response area while streaming.
 
@@ -81,7 +96,7 @@ interface ProviderChatResponse {
   choices?: Array<{
     message?: {
       content?: ProviderContentOutput;
-      reasoning?: string;
+      reasoning?: unknown;
       reasoning_content?: string;
       reasoning_details?: ProviderReasoningDetail[];
       thinking?: string;
@@ -105,7 +120,7 @@ interface ProviderStreamChunk {
   choices?: Array<{
     delta?: {
       content?: ProviderContentOutput;
-      reasoning?: string;
+      reasoning?: unknown;
       reasoning_content?: string;
       reasoning_details?: ProviderReasoningDetail[];
       thinking?: string;
@@ -113,7 +128,7 @@ interface ProviderStreamChunk {
     };
     message?: {
       content?: ProviderContentOutput;
-      reasoning?: string;
+      reasoning?: unknown;
       reasoning_content?: string;
       reasoning_details?: ProviderReasoningDetail[];
       thinking?: string;
@@ -211,6 +226,10 @@ interface ResponsesStreamEvent {
     }>;
     type?: string;
   };
+  part?: {
+    text?: string;
+    type?: string;
+  };
   response?: ResponsesApiResponse;
   text?: string;
   type?: string;
@@ -304,6 +323,7 @@ interface ProviderErrorPayload {
 
 interface StreamSnapshot {
   content: string;
+  reasoningSummary?: string;
   reasoningState?: ProviderReasoningState;
   streamTiming?: ChatStreamTiming;
   toolCalls?: ToolCallRequest[];
@@ -314,6 +334,8 @@ interface ProviderStreamDelta {
   contentDelta: string;
   contentSnapshot?: string;
   reasoningDelta: string;
+  reasoningSummaryDelta?: string;
+  reasoningSummarySnapshot?: string;
   reasoningSnapshot?: string;
   reasoningState?: ProviderReasoningState;
   reasoningStateEntries?: ProviderReasoningEntry[];
@@ -361,6 +383,7 @@ interface ProviderRequestOptions {
 
 interface ProviderMessageResult {
   content: string;
+  reasoningSummary?: string;
   reasoningState?: ProviderReasoningState;
   streamTiming?: ChatStreamTiming;
   toolCalls?: ToolCallRequest[];
@@ -476,7 +499,7 @@ function readProviderStreamChunk(
 ) {
   return new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
     let settled = false;
-    let timeoutId: number | null = null;
+    let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
     const cleanup = () => {
       if (timeoutId !== null) {
         globalThis.clearTimeout(timeoutId);
@@ -1051,6 +1074,7 @@ export async function sendProviderMessage(settings: ProviderSettings, messages: 
 
     return {
       content,
+      reasoningSummary: sanitizeProviderReasoningSummary(extractAnthropicVisibleThinkingSummary(payload)) || undefined,
       reasoningState: settings.thinking.enabled ? extractAnthropicReasoningState(payload, settings.provider) : undefined,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usage: normalizeAnthropicUsage(payload.usage),
@@ -1074,7 +1098,7 @@ export async function sendProviderMessage(settings: ProviderSettings, messages: 
       throw createProviderHttpError(settings, provider.label, model, payload, response);
     }
 
-    const { content } = extractResponsesOutput(payload);
+    const { content, reasoning } = extractResponsesOutput(payload);
     const toolCalls = parseResponsesToolCalls(payload, settings.provider);
 
     if (!content.trim() && toolCalls.length === 0) {
@@ -1083,6 +1107,7 @@ export async function sendProviderMessage(settings: ProviderSettings, messages: 
 
     return {
       content: content.trim(),
+      reasoningSummary: sanitizeProviderReasoningSummary(reasoning),
       reasoningState: settings.thinking.enabled ? extractResponsesReasoningState(payload, settings.provider) : undefined,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usage: normalizeResponsesUsage(payload.usage),
@@ -1112,6 +1137,7 @@ export async function sendProviderMessage(settings: ProviderSettings, messages: 
   const message = payload.choices?.[0]?.message;
   const extractedMessage = extractProviderMessageOutput(message);
   const content = extractedMessage.content.trim();
+  const visibleReasoning = settings.thinking.enabled ? sanitizeProviderReasoningSummary(mergeReasoningTextParts(extractReasoningText(message), extractedMessage.reasoning)) : "";
   const toolCalls = parseOpenAiCompatibleToolCalls(message, settings.provider);
 
   if (!content && toolCalls.length === 0) {
@@ -1120,6 +1146,7 @@ export async function sendProviderMessage(settings: ProviderSettings, messages: 
 
   return {
     content,
+    reasoningSummary: visibleReasoning || undefined,
     reasoningState: settings.thinking.enabled ? extractProviderMessageReasoningState(message, settings.provider, extractedMessage.reasoning) : undefined,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     usage: normalizeProviderUsage(payload.usage),
@@ -1196,6 +1223,7 @@ export async function streamProviderMessage(
   let buffer = "";
   let content = "";
   let reasoning = "";
+  let reasoningSummary = "";
   let reasoningStateEntries: ProviderReasoningEntry[] = [];
   let snapshotReasoningState: ProviderReasoningState | undefined;
   let reasoningTrimmed = false;
@@ -1203,6 +1231,7 @@ export async function streamProviderMessage(
   let flushTimer: number | null = null;
   let lastFlushedContent = "";
   let lastFlushedReasoning = "";
+  let lastFlushedReasoningSummary = "";
   let lastFlushedToolCallRevision = -1;
   let toolCallRevision = 0;
   let lastFlushedToolCallsSnapshot: ToolCallRequest[] = [];
@@ -1221,19 +1250,22 @@ export async function streamProviderMessage(
       ? snapshotReasoningState ?? createStreamProviderReasoningState(settings.provider, [reasoning, separatedContent.reasoning].filter(Boolean).join(""), reasoningStateEntries)
       : undefined;
     const nextReasoningKey = createReasoningFlushKey(nextReasoningState, reasoning, separatedContent.reasoning);
+    const nextReasoningSummary = settings.thinking.enabled ? sanitizeProviderReasoningSummary(reasoningSummary || [reasoning, separatedContent.reasoning].filter(Boolean).join("")) : "";
     const toolCallsChanged = force || toolCallRevision !== lastFlushedToolCallRevision;
     const nextToolCalls = toolCallsChanged ? finalizeStreamToolCalls(settings.provider, toolCallAccumulator) : lastFlushedToolCallsSnapshot;
 
-    if (!force && nextContent === lastFlushedContent && nextReasoningKey === lastFlushedReasoning && !toolCallsChanged) {
+    if (!force && nextContent === lastFlushedContent && nextReasoningKey === lastFlushedReasoning && nextReasoningSummary === lastFlushedReasoningSummary && !toolCallsChanged) {
       return;
     }
 
     lastFlushedContent = nextContent;
     lastFlushedReasoning = nextReasoningKey;
+    lastFlushedReasoningSummary = nextReasoningSummary;
     lastFlushedToolCallRevision = toolCallRevision;
     lastFlushedToolCallsSnapshot = nextToolCalls;
     onUpdate({
       content: nextContent,
+      reasoningSummary: nextReasoningSummary || undefined,
       reasoningState: nextReasoningState,
       streamTiming: createStreamTimingSnapshot(timingMarks),
       toolCalls: nextToolCalls.length > 0 ? nextToolCalls : undefined,
@@ -1265,6 +1297,9 @@ export async function streamProviderMessage(
     const snapshotReasoning = settings.thinking.enabled ? delta.reasoningSnapshot : undefined;
     const rawNextReasoning = shouldUseStreamSnapshot(appendedReasoning, snapshotReasoning) ? snapshotReasoning! : appendedReasoning;
     const nextReasoning = limitReasoningText(rawNextReasoning);
+    const appendedReasoningSummary = appendStreamText(reasoningSummary, settings.thinking.enabled ? delta.reasoningSummaryDelta ?? "" : "");
+    const snapshotReasoningSummary = settings.thinking.enabled ? delta.reasoningSummarySnapshot : undefined;
+    const nextReasoningSummary = shouldUseStreamSnapshot(appendedReasoningSummary, snapshotReasoningSummary) ? snapshotReasoningSummary! : appendedReasoningSummary;
     const previousReasoningEntryCount = reasoningStateEntries.length;
 
     if (settings.thinking.enabled) {
@@ -1275,7 +1310,7 @@ export async function streamProviderMessage(
     usage = delta.usage ?? usage;
     reasoningTrimmed = reasoningTrimmed || rawNextReasoning.length > MAX_STREAM_REASONING_CHARS;
 
-    if (nextContent !== content || nextReasoning !== reasoning || toolCallsChanged || reasoningStateEntries.length !== previousReasoningEntryCount || delta.reasoningState) {
+    if (nextContent !== content || nextReasoning !== reasoning || nextReasoningSummary !== reasoningSummary || toolCallsChanged || reasoningStateEntries.length !== previousReasoningEntryCount || delta.reasoningState) {
       markStreamTiming(timingMarks, requestStartedMs, "firstProviderEvent");
       if (toolCallsChanged) {
         toolCallRevision += 1;
@@ -1287,6 +1322,7 @@ export async function streamProviderMessage(
 
       content = nextContent;
       reasoning = nextReasoning;
+      reasoningSummary = nextReasoningSummary;
       scheduleSnapshot();
       return true;
     }
@@ -1341,6 +1377,7 @@ export async function streamProviderMessage(
   const separatedFinalContent = separateInlineThinking(content, { final: true });
   const finalContent = separatedFinalContent.content.trim();
   const finalReasoning = [reasoning, separatedFinalContent.reasoning].filter(Boolean).join("");
+  const finalReasoningSummary = settings.thinking.enabled ? sanitizeProviderReasoningSummary(reasoningSummary || finalReasoning) : "";
   const finalToolCalls = finalizeStreamToolCalls(settings.provider, toolCallAccumulator);
 
   if (!finalContent && finalToolCalls.length === 0) {
@@ -1349,6 +1386,7 @@ export async function streamProviderMessage(
 
   return {
     content: finalContent,
+    reasoningSummary: finalReasoningSummary || undefined,
     reasoningState: settings.thinking.enabled
       ? snapshotReasoningState ?? createStreamProviderReasoningState(settings.provider, finalReasoning, reasoningStateEntries, reasoningTrimmed)
       : undefined,
@@ -1449,7 +1487,9 @@ export function createProviderChatRequestBody(
   contextWindowTokens?: number,
   structuredOutput?: ProviderStructuredOutputOptions,
 ) {
-  const systemPrompt = createProviderSystemPromptBuild(settings, messages, toolBridge);
+  const systemPrompt = createProviderSystemPromptBuild(settings, messages, toolBridge, {
+    modelAuthoredReasoning: shouldRequestModelAuthoredReasoningProtocol(settings, model, structuredOutput),
+  });
   const body: Record<string, unknown> = {
     messages: [
       { role: "system", content: systemPrompt.prompt },
@@ -1461,7 +1501,7 @@ export function createProviderChatRequestBody(
     model,
   };
 
-  applyChatMaxTokens(settings, body);
+  applyChatMaxTokens(settings, body, model);
   applyLocalSamplingParameters(settings, body);
   applyChatStructuredOutput(body, structuredOutput);
 
@@ -1517,7 +1557,7 @@ export function createResponsesRequestBody(
       role: message.role,
     })),
     instructions: systemPrompt.prompt,
-    max_output_tokens: settings.maxTokens,
+    max_output_tokens: resolveThinkingAwareMaxOutputTokens(settings, model),
     model,
     stream,
   };
@@ -1588,6 +1628,11 @@ export function estimateProviderRequestReasoningReserveTokens(settings: Provider
     return thinkingBudget;
   }
 
+  const explicitReasoningBudget = readReasoningMaxTokens(body);
+  if (explicitReasoningBudget) {
+    return explicitReasoningBudget;
+  }
+
   const googleThinkingBudget = readGoogleThinkingBudget(body.extra_body);
   if (googleThinkingBudget) {
     return googleThinkingBudget;
@@ -1617,8 +1662,9 @@ function applyContextWindowPreflightToBody(settings: ProviderSettings, body: Rec
   const manualMaxOutput = getManualMaxOutputOverride(settings, model);
   const metadataMaxOutput = manualMaxOutput ?? getFallbackMaxOutputTokens(model, settings.provider, boundedContextWindow);
   const thinkingBudget = readNestedNumber(body.thinking, "budget_tokens");
-  const minimumAcceptedOutput = settings.provider === "anthropic" && thinkingBudget
-    ? thinkingBudget + 1024
+  const explicitReasoningBudget = thinkingBudget || readReasoningMaxTokens(body) || readGoogleThinkingBudget(body.extra_body);
+  const minimumAcceptedOutput = explicitReasoningBudget
+    ? explicitReasoningBudget + MIN_REASONING_FINAL_OUTPUT_TOKENS
     : 256;
   const safetyMarginTokens = getContextWindowSafetyMarginTokens(boundedContextWindow);
   const outputCappedByMetadata = Math.max(
@@ -1672,13 +1718,11 @@ function estimateAdditionalProviderReasoningReserveTokens(settings: ProviderSett
 }
 
 function estimateReasoningReserveFromEffort(effort: ReasoningEffort) {
-  const effortReserve: Record<ReasoningEffort, number> = {
-    low: 1024,
-    medium: 4096,
-    high: 16_384,
-  };
+  return getReasoningBudgetForEffort(effort);
+}
 
-  return effortReserve[effort] ?? effortReserve.medium;
+function readReasoningMaxTokens(body: Record<string, unknown>) {
+  return readNestedNumber(body.reasoning, "max_tokens");
 }
 
 function readGoogleThinkingBudget(value: unknown) {
@@ -1846,11 +1890,31 @@ function createAnthropicMessageContent(message: ChatMessage, contextOptions: Con
   ];
 }
 
-function createProviderSystemPromptBuild(settings: ProviderSettings, messages: ChatMessage[], toolBridge?: ProviderToolBridgeOptions) {
-  return buildAgentSystemPromptWithMetadata({ messages, settings, toolBridge });
+function createProviderSystemPromptBuild(
+  settings: ProviderSettings,
+  messages: ChatMessage[],
+  toolBridge?: ProviderToolBridgeOptions,
+  options: { modelAuthoredReasoning?: boolean } = {},
+) {
+  const build = buildAgentSystemPromptWithMetadata({ messages, settings, toolBridge });
+
+  if (!options.modelAuthoredReasoning) {
+    return build;
+  }
+
+  return {
+    ...build,
+    dynamicPrompt: appendPromptSection(build.dynamicPrompt, MODEL_AUTHORED_REASONING_PROTOCOL),
+    prompt: appendPromptSection(build.prompt, MODEL_AUTHORED_REASONING_PROTOCOL),
+    tokenEstimate: build.tokenEstimate + estimateTextTokens(MODEL_AUTHORED_REASONING_PROTOCOL),
+  };
 }
 
-function createAnthropicSystemPromptContent(settings: ProviderSettings, messages: ChatMessage[], toolBridge?: ProviderToolBridgeOptions) {
+function createAnthropicSystemPromptContent(
+  settings: ProviderSettings,
+  messages: ChatMessage[],
+  toolBridge?: ProviderToolBridgeOptions,
+) {
   const systemPrompt = createProviderSystemPromptBuild(settings, messages, toolBridge);
   const blocks = [
     createAnthropicSystemTextBlock(systemPrompt.cacheablePrompt, true),
@@ -1858,6 +1922,28 @@ function createAnthropicSystemPromptContent(settings: ProviderSettings, messages
   ].filter((block): block is AnthropicSystemTextBlock => Boolean(block));
 
   return blocks.length > 0 ? blocks : systemPrompt.prompt;
+}
+
+function shouldRequestModelAuthoredReasoningProtocol(
+  settings: ProviderSettings,
+  model: string,
+  structuredOutput?: ProviderStructuredOutputOptions,
+) {
+  if (structuredOutput || !settings.thinking.enabled || !supportsProviderThinking(settings.provider, settings.thinking.effort, model)) {
+    return false;
+  }
+
+  const provider = getModelProvider(settings.provider);
+
+  if (provider.apiStyle === "anthropic-messages" || usesResponsesApi(settings, model)) {
+    return false;
+  }
+
+  return true;
+}
+
+function appendPromptSection(prompt: string, section: string) {
+  return [prompt, section].filter(Boolean).join("\n\n");
 }
 
 function createAnthropicSystemTextBlock(text: string, cacheable: boolean): AnthropicSystemTextBlock | null {
@@ -1947,13 +2033,15 @@ function hashStableText(value: string) {
   return hash.toString(36);
 }
 
-function applyChatMaxTokens(settings: ProviderSettings, body: Record<string, unknown>) {
+function applyChatMaxTokens(settings: ProviderSettings, body: Record<string, unknown>, model: string) {
+  const maxOutputTokens = resolveThinkingAwareMaxOutputTokens(settings, model);
+
   if (usesMaxCompletionTokens(settings.provider)) {
-    body.max_completion_tokens = settings.maxTokens;
+    body.max_completion_tokens = maxOutputTokens;
     return;
   }
 
-  body.max_tokens = settings.maxTokens;
+  body.max_tokens = maxOutputTokens;
 }
 
 function usesMaxCompletionTokens(provider: ModelProviderId) {
@@ -2012,9 +2100,45 @@ function createOpenAiJsonSchemaFormat(structuredOutput: ProviderStructuredOutput
 }
 
 function usesResponsesApi(settings: ProviderSettings, model: string) {
-  const provider = getModelProvider(settings.provider);
+  return settings.provider === "openai" && settings.thinking.enabled && supportsProviderThinking(settings.provider, settings.thinking.effort, model);
+}
 
-  return (settings.provider === "openai" || provider.reasoningMode === "local-responses") && settings.thinking.enabled && supportsProviderThinking(settings.provider, settings.thinking.effort, model);
+function resolveThinkingAwareMaxOutputTokens(settings: ProviderSettings, model: string) {
+  const reasoningBudget = getProviderReasoningBudget(settings, model);
+
+  if (!reasoningBudget) {
+    return settings.maxTokens;
+  }
+
+  return Math.max(settings.maxTokens, reasoningBudget + MIN_REASONING_FINAL_OUTPUT_TOKENS);
+}
+
+function getProviderReasoningBudget(settings: ProviderSettings, model: string) {
+  if (!settings.thinking.enabled || !supportsProviderThinking(settings.provider, settings.thinking.effort, model)) {
+    return 0;
+  }
+
+  if (settings.provider === "google") {
+    return getGoogleThinkingBudget(settings.thinking.effort, model);
+  }
+
+  return getReasoningBudgetForEffort(settings.thinking.effort);
+}
+
+function getReasoningBudgetForEffort(effort: ReasoningEffort) {
+  return REASONING_BUDGET_BY_EFFORT[effort] ?? REASONING_BUDGET_BY_EFFORT.medium;
+}
+
+function getGoogleThinkingBudget(effort: ReasoningEffort, model: string) {
+  const normalizedModel = model.toLowerCase();
+  const requestedBudget = getReasoningBudgetForEffort(effort);
+
+  if (!normalizedModel.startsWith("gemini-2.5")) {
+    return requestedBudget;
+  }
+
+  const maxBudget = normalizedModel.includes("pro") ? 32_768 : 24_576;
+  return Math.min(requestedBudget, maxBudget);
 }
 
 function createAnthropicThinkingConfig(settings: ProviderSettings, model: string) {
@@ -2024,12 +2148,13 @@ function createAnthropicThinkingConfig(settings: ProviderSettings, model: string
 
   if (usesAnthropicAdaptiveThinking(model)) {
     return {
-      maxTokens: settings.maxTokens,
+      maxTokens: resolveThinkingAwareMaxOutputTokens(settings, model),
       outputConfig: {
         effort: mapAnthropicEffort(settings.thinking.effort),
       },
       thinking: {
         type: "adaptive",
+        display: "summarized",
       },
     };
   }
@@ -2037,11 +2162,12 @@ function createAnthropicThinkingConfig(settings: ProviderSettings, model: string
   const budgetTokens = createAnthropicThinkingBudget(settings, model);
 
   return {
-    maxTokens: budgetTokens ? Math.max(settings.maxTokens, budgetTokens + 1024) : settings.maxTokens,
+    maxTokens: budgetTokens ? Math.max(resolveThinkingAwareMaxOutputTokens(settings, model), budgetTokens + MIN_REASONING_FINAL_OUTPUT_TOKENS) : settings.maxTokens,
     thinking: budgetTokens
       ? {
           type: "enabled",
           budget_tokens: budgetTokens,
+          display: "summarized",
         }
       : undefined,
   };
@@ -2061,14 +2187,14 @@ function createAnthropicThinkingBudget(settings: ProviderSettings, model: string
   }
 
   // Anthropic requires `budget_tokens` >= 1024. The Low/Medium/High labels in the
-  // UI need a meaningful gradation, so spread the budget non-linearly:
-  //   Low    1k  — quick, single-pass reasoning
-  //   Medium 4k  — balanced (default)
-  //   High   16k — deep reasoning, multi-step planning
+  // UI map to the shared reasoning budget ladder with a 35k high ceiling:
+  //   Low    4k  - quick but not starved
+  //   Medium 16k - balanced problem solving
+  //   High   35k - deep reasoning for hard coding and planning
   const effortBudget: Record<ReasoningEffort, number> = {
-    low: 1024,
-    medium: 4096,
-    high: 16384,
+    low: REASONING_BUDGET_BY_EFFORT.low,
+    medium: REASONING_BUDGET_BY_EFFORT.medium,
+    high: REASONING_BUDGET_BY_EFFORT.high,
   };
 
   return effortBudget[settings.thinking.effort] ?? effortBudget.medium;
@@ -2104,17 +2230,22 @@ function applyReasoningToRequestBody(settings: ProviderSettings, body: Record<st
   }
 
   if (provider.reasoningMode === "openrouter") {
-    body.reasoning = {
-      effort: mapReasoningEffort(settings.provider, settings.thinking.effort),
+    const reasoning: Record<string, unknown> = {
+      enabled: true,
+      max_tokens: getProviderReasoningBudget(settings, model),
       exclude: false,
     };
+    if (settings.provider === "9router" && isNineRouterCodexModelId(model)) {
+      reasoning.summary = "auto";
+    }
+    body.reasoning = reasoning;
     return;
   }
 
   if (provider.reasoningMode === "google-thinking") {
     body.extra_body = {
       google: {
-        thinking_config: createGoogleThinkingConfig(settings.thinking.effort, model),
+        thinking_config: createGoogleThinkingConfig(settings.thinking.effort, model, getProviderReasoningBudget(settings, model)),
       },
     };
     return;
@@ -2165,23 +2296,18 @@ function applyResponsesReasoningToRequestBody(settings: ProviderSettings, body: 
 
   body.reasoning = {
     effort: mapReasoningEffort(settings.provider, settings.thinking.effort),
+    summary: "auto",
   };
 }
 
-function createGoogleThinkingConfig(effort: ReasoningEffort, model: string) {
+function createGoogleThinkingConfig(effort: ReasoningEffort, model: string, budget = getGoogleThinkingBudget(effort, model)) {
   const normalizedModel = model.toLowerCase();
   const includeThoughts = true;
 
   if (normalizedModel.startsWith("gemini-2.5")) {
-    const thinkingBudgets: Record<ReasoningEffort, number> = {
-      low: 1024,
-      medium: 8192,
-      high: 24576,
-    };
-
     return {
       include_thoughts: includeThoughts,
-      thinking_budget: thinkingBudgets[effort] ?? thinkingBudgets.medium,
+      thinking_budget: budget,
     };
   }
 
@@ -2198,10 +2324,6 @@ function mapGoogleThinkingLevel(effort: ReasoningEffort, _normalizedModel: strin
 function mapReasoningEffort(providerId: ModelProviderId, effort: ReasoningEffort) {
   if (providerId === "deepseek") {
     return effort;
-  }
-
-  if (providerId === "mistral") {
-    return "high";
   }
 
   return effort;
@@ -2276,10 +2398,10 @@ function parseProviderStreamLine(providerId: ModelProviderId, line: string, useR
     return parseAnthropicStreamData(data);
   }
 
-  return parseOpenAiCompatibleStreamData(data);
+  return parseOpenAiCompatibleStreamData(data, providerId);
 }
 
-function parseOpenAiCompatibleStreamData(data: string): ProviderStreamDelta {
+function parseOpenAiCompatibleStreamData(data: string, providerId: ModelProviderId): ProviderStreamDelta {
   let payload: ProviderStreamChunk;
 
   try {
@@ -2290,6 +2412,10 @@ function parseOpenAiCompatibleStreamData(data: string): ProviderStreamDelta {
 
   if (payload.error?.message) {
     throw new Error(payload.error.message);
+  }
+
+  if (!payload.choices?.length && looksLikeResponsesStreamPayload(payload)) {
+    return parseResponsesStreamData(data, providerId);
   }
 
   const choice = payload.choices?.[0];
@@ -2303,6 +2429,20 @@ function parseOpenAiCompatibleStreamData(data: string): ProviderStreamDelta {
     toolCallDeltas: parseOpenAiCompatibleStreamToolCallDeltas(payload),
     usage: normalizeProviderUsage(payload.usage),
   };
+}
+
+function looksLikeResponsesStreamPayload(payload: unknown): payload is ResponsesStreamEvent {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  const record = payload as Partial<ResponsesStreamEvent>;
+  return (
+    typeof record.type === "string" ||
+    Boolean(record.response) ||
+    Boolean(record.item) ||
+    Boolean(record.part)
+  );
 }
 
 function parseResponsesStreamData(data: string, providerId: ModelProviderId): ProviderStreamDelta {
@@ -2319,17 +2459,24 @@ function parseResponsesStreamData(data: string, providerId: ModelProviderId): Pr
   }
 
   const type = payload.type ?? "";
-  const isTextDelta = type.includes("output_text.delta") || type.includes("text.delta");
-  const isReasoningDelta = type.includes("reasoning") && type.includes("delta");
+  const isReasoningSummaryDelta = type.includes("reasoning_summary_text.delta");
+  const isReasoningSummaryDone = type.includes("reasoning_summary_text.done") || type.includes("reasoning_summary_part.done");
+  const isTextDelta = type.includes("output_text.delta") || (type.includes("text.delta") && !isReasoningSummaryDelta);
+  const isReasoningDelta = type.includes("reasoning") && type.includes("delta") && !isReasoningSummaryDelta;
   const responseSnapshot = payload.response ? extractResponsesOutput(payload.response) : undefined;
   const responseReasoningState = payload.response ? extractResponsesReasoningState(payload.response, providerId) : undefined;
   const toolCallsSnapshot = payload.response ? parseResponsesStreamToolCalls(payload, providerId) : undefined;
   const toolCallDeltas = parseResponsesStreamToolCallDeltas(payload);
+  const reasoningSummarySnapshot =
+    responseSnapshot?.reasoning ||
+    (isReasoningSummaryDone ? payload.text ?? payload.part?.text ?? payload.item?.summary?.map((summary) => summary.text ?? "").join("") : undefined);
 
   return {
     contentDelta: isTextDelta ? payload.delta ?? payload.text ?? "" : "",
     contentSnapshot: responseSnapshot?.content || undefined,
     reasoningDelta: isReasoningDelta ? payload.delta ?? payload.text ?? "" : "",
+    reasoningSummaryDelta: isReasoningSummaryDelta ? payload.delta ?? payload.text ?? "" : "",
+    reasoningSummarySnapshot: reasoningSummarySnapshot || undefined,
     reasoningSnapshot: responseSnapshot?.reasoning || undefined,
     reasoningState: responseReasoningState,
     toolCallDeltas: toolCallDeltas.length > 0 ? toolCallDeltas : undefined,
@@ -2360,6 +2507,7 @@ function parseAnthropicStreamData(data: string): ProviderStreamDelta {
   return {
     contentDelta,
     reasoningDelta,
+    reasoningSummaryDelta: reasoningDelta,
     reasoningStateEntries,
     toolCallDeltas: toolCallDelta ? [toolCallDelta] : undefined,
     usage: normalizeAnthropicUsage(payload.usage ?? payload.message?.usage),
@@ -2574,6 +2722,23 @@ function createStreamTextFingerprint(value: string) {
 
 function limitReasoningText(reasoning: string) {
   return reasoning.length > MAX_STREAM_REASONING_CHARS ? reasoning.slice(-MAX_STREAM_REASONING_CHARS) : reasoning;
+}
+
+function sanitizeProviderReasoningSummary(summary: string | undefined) {
+  const cleaned = cleanInlineText(summary ?? "")
+    .replace(/^(?:reasoning|thinking|summary|analysis)\s*[:.-]\s*/i, "")
+    .trim();
+
+  if (
+    !cleaned ||
+    /^(?:private|secret|hidden)$/i.test(cleaned) ||
+    /<\s*(?:analysis|reasoning|thinking|thought|scratchpad)\b/i.test(cleaned) ||
+    /\bprivate (?:reasoning|scratchpad|notes?)\b/i.test(cleaned)
+  ) {
+    return "";
+  }
+
+  return cleaned.length <= MAX_VISIBLE_REASONING_CHARS ? cleaned : `${cleaned.slice(0, MAX_VISIBLE_REASONING_CHARS - 1).trimEnd()}...`;
 }
 
 function mergeReasoningStateEntries(existing: ProviderReasoningEntry[], next: ProviderReasoningEntry[] | undefined) {
@@ -2817,12 +2982,12 @@ function extractResponsesOutput(payload: ResponsesApiResponse) {
 }
 
 /**
- * Streaming-aware wrapper around `extractInlineThinking`. Pass `final=true`
+ * Streaming-aware wrapper around `extractInternalReasoningTags`. Pass `final=true`
  * for completed payloads (non-streaming responses) so any trailing tag-prefix
  * is released rather than buffered.
  */
 function separateInlineThinking(value: string, options: { final?: boolean } = {}) {
-  const { content, reasoning, pendingPrefix } = extractInlineThinking(value, { final: options.final });
+  const { content, reasoning, pendingPrefix } = extractInternalReasoningTags(value, { final: options.final });
   return { content, reasoning, pendingPrefix };
 }
 
@@ -2968,7 +3133,7 @@ function normalizeModelContextLength(value: unknown) {
 function extractReasoningText(
   delta:
     | {
-        reasoning?: string;
+        reasoning?: unknown;
         reasoning_content?: string;
         reasoning_details?: ProviderReasoningDetail[];
         thinking?: string;
@@ -2979,13 +3144,13 @@ function extractReasoningText(
     return "";
   }
 
-  return firstReasoningText(delta.reasoning, delta.reasoning_content, delta.thinking, extractReasoningDetailsText(delta.reasoning_details));
+  return firstReasoningText(extractReasoningUnknown(delta.reasoning), delta.reasoning_content, delta.thinking, extractReasoningDetailsText(delta.reasoning_details));
 }
 
 function extractProviderMessageReasoningState(
   message:
     | {
-        reasoning?: string;
+        reasoning?: unknown;
         reasoning_content?: string;
         reasoning_details?: ProviderReasoningDetail[];
         thinking?: string;
@@ -3006,7 +3171,7 @@ function extractProviderMessageReasoningState(
 function extractProviderReasoningEntries(
   delta:
     | {
-        reasoning?: string;
+        reasoning?: unknown;
         reasoning_content?: string;
         reasoning_details?: ProviderReasoningDetail[];
         thinking?: string;
@@ -3034,6 +3199,11 @@ function extractProviderReasoningEntries(
   }
 
   if (typeof delta.reasoning === "string" && delta.reasoning) {
+    entries.push({
+      type: "reasoning",
+      value: delta.reasoning,
+    });
+  } else if (delta.reasoning !== undefined && delta.reasoning !== null) {
     entries.push({
       type: "reasoning",
       value: delta.reasoning,
@@ -3106,6 +3276,14 @@ function extractAnthropicReasoningState(payload: AnthropicMessageResponse, provi
   return createProviderReasoningState(provider, "anthropic-thinking", entries);
 }
 
+function extractAnthropicVisibleThinkingSummary(payload: AnthropicMessageResponse) {
+  return (payload.content ?? [])
+    .filter((block) => block.type === "thinking")
+    .map((block) => block.thinking ?? "")
+    .filter(Boolean)
+    .join("\n");
+}
+
 function createAnthropicStreamReasoningEntries(payload: AnthropicStreamChunk): ProviderReasoningEntry[] {
   const entries: ProviderReasoningEntry[] = [];
 
@@ -3154,8 +3332,36 @@ function extractReasoningDetailsText(details: ProviderReasoningDetail[] | undefi
     .join("");
 }
 
-function firstReasoningText(...parts: Array<string | undefined>) {
-  return parts.find((part) => typeof part === "string" && part.length > 0) ?? "";
+function extractReasoningUnknown(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(extractReasoningUnknown).filter(Boolean).join("");
+  }
+
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  const record = value as Record<string, unknown>;
+  const summary = Array.isArray(record.summary)
+    ? record.summary.map(extractReasoningUnknown).filter(Boolean).join("")
+    : extractReasoningUnknown(record.summary);
+
+  return firstReasoningText(
+    record.text,
+    summary,
+    record.content,
+    record.reasoning_content,
+    record.thinking,
+    record.reasoning,
+  );
+}
+
+function firstReasoningText(...parts: Array<unknown>) {
+  return parts.find((part) => typeof part === "string" && part.length > 0) as string | undefined ?? "";
 }
 
 function mergeReasoningTextParts(...parts: string[]) {

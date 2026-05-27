@@ -24,7 +24,7 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::ipc::Channel;
+use tauri::{ipc::Channel, path::BaseDirectory, Manager};
 use uuid::Uuid;
 
 const MCP_DATABASE_STORAGE_KEY: &str = "mcp-servers.v1";
@@ -36,6 +36,7 @@ const MCP_HTTP_CONNECT_TIMEOUT_SECS: u64 = 8;
 const MCP_HTTP_TIMEOUT_SECS: u64 = 30;
 const MCP_STDIO_TIMEOUT_SECS: u64 = 90;
 const MCP_STDIO_SHUTDOWN_TIMEOUT_MS: u64 = 1_200;
+const MCP_STDIO_PROGRESS_MIN_INTERVAL_MS: u64 = 400;
 const MCP_MAX_SERVERS: usize = 50;
 const MCP_MAX_TOOL_LIST_PAGES: usize = 8;
 const MCP_MAX_TOOLS_PER_SERVER: usize = 200;
@@ -47,6 +48,7 @@ const MCP_MAX_STDIO_ENV: usize = 80;
 const MCP_REGISTRY_BASE_URL: &str = "https://registry.modelcontextprotocol.io/v0.1/servers";
 const MCP_REGISTRY_DEFAULT_RESULTS: usize = 12;
 const MCP_REGISTRY_MAX_RESULTS: usize = 24;
+const LINKEDIN_MCP_SERVER_RELATIVE_PATH: &str = "plugins/linkedin/scripts/linkedin-mcp-server.mjs";
 const USER_AGENT: &str = "GilbertCodex/0.5 (desktop MCP)";
 
 #[derive(Default)]
@@ -516,6 +518,7 @@ pub fn mcp_save_server(
     }
 
     normalize_database(&mut database);
+    apply_first_party_mcp_defaults(&app, &mut database);
     save_database(&app, &database)?;
     reset_cached_stdio_session(state.inner(), &server_id);
 
@@ -587,10 +590,11 @@ async fn run_mcp_test_server(
     progress: Option<McpProgressSender>,
 ) -> Result<McpServerTestResponse, String> {
     let id = request.id.as_ref().and_then(|id| normalize_optional_id(id));
-    let record = match id.as_ref() {
+    let mut record = match id.as_ref() {
         Some(server_id) => find_server_record(app, server_id)?,
         None => create_probe_record(&request)?,
     };
+    apply_first_party_mcp_server_defaults(app, &mut record);
 
     send_mcp_progress(
         progress.as_ref(),
@@ -716,10 +720,29 @@ pub async fn mcp_call_tool(
     state: tauri::State<'_, McpState>,
     request: McpCallToolRequest,
 ) -> Result<McpToolCallResponse, String> {
+    run_mcp_call_tool(&app, state.inner(), request, None).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn mcp_call_tool_stream(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, McpState>,
+    request: McpCallToolRequest,
+    on_event: Channel<McpServerProgressEvent>,
+) -> Result<McpToolCallResponse, String> {
+    run_mcp_call_tool(&app, state.inner(), request, Some(Arc::new(on_event))).await
+}
+
+async fn run_mcp_call_tool(
+    app: &tauri::AppHandle,
+    state: &McpState,
+    request: McpCallToolRequest,
+    progress: Option<McpProgressSender>,
+) -> Result<McpToolCallResponse, String> {
     let server_id = normalize_id(&request.server_id, "MCP server id")?;
     let requested_tool_name = normalize_tool_name(&request.tool_name)?;
     let arguments = normalize_tool_arguments(request.arguments)?;
-    let record = find_server_record(&app, &server_id)?;
+    let record = find_server_record(app, &server_id)?;
     let tool_name = resolve_mcp_tool_name(&record, &requested_tool_name);
     let arguments = normalize_mcp_tool_arguments_for_server(&record, &tool_name, arguments);
 
@@ -727,13 +750,28 @@ pub async fn mcp_call_tool(
         return Err(format!("MCP server {} is disabled.", record.name));
     }
 
-    let raw_result = call_server_tool(
+    send_mcp_progress(
+        progress.as_ref(),
+        "started",
+        format!("Calling `{}` on {}.", tool_name, record.name.trim()),
+        None,
+    );
+
+    let raw_result = match call_server_tool(
         &record,
-        state.inner().stdio_sessions.clone(),
+        state.stdio_sessions.clone(),
         &tool_name,
         arguments.clone(),
+        progress.clone(),
     )
-    .await?;
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            send_mcp_progress(progress.as_ref(), "error", error.clone(), None);
+            return Err(error);
+        }
+    };
     let visible_result = sanitize_mcp_visible_value(&raw_result);
     let structured_content = visible_result.get("structuredContent").cloned();
     let is_error = visible_result
@@ -748,17 +786,20 @@ pub async fn mcp_call_tool(
         tools: record.tools.clone(),
     };
     let (_state_response, server) =
-        update_server_after_probe(&app, state.inner(), &server_id, &probe, None)?;
+        update_server_after_probe(app, state, &server_id, &probe, None)?;
     let server = maybe_persist_firebase_project_directory(
-        &app,
-        state.inner(),
-        &server_id,
-        &record,
-        &tool_name,
-        &arguments,
-        is_error,
-        server,
+        app, state, &server_id, &record, &tool_name, &arguments, is_error, server,
     )?;
+    send_mcp_progress(
+        progress.as_ref(),
+        if is_error { "error" } else { "finished" },
+        if is_error {
+            format!("MCP tool `{}` reported an error.", tool_name)
+        } else {
+            format!("MCP tool `{}` finished.", tool_name)
+        },
+        None,
+    );
 
     Ok(McpToolCallResponse {
         content,
@@ -1084,7 +1125,9 @@ fn load_database(app: &tauri::AppHandle) -> Result<McpDatabase, String> {
     let namespace = auth::current_user_storage_namespace(app)?;
 
     if let Some(content) = storage::read_value(app, &namespace, MCP_DATABASE_STORAGE_KEY)? {
-        return parse_database_content(&content);
+        let mut database = parse_database_content(&content)?;
+        apply_first_party_mcp_defaults(app, &mut database);
+        return Ok(database);
     }
 
     Ok(fresh_database())
@@ -1164,6 +1207,32 @@ fn normalize_database(database: &mut McpDatabase) {
 
     database.servers.retain(has_valid_record_target);
     dedupe_servers_by_target(database);
+}
+
+fn apply_first_party_mcp_defaults(app: &tauri::AppHandle, database: &mut McpDatabase) {
+    for server in &mut database.servers {
+        apply_first_party_mcp_server_defaults(app, server);
+    }
+}
+
+fn apply_first_party_mcp_server_defaults(app: &tauri::AppHandle, server: &mut McpServerRecord) {
+    if server.transport != MCP_TRANSPORT_STDIO
+        || !is_linkedin_local_mcp_server(server.command.as_deref(), &server.args)
+        || server
+            .working_directory
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some()
+    {
+        return;
+    }
+
+    if let Some(root) =
+        resolve_first_party_mcp_working_directory(Some(app), LINKEDIN_MCP_SERVER_RELATIVE_PATH)
+    {
+        server.working_directory = Some(root.to_string_lossy().to_string());
+    }
 }
 
 fn create_connection_state(database: &McpDatabase) -> McpConnectionState {
@@ -1501,6 +1570,7 @@ async fn call_server_tool(
     stdio_sessions: StdioSessionCache,
     tool_name: &str,
     arguments: Value,
+    progress: Option<McpProgressSender>,
 ) -> Result<Value, String> {
     if is_firebase_mcp_server(record) && is_firebase_mcp_login_tool(tool_name) {
         return Ok(firebase_mcp_login_guidance());
@@ -1510,14 +1580,35 @@ async fn call_server_tool(
         let record = record.clone();
         let tool_name = tool_name.to_string();
         return tauri::async_runtime::spawn_blocking(move || {
-            call_stdio_server_tool_persistent(&stdio_sessions, &record, &tool_name, arguments)
+            call_stdio_server_tool_persistent(
+                &stdio_sessions,
+                &record,
+                &tool_name,
+                arguments,
+                progress,
+            )
         })
         .await
         .map_err(|error| format!("MCP stdio task failed: {error}"))?;
     }
 
+    send_mcp_progress(
+        progress.as_ref(),
+        "step",
+        format!(
+            "Connecting to {}.",
+            record.endpoint.as_deref().unwrap_or("MCP endpoint")
+        ),
+        None,
+    );
     let client = mcp_client()?;
     let initialized = initialize_server(&client, record).await?;
+    send_mcp_progress(
+        progress.as_ref(),
+        "step",
+        format!("Invoking `{tool_name}`."),
+        None,
+    );
     let response = mcp_rpc_request(
         &client,
         record,
@@ -1772,12 +1863,13 @@ fn call_stdio_server_tool_persistent(
     record: &McpServerRecord,
     tool_name: &str,
     arguments: Value,
+    progress: Option<McpProgressSender>,
 ) -> Result<Value, String> {
     if is_firebase_mcp_server(record) && is_firebase_mcp_login_tool(tool_name) {
         return Ok(firebase_mcp_login_guidance());
     }
 
-    with_persistent_stdio_session(stdio_sessions, record, None, |entry| {
+    with_persistent_stdio_session(stdio_sessions, record, progress, |entry| {
         stdio_rpc_request(
             &mut entry.session,
             "tools/call",
@@ -2252,6 +2344,55 @@ fn sanitize_stdio_progress_line(line: &str) -> Option<String> {
     Some(truncate_chars(&sanitize_sensitive_mcp_text(trimmed), 1_200))
 }
 
+#[derive(Default)]
+struct StdioProgressThrottle {
+    last_sent_at: Option<Instant>,
+    latest_suppressed: Option<String>,
+    suppressed_count: usize,
+}
+
+fn collect_due_stdio_progress_messages(
+    throttle: &mut StdioProgressThrottle,
+    message: String,
+    now: Instant,
+) -> Vec<String> {
+    let Some(last_sent_at) = throttle.last_sent_at else {
+        throttle.last_sent_at = Some(now);
+        return vec![message];
+    };
+
+    if now.duration_since(last_sent_at) < Duration::from_millis(MCP_STDIO_PROGRESS_MIN_INTERVAL_MS)
+    {
+        throttle.suppressed_count += 1;
+        throttle.latest_suppressed = Some(message);
+        return Vec::new();
+    }
+
+    let mut messages = flush_stdio_progress_throttle(throttle);
+    messages.push(message);
+    throttle.last_sent_at = Some(now);
+    messages
+}
+
+fn flush_stdio_progress_throttle(throttle: &mut StdioProgressThrottle) -> Vec<String> {
+    if throttle.suppressed_count == 0 {
+        return Vec::new();
+    }
+
+    let suffix = throttle
+        .latest_suppressed
+        .take()
+        .map(|latest| format!(" Latest: {latest}"))
+        .unwrap_or_default();
+    let count = throttle.suppressed_count;
+    throttle.suppressed_count = 0;
+
+    vec![format!(
+        "{count} additional MCP stderr update{} suppressed for UI performance.{suffix}",
+        if count == 1 { "" } else { "s" }
+    )]
+}
+
 fn open_stdio_session(
     record: &McpServerRecord,
     progress: Option<McpProgressSender>,
@@ -2356,17 +2497,24 @@ fn open_stdio_session(
     if let Some(stderr) = stderr {
         let progress = progress.clone();
         thread::spawn(move || {
+            let mut progress_throttle = StdioProgressThrottle::default();
             for line in BufReader::new(stderr).lines() {
                 match line {
                     Ok(line) => {
                         if let Some(progress) = progress.as_ref() {
                             if let Some(message) = sanitize_stdio_progress_line(&line) {
-                                send_mcp_progress(
-                                    Some(progress),
-                                    "output",
+                                for message in collect_due_stdio_progress_messages(
+                                    &mut progress_throttle,
                                     message,
-                                    Some("stderr".to_string()),
-                                );
+                                    Instant::now(),
+                                ) {
+                                    send_mcp_progress(
+                                        Some(progress),
+                                        "output",
+                                        message,
+                                        Some("stderr".to_string()),
+                                    );
+                                }
                             }
                         }
 
@@ -2378,6 +2526,17 @@ fn open_stdio_session(
                         let _ = stderr_tx.send(format!("stderr read error: {error}"));
                         break;
                     }
+                }
+            }
+
+            if let Some(progress) = progress.as_ref() {
+                for message in flush_stdio_progress_throttle(&mut progress_throttle) {
+                    send_mcp_progress(
+                        Some(progress),
+                        "output",
+                        message,
+                        Some("stderr".to_string()),
+                    );
                 }
             }
         });
@@ -3819,6 +3978,128 @@ fn normalize_optional_working_directory(value: Option<&str>) -> Option<String> {
     normalize_working_directory(value).ok().flatten()
 }
 
+fn is_linkedin_local_mcp_server(command: Option<&str>, args: &[String]) -> bool {
+    is_node_command(command)
+        && args
+            .iter()
+            .any(|arg| mcp_arg_matches_relative_path(arg, LINKEDIN_MCP_SERVER_RELATIVE_PATH))
+}
+
+fn is_node_command(command: Option<&str>) -> bool {
+    let Some(command) = command.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    let command_name = Path::new(command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(command)
+        .to_ascii_lowercase();
+    let command_name = command_name
+        .strip_suffix(".cmd")
+        .unwrap_or(command_name.as_str());
+    let command_name = command_name.strip_suffix(".exe").unwrap_or(command_name);
+
+    command_name == "node"
+}
+
+fn mcp_arg_matches_relative_path(arg: &str, relative_path: &str) -> bool {
+    let normalized_arg = normalize_mcp_arg_path(arg);
+    let normalized_relative = normalize_mcp_arg_path(relative_path);
+
+    normalized_arg == normalized_relative
+        || normalized_arg.ends_with(&format!("/{normalized_relative}"))
+}
+
+fn normalize_mcp_arg_path(value: &str) -> String {
+    let normalized = value.trim().replace('\\', "/");
+    normalized
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_ascii_lowercase()
+}
+
+fn resolve_first_party_mcp_working_directory(
+    app: Option<&tauri::AppHandle>,
+    relative_file: &str,
+) -> Option<PathBuf> {
+    first_party_mcp_working_directory_from_roots(
+        relative_file,
+        first_party_mcp_working_directory_candidates(app),
+    )
+}
+
+fn first_party_mcp_working_directory_from_roots(
+    relative_file: &str,
+    roots: Vec<PathBuf>,
+) -> Option<PathBuf> {
+    let relative_path = forward_slash_path(relative_file);
+    let mut seen = HashSet::new();
+
+    for root in roots {
+        let root_key = root.to_string_lossy().to_ascii_lowercase();
+
+        if !seen.insert(root_key) {
+            continue;
+        }
+
+        if root.join(&relative_path).is_file() {
+            return Some(root.canonicalize().unwrap_or(root));
+        }
+    }
+
+    None
+}
+
+fn first_party_mcp_working_directory_candidates(app: Option<&tauri::AppHandle>) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    if let Some(app) = app {
+        if let Ok(resource_server) = app
+            .path()
+            .resolve(LINKEDIN_MCP_SERVER_RELATIVE_PATH, BaseDirectory::Resource)
+        {
+            if resource_server.is_file() {
+                if let Some(root) = root_from_linkedin_mcp_server_path(&resource_server) {
+                    roots.push(root);
+                }
+            }
+        }
+    }
+
+    if let Ok(current_dir) = env::current_dir() {
+        roots.push(current_dir.join("resources"));
+        roots.push(current_dir.clone());
+
+        if let Some(parent) = current_dir.parent() {
+            roots.push(parent.to_path_buf());
+            roots.push(parent.join("resources"));
+        }
+    }
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    roots.push(manifest_dir.to_path_buf());
+    if let Some(parent) = manifest_dir.parent() {
+        roots.push(parent.to_path_buf());
+    }
+
+    if let Ok(exe_path) = env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            roots.push(exe_dir.to_path_buf());
+            roots.push(exe_dir.join("resources"));
+        }
+    }
+
+    roots
+}
+
+fn root_from_linkedin_mcp_server_path(path: &Path) -> Option<PathBuf> {
+    Some(path.parent()?.parent()?.parent()?.parent()?.to_path_buf())
+}
+
+fn forward_slash_path(value: &str) -> PathBuf {
+    value.split('/').collect()
+}
+
 fn normalize_server_name(value: &str) -> Result<String, String> {
     let name = value.trim();
 
@@ -4093,6 +4374,91 @@ mod tests {
 
     fn node_available() -> bool {
         Command::new("node").arg("--version").output().is_ok()
+    }
+
+    #[test]
+    fn detects_linkedin_local_mcp_server_path() {
+        let args = vec!["./plugins/linkedin/scripts/linkedin-mcp-server.mjs".to_string()];
+
+        assert!(is_linkedin_local_mcp_server(Some("node"), &args));
+        assert!(is_linkedin_local_mcp_server(Some("node.exe"), &args));
+        assert!(!is_linkedin_local_mcp_server(Some("npx"), &args));
+    }
+
+    #[test]
+    fn stdio_progress_throttle_samples_noisy_stderr() {
+        let mut throttle = StdioProgressThrottle::default();
+        let now = Instant::now();
+
+        assert_eq!(
+            collect_due_stdio_progress_messages(&mut throttle, "line 1".to_string(), now),
+            vec!["line 1".to_string()]
+        );
+        assert!(collect_due_stdio_progress_messages(
+            &mut throttle,
+            "line 2".to_string(),
+            now + Duration::from_millis(100),
+        )
+        .is_empty());
+        assert!(collect_due_stdio_progress_messages(
+            &mut throttle,
+            "line 3".to_string(),
+            now + Duration::from_millis(200),
+        )
+        .is_empty());
+
+        assert_eq!(
+            collect_due_stdio_progress_messages(
+                &mut throttle,
+                "line 4".to_string(),
+                now + Duration::from_millis(MCP_STDIO_PROGRESS_MIN_INTERVAL_MS + 1),
+            ),
+            vec![
+                "2 additional MCP stderr updates suppressed for UI performance. Latest: line 3"
+                    .to_string(),
+                "line 4".to_string(),
+            ]
+        );
+        assert!(flush_stdio_progress_throttle(&mut throttle).is_empty());
+    }
+
+    #[test]
+    fn stdio_progress_throttle_flushes_trailing_summary() {
+        let mut throttle = StdioProgressThrottle::default();
+        let now = Instant::now();
+
+        let _ = collect_due_stdio_progress_messages(&mut throttle, "first".to_string(), now);
+        let _ = collect_due_stdio_progress_messages(
+            &mut throttle,
+            "suppressed".to_string(),
+            now + Duration::from_millis(10),
+        );
+
+        assert_eq!(
+            flush_stdio_progress_throttle(&mut throttle),
+            vec![
+                "1 additional MCP stderr update suppressed for UI performance. Latest: suppressed"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn resolves_first_party_mcp_working_directory_from_repo_root() {
+        let root = env::temp_dir().join(format!("gilbert-linkedin-mcp-root-{}", Uuid::new_v4()));
+        let server_path = root.join("plugins/linkedin/scripts/linkedin-mcp-server.mjs");
+        fs::create_dir_all(server_path.parent().expect("server parent"))
+            .expect("create linkedin mcp server folder");
+        fs::write(&server_path, "process.exit(0);\n").expect("write linkedin mcp server");
+
+        let resolved = first_party_mcp_working_directory_from_roots(
+            LINKEDIN_MCP_SERVER_RELATIVE_PATH,
+            vec![root.join("src-tauri"), root.clone()],
+        )
+        .expect("resolve linkedin mcp root");
+
+        assert_eq!(resolved, root.canonicalize().expect("canonical root"));
+        let _ = fs::remove_dir_all(root);
     }
 
     fn write_echo_stdio_server() -> PathBuf {
@@ -4538,6 +4904,7 @@ rl.on("line", (line) => {
             &record,
             "start_job",
             json!({}),
+            None,
         )
         .expect("start stateful job");
         let job_id = start
@@ -4549,6 +4916,7 @@ rl.on("line", (line) => {
             &record,
             "job_status",
             json!({ "jobId": job_id }),
+            None,
         )
         .expect("read stateful job status");
         let content = format_mcp_tool_result_content(&status);

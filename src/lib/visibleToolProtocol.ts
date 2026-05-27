@@ -3,11 +3,16 @@ const DSML_MARKER_PATTERN = /<\s*\|\s*DSML\s*\|\s*(?:tool_calls|invoke|parameter
 const XML_TOOL_CALL_PATTERN = /<\s*(?:\/?\s*tool_call\b|\/?\s*(?:files_|git_|terminal_|browser_|web_|github_|gmail_|calendar_|bridge_)[\w.-]+\b|\/?\s*arg_(?:key|value)\b)/i;
 const TOOL_CALLS_JSON_PATTERN = /"tool_calls"\s*:\s*\[/i;
 const FENCED_TOOL_CALLS_JSON_PATTERN = /(^|\n)\s{0,3}(`{3,}|~{3,})[^\r\n]*\r?\n[\s\S]*?"tool_calls"\s*:\s*\[[\s\S]*?\r?\n\s{0,3}\2[ \t]*(?=\r?\n|$)/gi;
+const VISIBLE_TOOL_PROTOCOL_MARKER_PATTERN = /<|bridge_tool_call|tool_calls|tool_call/i;
 
 /** Removes model-written tool protocol text from content that may be rendered. */
 export function stripVisibleToolProtocol(content: string) {
   if (!content) {
     return "";
+  }
+
+  if (!VISIBLE_TOOL_PROTOCOL_MARKER_PATTERN.test(content)) {
+    return content.trim();
   }
 
   let next = stripBridgeToolCallSentinels(content)

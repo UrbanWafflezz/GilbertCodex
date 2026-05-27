@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { closeWindow, maximizeWindow, minimizeWindow } from "../../app/windowClient";
+import { closeWindow, maximizeWindow, minimizeWindow, quitApp } from "../../app/windowClient";
 import { useDismissableLayer } from "../../lib/useDismissableLayer";
 import { runTopBarEditCommand } from "./topBarEditCommands";
 import { TopBarMenus, type TopBarMenuAction, type TopBarMenuDefinition } from "./TopBarMenus";
@@ -37,7 +37,7 @@ export function AuthTopBar({ activeMode, hasAccounts, hostPlatform, onModeChange
       file: [
         { checked: activeMode === "create", label: "Create account", onSelect: () => onModeChange("create") },
         { checked: activeMode === "login", disabled: !hasAccounts, label: "Sign in", onSelect: () => onModeChange("login") },
-        { danger: true, label: isMac ? "Quit Gilbert Codex" : "Exit", separatorBefore: true, shortcut: isMac ? "Command+Q" : "Alt+F4", onSelect: closeWindow },
+        { danger: true, label: isMac ? "Quit Gilbert Codex" : "Exit", separatorBefore: true, shortcut: isMac ? "Command+Q" : undefined, onSelect: quitApp },
       ],
       edit: [
         { label: "Undo", shortcut: shortcut("Ctrl+Z"), onSelect: () => runTopBarEditCommand("undo") },
@@ -78,7 +78,10 @@ export function AuthTopBar({ activeMode, hasAccounts, hostPlatform, onModeChange
       }
 
       const key = event.key.toLowerCase();
-      if (key === "q" || key === "w") {
+      if (key === "q") {
+        event.preventDefault();
+        void quitApp();
+      } else if (key === "w") {
         event.preventDefault();
         void closeWindow();
       }

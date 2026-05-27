@@ -80,7 +80,10 @@ export interface ComputerGitStatus {
   headSha?: string;
   remoteUrl?: string;
   repositoryRoot?: string;
+  stagedFiles?: number;
   upstream?: string;
+  unstagedFiles?: number;
+  untrackedFiles?: number;
 }
 
 export interface ComputerGitActionResult {
@@ -112,7 +115,10 @@ export interface ComputerGitChangedFile {
   diffTruncated?: boolean;
   oldPath?: string;
   path: string;
+  staged?: boolean;
   status: string;
+  unstaged?: boolean;
+  untracked?: boolean;
 }
 
 export interface ComputerGitDiffLine {

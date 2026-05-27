@@ -3,6 +3,7 @@ import type { MutableRefObject, SetStateAction } from "react";
 import type { LocalSubagentResult, LocalSubagentTask } from "../../../localWorkspace/localToolRuntimeDisabled";
 import type { ContextCompactionNotice, ContextWindowUsage, compactMessagesForContext } from "../../../lib/contextWindow";
 import type { createMessage as createMessageFn } from "../../../lib/chatUtils";
+import { mergeVisibleReasoningSummaries } from "../../../lib/reasoningSummary";
 import type { sendProviderMessage, streamProviderMessage } from "../../../services/modelProviderClient";
 import type { ChatMessage, ChatProgressItem, ChatSummary } from "../../../types/chat";
 import type { ProviderSettings } from "../../../types/settings";
@@ -272,7 +273,6 @@ export function createEmptyResponseRetrySettings(deps: ProviderStreamingDeps, se
       thinking: {
         ...settings.thinking,
         enabled: false,
-        effort: "low",
       },
     };
   }
@@ -336,8 +336,7 @@ export function preserveVisibleResponseThinking(deps: ProviderStreamingDeps, pre
 
     return {
       ...nextMessage,
-      reasoning: undefined,
-      responseThinking: nextMessage.responseThinking ?? previousMessage.responseThinking,
+      reasoning: mergeVisibleReasoningSummaries(previousMessage.reasoning, nextMessage.reasoning) || undefined,
       workTrace: mergeMessageWorkTrace(previousMessage, nextMessage),
     };
   }

@@ -15,6 +15,16 @@ use tauri::{AppHandle, Manager};
 const AGENT_RUNS_STORAGE_KEY: &str = "agent-runs.v1";
 const MAX_AGENT_RUN_HISTORY: usize = 200;
 
+async fn run_agent_runs_worker<T, F>(label: &'static str, task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| format!("{label} worker stopped unexpectedly: {error}"))?
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentApprovalRecord {
@@ -94,30 +104,38 @@ pub struct AgentRunRecord {
 }
 
 #[tauri::command]
-pub fn agent_runs_list(app: AppHandle) -> Result<Vec<AgentRunRecord>, String> {
-    load_agent_runs(&app)
+pub async fn agent_runs_list(app: AppHandle) -> Result<Vec<AgentRunRecord>, String> {
+    run_agent_runs_worker("Agent runs load", move || load_agent_runs(&app)).await
 }
 
 #[tauri::command]
-pub fn agent_run_save(app: AppHandle, run: AgentRunRecord) -> Result<AgentRunRecord, String> {
-    let namespace = auth::current_user_storage_namespace(&app)?;
-    save_agent_run_typed(&app, &namespace, &run)?;
-    prune_typed_agent_runs(&app, &namespace)?;
-    Ok(run)
-}
-
-#[tauri::command]
-pub fn agent_run_delete(app: AppHandle, id: String) -> Result<(), String> {
-    let namespace = auth::current_user_storage_namespace(&app)?;
-    storage::with_serialized_database_write(&app, "agent run delete", |connection| {
-        connection
-            .execute(
-                "DELETE FROM agent_runs WHERE namespace = ?1 AND run_id = ?2",
-                params![namespace, id],
-            )
-            .map(|_| ())
-            .map_err(|error| format!("Failed to delete agent run from Gilbert Database: {error}"))
+pub async fn agent_run_save(app: AppHandle, run: AgentRunRecord) -> Result<AgentRunRecord, String> {
+    run_agent_runs_worker("Agent run save", move || {
+        let namespace = auth::current_user_storage_namespace(&app)?;
+        save_agent_run_typed(&app, &namespace, &run)?;
+        prune_typed_agent_runs(&app, &namespace)?;
+        Ok(run)
     })
+    .await
+}
+
+#[tauri::command]
+pub async fn agent_run_delete(app: AppHandle, id: String) -> Result<(), String> {
+    run_agent_runs_worker("Agent run delete", move || {
+        let namespace = auth::current_user_storage_namespace(&app)?;
+        storage::with_serialized_database_write(&app, "agent run delete", |connection| {
+            connection
+                .execute(
+                    "DELETE FROM agent_runs WHERE namespace = ?1 AND run_id = ?2",
+                    params![namespace, id],
+                )
+                .map(|_| ())
+                .map_err(|error| {
+                    format!("Failed to delete agent run from Gilbert Database: {error}")
+                })
+        })
+    })
+    .await
 }
 
 fn load_agent_runs(app: &AppHandle) -> Result<Vec<AgentRunRecord>, String> {

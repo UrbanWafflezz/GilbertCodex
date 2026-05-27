@@ -23,7 +23,7 @@ export function getEffectiveMaxOutputTokens(settings: ProviderSettings, contextW
   return getAutomaticHostedMaxOutputTokens(settings, contextWindowTokens);
 }
 
-export function getAutomaticHostedMaxOutputTokens(settings: Pick<ProviderSettings, "model" | "thinking">, contextWindowTokens = DEFAULT_CONTEXT_WINDOW_TOKENS) {
+export function getAutomaticHostedMaxOutputTokens(settings: Pick<ProviderSettings, "model">, contextWindowTokens = DEFAULT_CONTEXT_WINDOW_TOKENS) {
   const contextBudget = getStandardOutputBudget(contextWindowTokens);
   const modelLimit = inferModelOutputLimit(settings.model);
 

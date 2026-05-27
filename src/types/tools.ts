@@ -20,7 +20,6 @@ export type ToolRegistryId =
   | "sourceControl"
   | "sqlTools"
   | "terminal"
-  | "thinking"
   | "testingTools"
   | "typescriptTools"
   | "webSearch"
@@ -29,7 +28,7 @@ export type ToolRegistryId =
 
 export type ToolRegistrySettings = Record<ToolRegistryId, boolean>;
 
-/** New installs keep the core provider, planning/thinking UI, local workspace, image generation, MCP, web search, terminal, and preview tools enabled. */
+/** New installs keep the core provider, planning, local workspace, image generation, MCP, web search, terminal, and preview tools enabled. */
 export const DEFAULT_TOOL_REGISTRY_SETTINGS: ToolRegistrySettings = {
   browserPreview: true,
   codeEdit: true,
@@ -51,7 +50,6 @@ export const DEFAULT_TOOL_REGISTRY_SETTINGS: ToolRegistrySettings = {
   sourceControl: true,
   sqlTools: false,
   terminal: true,
-  thinking: true,
   testingTools: false,
   typescriptTools: false,
   webSearch: true,
@@ -75,7 +73,6 @@ const ACTIVE_TOOL_REGISTRY_IDS = new Set<ToolRegistryId>([
   "provider",
   "sourceControl",
   "terminal",
-  "thinking",
   "webSearch",
 ]);
 

@@ -138,8 +138,13 @@ describe("createRuntimeToolPrompt", () => {
     expect(prompt).toContain("use the closest attached tool in the same family");
     expect(prompt).toContain("including several changes in a single file");
     expect(prompt).toContain("Use files_edit_many as the default");
+    expect(prompt).toContain("Keep files_edit_many edits narrow");
+    expect(prompt).toContain("patch the smallest current block");
     expect(prompt).toContain("Use replace_range only with line numbers from a fresh read");
     expect(prompt).toContain("endColumn is exclusive");
+    expect(prompt).toContain("make oldText unique");
+    expect(prompt).toContain("matched multiple times");
+    expect(prompt).toContain("do not set replaceAll unless every occurrence should change");
     expect(prompt).toContain("do not stop: re-read the current slice");
     expect(prompt).toContain("deliberate full-file rewrites");
     expect(prompt).not.toContain("create_files");
@@ -274,6 +279,9 @@ describe("createRuntimeToolPrompt", () => {
     expect(prompt).toContain("plugin, connector, hosted service, or marketplace app");
     expect(prompt).toContain("inspect the configured MCP servers before denying access");
     expect(prompt).toContain("If mcp_list_servers shows no enabled configured server");
+    expect(prompt).toContain("For GoDaddy + Firebase Hosting workflows");
+    expect(prompt).toContain("it cannot buy domains, update DNS records");
+    expect(prompt).toContain("separate GoDaddy Domains API integration");
     expect(prompt).toContain("same serverId and returned job/deploy id");
     expect(prompt).toContain("instead of switching servers or assuming a file edit/write is required");
   });

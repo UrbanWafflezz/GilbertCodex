@@ -82,6 +82,40 @@ describe("automationScheduler", () => {
     expect(scope.maxToolCalls).toBe(task.runLimits.maxToolCalls);
   });
 
+  it("keeps project, selected MCP tools, and installed skills in prompts and scoped tool access", () => {
+    const task = createAutomationTaskFromDraft({
+      capabilityScope: {
+        autonomyLevel: "scoped",
+        capabilities: [],
+        mcpServers: [{
+          serverId: "firebase",
+          serverName: "Firebase",
+          toolNames: ["firebase_deploy_status"],
+        }],
+        skills: [{
+          id: "review",
+          name: "Code Review",
+          trigger: "$review",
+        }],
+      },
+      projectName: "Website",
+      prompt: "Check my deploy status.",
+      title: "Deploy watcher",
+    }, "2026-05-21T10:00:00.000Z");
+    const scope = createAutomationToolScope(task);
+    const runPrompt = createAutomationRunPrompt(task);
+
+    expect(task.projectName).toBe("Website");
+    expect(scope.allowedToolIds).toContain("mcp_call_tool");
+    expect(scope.allowedFamilies).toContain("mcp");
+    expect(scope.allowedMcpServers).toEqual([{ serverId: "firebase", toolNames: ["firebase_deploy_status"] }]);
+    expect(createAutomationRuntimeToolOverrides(task).mcpServers).toBe(true);
+    expect(runPrompt).toContain("Project: Website");
+    expect(runPrompt).toContain("serverId: firebase");
+    expect(runPrompt).toContain("firebase_deploy_status");
+    expect(runPrompt).toContain("Installed skill Code Review ($review)");
+  });
+
   it("keeps a task-specific provider and model on the normalized task", () => {
     const task = createAutomationTaskFromDraft({
       model: "gpt-5.5",

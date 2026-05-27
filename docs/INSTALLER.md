@@ -66,7 +66,7 @@ plugins/
 
 `src/toolBridge/index.ts` is required for release builds. `plugins/` and `.agents/plugins/` are optional, but if they exist in the private overlay they are copied into the build workspace before the installer is compiled. These files remain absent from the public GitHub tree.
 
-The release workflow does not require GitHub OAuth, Google OAuth, support-link, provider-key, or other app-user credentials. GitHub and Google OAuth setup is entered by each user in Settings, provider keys stay in local app storage, and the public Cash App funding link is source-level public metadata. Other optional funding-link overrides remain local build configuration only. Do not add app-user OAuth client secrets, tokens, downloaded Google credential JSON, provider keys, or private account data to release variables.
+The release workflow does not require GitHub OAuth, Google OAuth, provider-key, or other app-user credentials. GitHub and Google OAuth setup is entered by each user in Settings, and provider keys stay in local app storage. Do not add app-user OAuth client secrets, tokens, downloaded Google credential JSON, provider keys, or private account data to release variables.
 
 The current macOS local bundle config uses ad-hoc signing (`signingIdentity = "-"`) so builds can still be inspected without Apple credentials. The GitHub Release workflow publishes ad-hoc signed, unnotarized macOS artifacts until a Developer ID Application certificate and Apple notarization secrets are available.
 

@@ -15,7 +15,6 @@ import {
 import {
   AlertTriangle,
   ArrowUp,
-  BrainCircuit,
   Check,
   ChevronDown,
   CloudOff,
@@ -36,6 +35,7 @@ import {
   ShieldCheck,
   Sparkles,
   Square,
+  Target,
   Video,
   Wand2,
   X,
@@ -59,6 +59,10 @@ import { fetchProviderModels } from "../../services/modelProviderClient";
 import { formatWebSearchProviderLabel } from "../../services/webSearchClient";
 import { estimateModelProviderContextWindowUsage, projectDraftOntoProviderUsage } from "../../services/modelProviderUsage";
 import {
+  createProjectGoalContinuePrompt,
+  parseProjectGoalCommandAction,
+} from "../../lib/projectGoals";
+import {
   cancelNativeDictation,
   getNativeDictationAudioLevel,
   isTauriDesktopRuntime,
@@ -81,7 +85,7 @@ import {
 } from "../../localWorkspace/files";
 import type { ChatAttachment, ChatComposerDraft, ChatMessage, ChatSendInput, ChatSummary } from "../../types/chat";
 import type { ComputerGitStatus, LocalPermissionMode, LocalWorkspaceSettings } from "../../types/localWorkspace";
-import type { CreateProjectOptions, ProjectSummary } from "../../types/project";
+import type { CreateProjectOptions, ProjectGoal, ProjectSummary } from "../../types/project";
 import type { AppFollowUpBehavior, ProviderSettings, ThinkingSettings, WebSearchSettings } from "../../types/settings";
 
 type ComposerMenu = "attach" | "context" | "model" | "workspace" | null;
@@ -160,11 +164,18 @@ interface ChatComposerProps {
   onLocalWorkspaceChange: (settings: LocalWorkspaceSettings) => void;
   onModelChange: (model: string, provider: ChatModelOption["provider"]) => void;
   onForkWorktree?: () => void | Promise<void>;
+  onProjectGoalClear: () => void;
+  onProjectGoalComplete: () => void;
+  onProjectGoalCreate: (objective: string, options?: { input?: ChatSendInput; start?: boolean }) => void | Promise<void>;
+  onProjectGoalPause: () => void;
+  onProjectGoalResume: () => void;
+  onProjectGoalUpdate: (objective: string) => void;
   onReviewChanges?: () => void;
   onSelectProject: (project: string) => void;
   onStopGeneration?: () => void;
   onSteerQueuedMessage: (messageId: string, contentOverride?: string) => void;
   onSubmit: (input: ChatSendInput) => void | Promise<void>;
+  projectGoal?: ProjectGoal;
   projects: ProjectSummary[];
   providerSettings: ProviderSettings;
   queuedMessageCount?: number;
@@ -222,6 +233,31 @@ interface ChatResearchMentionTrigger {
   rangeStart: number;
 }
 
+interface SlashCommandState {
+  activeIndex: number;
+  open: boolean;
+  query: string;
+  rangeEnd: number;
+  rangeStart: number;
+}
+
+interface SlashCommandTrigger {
+  query: string;
+  rangeEnd: number;
+  rangeStart: number;
+}
+
+type SlashCommandAction = "clear-goal" | "complete-goal" | "continue-goal" | "insert-goal" | "pause-goal" | "resume-goal";
+
+interface SlashCommandOption {
+  action: SlashCommandAction;
+  command: string;
+  description: string;
+  disabled?: boolean;
+  id: string;
+  title: string;
+}
+
 type ModelProviderDefinition = (typeof MODEL_PROVIDERS)[number];
 type LiveModelCatalogCacheStatus = Extract<LiveModelCatalogStatus, "error" | "ready">;
 
@@ -245,6 +281,13 @@ const CLOSED_SKILL_MENTION_STATE: SkillMentionState = {
   trigger: "$",
 };
 const CLOSED_CHAT_RESEARCH_MENTION_STATE: ChatResearchMentionState = {
+  activeIndex: 0,
+  open: false,
+  query: "",
+  rangeEnd: 0,
+  rangeStart: 0,
+};
+const CLOSED_SLASH_COMMAND_STATE: SlashCommandState = {
   activeIndex: 0,
   open: false,
   query: "",
@@ -284,20 +327,6 @@ function formatComposerRouteTitle(option: ChatModelOption) {
   const source = getModelRouteSourceInfo(option.provider, option.value);
 
   return `${source.sourceLabel}: ${option.value}`;
-}
-
-function formatComposerReasoningLabel(settings: ThinkingSettings) {
-  if (!settings.enabled) {
-    return "Reasoning off";
-  }
-
-  const effortLabel =
-    settings.effort === "low" ? "Low" :
-    settings.effort === "medium" ? "Medium" :
-    settings.effort === "high" ? "High" :
-    settings.effort;
-
-  return `${effortLabel} reasoning`;
 }
 
 function shouldRequireSubmitChord(content: string) {
@@ -350,6 +379,38 @@ export function shouldRefreshComposerGitStatus(root: string, _scope: LocalWorksp
 
 export function shouldShowComposerGitStatusLoading(status: ComputerGitStatus | null, loading: boolean, root: string) {
   return loading || (Boolean(root.trim()) && status === null);
+}
+
+export function getComposerGitStageableFileCount(status: ComputerGitStatus) {
+  if (typeof status.unstagedFiles === "number" || typeof status.untrackedFiles === "number") {
+    return (status.unstagedFiles ?? 0) + (status.untrackedFiles ?? 0);
+  }
+
+  return status.changedFiles;
+}
+
+function formatComposerGitWorktreeSummary(status: ComputerGitStatus) {
+  const stagedFiles = status.stagedFiles ?? 0;
+  const stageableFiles = getComposerGitStageableFileCount(status);
+  const parts = [
+    stagedFiles > 0 ? `${stagedFiles} staged` : "",
+    stageableFiles > 0 ? `${stageableFiles} unstaged` : "",
+  ].filter(Boolean);
+
+  if (parts.length > 0) {
+    return parts.join(" · ");
+  }
+
+  return status.changedFiles === 1 ? "1 changed file" : `${status.changedFiles} changed files`;
+}
+
+function formatComposerGitSyncSummary(status: ComputerGitStatus) {
+  const parts = [
+    status.ahead > 0 ? `${status.ahead} ahead` : "",
+    status.behind > 0 ? `${status.behind} behind` : "",
+  ].filter(Boolean);
+
+  return parts.join(" · ");
 }
 
 function createLiveModelCatalogProviderRequestKey(provider: ModelProviderDefinition, settings: ProviderSettings) {
@@ -421,11 +482,18 @@ function ChatComposerComponent({
   onHeightChange,
   onLocalWorkspaceChange,
   onModelChange,
+  onProjectGoalClear,
+  onProjectGoalComplete,
+  onProjectGoalCreate,
+  onProjectGoalPause,
+  onProjectGoalResume,
+  onProjectGoalUpdate,
   onReviewChanges,
   onSelectProject,
   onStopGeneration,
   onSteerQueuedMessage,
   onSubmit,
+  projectGoal,
   projects,
   providerSettings,
   queuedMessageCount,
@@ -464,11 +532,13 @@ function ChatComposerComponent({
   const deferredMessage = useDeferredValue(contextDraftMessage);
   const [skillMention, setSkillMention] = useState<SkillMentionState>(CLOSED_SKILL_MENTION_STATE);
   const [chatResearchMention, setChatResearchMention] = useState<ChatResearchMentionState>(CLOSED_CHAT_RESEARCH_MENTION_STATE);
+  const [slashCommand, setSlashCommand] = useState<SlashCommandState>(CLOSED_SLASH_COMMAND_STATE);
   const [selectedResearchChatIds, setSelectedResearchChatIds] = useState<string[]>([]);
   const [openMenu, setOpenMenu] = useState<ComposerMenu>(null);
   const [planMode, setPlanMode] = useState<PlanningModeSettings>({
     enabled: false,
   });
+  const [projectGoalError, setProjectGoalError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ComposerAttachmentDraft[]>([]);
   const [liveModelCatalogs, setLiveModelCatalogs] = useState<Partial<Record<ProviderSettings["provider"], ProviderModelMetadata[]>>>({});
   const [liveModelCatalogStatus, setLiveModelCatalogStatus] = useState<Partial<Record<ProviderSettings["provider"], LiveModelCatalogStatus>>>({});
@@ -493,6 +563,15 @@ function ChatComposerComponent({
   const hasPendingAttachments = useMemo(() => attachments.some((attachment) => attachment.status === "loading"), [attachments]);
   const hasFailedAttachments = useMemo(() => attachments.some((attachment) => attachment.status === "error"), [attachments]);
   const canSend = !disabled && (Boolean(message.trim()) || readyAttachments.length > 0) && !hasPendingAttachments && !hasFailedAttachments && !voiceActive;
+  const canUseProjectGoals = !isNoProjectName(chat.project);
+  const slashCommandMatches = useMemo(
+    () => getProjectGoalSlashCommandOptions(slashCommand.query, {
+      canUseProjectGoals,
+      isGenerating,
+      projectGoal,
+    }),
+    [canUseProjectGoals, isGenerating, projectGoal, slashCommand.query],
+  );
   const selectedModel = useMemo(
     () => modelFromValue(model, providerSettings.provider, liveModelCatalogs[providerSettings.provider]),
     [liveModelCatalogs, model, providerSettings.provider],
@@ -555,8 +634,7 @@ function ChatComposerComponent({
   const gitBranchLabel = gitStatus?.available ? gitStatus.branch || "Git" : gitStatusLoading ? "Checking Git" : "No Git";
   const hasGitChangeSummary = Boolean(gitStatus?.available && gitStatus.changedFiles > 0);
   const composerModelLabel = formatComposerRouteLabel(selectedModel);
-  const composerThinkingLabel = formatComposerReasoningLabel(thinking);
-  const composerModelTitle = `${formatComposerRouteTitle(selectedModel)}. ${composerThinkingLabel}.`;
+  const composerModelTitle = formatComposerRouteTitle(selectedModel);
   const workspaceMetaLabel = gitStatus?.available
     ? hasGitChangeSummary
       ? `${gitBranchLabel} · ${gitStatus.changedFiles}`
@@ -565,7 +643,7 @@ function ChatComposerComponent({
       ? localPermissionModeLabel(localWorkspace.permissionMode)
       : "Local off";
   const workspaceButtonLabel = `${isProjectChat || activeRoot ? "Workspace" : "Computer access"}: ${projectLabel}. ${workspaceMetaLabel}.`;
-  const activeModeCount = (thinking.enabled ? 1 : 0) + (webSearch.enabled ? 1 : 0) + (imageGenerationEnabled ? 1 : 0) + (planMode.enabled ? 1 : 0);
+  const activeModeCount = (webSearch.enabled ? 1 : 0) + (imageGenerationEnabled ? 1 : 0) + (planMode.enabled ? 1 : 0);
   const heldQueuedMessageIdSet = useMemo(() => new Set(heldQueuedMessageIds), [heldQueuedMessageIds]);
   const researchChatOptions = useMemo(() => sortChatsByUpdatedAt(chats.filter((candidate) => isPlainResearchChat(candidate, chat.id))), [chat.id, chats]);
   const selectedResearchChats = useMemo(
@@ -991,6 +1069,10 @@ function ChatComposerComponent({
   }, [activeRoot]);
 
   useEffect(() => {
+    setProjectGoalError(null);
+  }, [chat.project, projectGoal?.id]);
+
+  useEffect(() => {
     const composer = composerRef.current;
 
     if (!active || !composer || !onHeightChange) {
@@ -1042,6 +1124,7 @@ function ChatComposerComponent({
     setAttachments(draft?.attachments.map(createDraftFromAttachment) ?? []);
     closeSkillMentionPicker();
     closeChatResearchMentionPicker();
+    closeSlashCommandPicker();
   }, [chat.id]);
 
   useEffect(() => {
@@ -1073,6 +1156,7 @@ function ChatComposerComponent({
     setAttachments(restoreDraft.attachments.map(createDraftFromAttachment));
     closeSkillMentionPicker();
     closeChatResearchMentionPicker();
+    closeSlashCommandPicker();
     cancelPendingDraftChange();
     setContextDraftMessage(restoreDraft.content);
     onDraftChange?.(restoreDraft);
@@ -1082,6 +1166,7 @@ function ChatComposerComponent({
   useEffect(() => {
     setSelectedResearchChatIds([]);
     closeChatResearchMentionPicker();
+    closeSlashCommandPicker();
   }, [chat.id]);
 
   useEffect(() => {
@@ -1462,6 +1547,22 @@ function ChatComposerComponent({
     setAttachments((currentAttachments) => currentAttachments.filter((_, index) => index !== fileIndex));
   }
 
+  function clearSubmittedComposerState(submittingPlanMode: boolean) {
+    setComposerMessage("", { immediate: true, notifyDraft: false });
+    setAttachments([]);
+    setSelectedResearchChatIds([]);
+    if (submittingPlanMode) {
+      setPlanMode({ enabled: false });
+    }
+    closeSkillMentionPicker();
+    closeChatResearchMentionPicker();
+    closeSlashCommandPicker();
+    cancelPendingDraftChange();
+    setContextDraftMessage("");
+    setProjectGoalError(null);
+    onDraftChange?.(null);
+  }
+
   function submitMessage() {
     const content = messageRef.current.trim();
 
@@ -1471,26 +1572,119 @@ function ChatComposerComponent({
 
     const referencedChatIds = resolveComposerResearchChatIds(content, selectedResearchChatIds, researchChatOptions);
     const submittingPlanMode = planMode.enabled;
+    const projectGoalAction = parseProjectGoalCommandAction(content);
 
-    setComposerMessage("", { immediate: true, notifyDraft: false });
-    setAttachments([]);
-    setSelectedResearchChatIds([]);
-    if (submittingPlanMode) {
-      setPlanMode({ enabled: false });
+    if (projectGoalAction !== null) {
+      if (!canUseProjectGoals) {
+        setProjectGoalError("Choose or create a project before starting a Project Goal.");
+        return;
+      }
+
+      if (projectGoalAction.kind === "empty") {
+        setProjectGoalError("Add the goal after /goal or choose a Project Goals command.");
+        return;
+      }
+
+      if (projectGoalAction.kind === "continue") {
+        if (!projectGoal || projectGoal.status !== "active" || disabled || isGenerating) {
+          setProjectGoalError("Start or resume a Project Goal before continuing it.");
+          return;
+        }
+
+        clearSubmittedComposerState(submittingPlanMode);
+        continueProjectGoal(projectGoal);
+        return;
+      }
+
+      if (projectGoalAction.kind === "pause") {
+        if (!projectGoal || projectGoal.status !== "active") {
+          setProjectGoalError("Only active Project Goals can be paused.");
+          return;
+        }
+
+        clearSubmittedComposerState(submittingPlanMode);
+        onProjectGoalPause();
+        return;
+      }
+
+      if (projectGoalAction.kind === "resume") {
+        if (!projectGoal || projectGoal.status === "active") {
+          setProjectGoalError(projectGoal ? "This Project Goal is already active." : "Start a Project Goal before resuming it.");
+          return;
+        }
+
+        clearSubmittedComposerState(submittingPlanMode);
+        onProjectGoalResume();
+        return;
+      }
+
+      if (projectGoalAction.kind === "complete") {
+        if (!projectGoal || projectGoal.status === "complete") {
+          setProjectGoalError(projectGoal ? "This Project Goal is already complete." : "Start a Project Goal before completing it.");
+          return;
+        }
+
+        clearSubmittedComposerState(submittingPlanMode);
+        onProjectGoalComplete();
+        return;
+      }
+
+      if (projectGoalAction.kind === "clear") {
+        if (!projectGoal) {
+          setProjectGoalError("There is no Project Goal to clear.");
+          return;
+        }
+
+        clearSubmittedComposerState(submittingPlanMode);
+        onProjectGoalClear();
+        return;
+      }
     }
-    closeSkillMentionPicker();
-    closeChatResearchMentionPicker();
-    cancelPendingDraftChange();
-    setContextDraftMessage("");
-    onDraftChange?.(null);
-    void onSubmit({
+
+    clearSubmittedComposerState(submittingPlanMode);
+    const sendInput: ChatSendInput = {
       attachments: readyAttachments,
-      content,
+      content: projectGoalAction?.kind === "set" ? projectGoalAction.objective : content,
       followUpBehavior,
       localWorkspace,
       mode: submittingPlanMode ? "plan" : "chat",
       planning: submittingPlanMode ? {} : undefined,
       referencedChatIds: referencedChatIds.length > 0 ? referencedChatIds : undefined,
+      webSearch: {
+        enabled: webSearch.enabled,
+        maxResults: webSearch.maxResults,
+        provider: webSearch.provider,
+      },
+    };
+
+    if (projectGoalAction?.kind === "set") {
+      if (projectGoal) {
+        onProjectGoalUpdate(projectGoalAction.objective);
+        void onSubmit(sendInput);
+        return;
+      }
+
+      void onProjectGoalCreate(projectGoalAction.objective, {
+        input: sendInput,
+        start: true,
+      });
+      return;
+    }
+
+    void onSubmit(sendInput);
+  }
+
+  function continueProjectGoal(goal = projectGoal) {
+    if (!goal || goal.status !== "active" || disabled || isGenerating) {
+      return;
+    }
+
+    void onSubmit({
+      attachments: [],
+      content: createProjectGoalContinuePrompt(goal),
+      followUpBehavior,
+      localWorkspace,
+      mode: "chat",
       webSearch: {
         enabled: webSearch.enabled,
         maxResults: webSearch.maxResults,
@@ -1505,6 +1699,7 @@ function ChatComposerComponent({
     setOpenMenu(null);
     closeSkillMentionPicker();
     closeChatResearchMentionPicker();
+    closeSlashCommandPicker();
     setSelectedResearchChatIds(queuedMessage.researchReferences?.map((reference) => reference.chatId) ?? []);
     skipNextAttachmentDraftEmitRef.current = true;
     setAttachments(restoredAttachments);
@@ -1536,6 +1731,38 @@ function ChatComposerComponent({
   }
 
   function handleTextKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (slashCommand.open) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setSlashCommand((currentState) => ({
+          ...currentState,
+          activeIndex: slashCommandMatches.length > 0 ? (currentState.activeIndex + 1) % slashCommandMatches.length : 0,
+        }));
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setSlashCommand((currentState) => ({
+          ...currentState,
+          activeIndex: slashCommandMatches.length > 0 ? (currentState.activeIndex - 1 + slashCommandMatches.length) % slashCommandMatches.length : 0,
+        }));
+        return;
+      }
+
+      if ((event.key === "Enter" || event.key === "Tab") && slashCommandMatches.length > 0) {
+        event.preventDefault();
+        selectSlashCommand(slashCommandMatches[Math.min(slashCommand.activeIndex, slashCommandMatches.length - 1)]!);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSlashCommandPicker();
+        return;
+      }
+    }
+
     if (skillMention.open) {
       const matches = getSkillMentionMatches(skillMention.query);
 
@@ -1617,6 +1844,9 @@ function ChatComposerComponent({
   function handleMessageChange(event: ChangeEvent<HTMLTextAreaElement>) {
     const nextMessage = event.target.value;
 
+    if (projectGoalError) {
+      setProjectGoalError(null);
+    }
     setComposerMessage(nextMessage);
     syncComposerMentionPickers(nextMessage, event.target.selectionStart ?? nextMessage.length, event.target.selectionEnd ?? event.target.selectionStart ?? nextMessage.length);
   }
@@ -1635,9 +1865,39 @@ function ChatComposerComponent({
     setChatResearchMention(CLOSED_CHAT_RESEARCH_MENTION_STATE);
   }
 
+  function closeSlashCommandPicker() {
+    setSlashCommand(CLOSED_SLASH_COMMAND_STATE);
+  }
+
   function syncComposerMentionPickers(nextMessage: string, selectionStart: number, selectionEnd: number) {
+    syncSlashCommandPicker(nextMessage, selectionStart, selectionEnd);
     syncSkillMentionPicker(nextMessage, selectionStart, selectionEnd);
     syncChatResearchMentionPicker(nextMessage, selectionStart, selectionEnd);
+  }
+
+  function syncSlashCommandPicker(nextMessage: string, selectionStart: number, selectionEnd: number) {
+    if (selectionStart !== selectionEnd) {
+      closeSlashCommandPicker();
+      return;
+    }
+
+    const trigger = findComposerSlashCommandTrigger(nextMessage, selectionStart);
+
+    if (!trigger) {
+      closeSlashCommandPicker();
+      return;
+    }
+
+    setOpenMenu(null);
+    closeSkillMentionPicker();
+    closeChatResearchMentionPicker();
+    setSlashCommand({
+      activeIndex: 0,
+      open: true,
+      query: trigger.query,
+      rangeEnd: trigger.rangeEnd,
+      rangeStart: trigger.rangeStart,
+    });
   }
 
   function syncSkillMentionPicker(nextMessage: string, selectionStart: number, selectionEnd: number) {
@@ -1654,6 +1914,7 @@ function ChatComposerComponent({
     }
 
     setOpenMenu(null);
+    closeSlashCommandPicker();
     closeChatResearchMentionPicker();
     setSkillMention({
       activeIndex: 0,
@@ -1680,6 +1941,7 @@ function ChatComposerComponent({
 
     setOpenMenu(null);
     closeSkillMentionPicker();
+    closeSlashCommandPicker();
     setChatResearchMention({
       activeIndex: 0,
       open: true,
@@ -1687,6 +1949,64 @@ function ChatComposerComponent({
       rangeEnd: trigger.rangeEnd,
       rangeStart: trigger.rangeStart,
     });
+  }
+
+  function insertSlashCommandText(command: string) {
+    if (!slashCommand.open) {
+      return;
+    }
+
+    const currentMessage = messageRef.current;
+    const beforeCommand = currentMessage.slice(0, slashCommand.rangeStart);
+    const afterCommand = currentMessage.slice(slashCommand.rangeEnd).replace(/^\s+/, "");
+    const insertion = `${command} `;
+    const nextMessage = `${beforeCommand}${insertion}${afterCommand}`;
+    const nextCursorPosition = beforeCommand.length + insertion.length;
+
+    setProjectGoalError(null);
+    setComposerMessage(nextMessage, { immediate: true });
+    closeSlashCommandPicker();
+
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(nextCursorPosition, nextCursorPosition);
+    });
+  }
+
+  function selectSlashCommand(option: SlashCommandOption) {
+    if (option.disabled) {
+      return;
+    }
+
+    if (option.action === "insert-goal") {
+      insertSlashCommandText(option.command);
+      return;
+    }
+
+    setProjectGoalError(null);
+    clearSubmittedComposerState(planMode.enabled);
+
+    if (option.action === "continue-goal") {
+      continueProjectGoal(projectGoal);
+      return;
+    }
+
+    if (option.action === "pause-goal") {
+      onProjectGoalPause();
+      return;
+    }
+
+    if (option.action === "resume-goal") {
+      onProjectGoalResume();
+      return;
+    }
+
+    if (option.action === "complete-goal") {
+      onProjectGoalComplete();
+      return;
+    }
+
+    onProjectGoalClear();
   }
 
   function insertSkillMention(skill: PluginSkillOption) {
@@ -2020,8 +2340,8 @@ function ChatComposerComponent({
           id="composer-message-input"
           ref={textareaRef}
           aria-autocomplete="list"
-          aria-controls={skillMention.open ? "composer-skill-mention-picker" : chatResearchMention.open ? "composer-chat-research-picker" : undefined}
-          aria-expanded={skillMention.open || chatResearchMention.open}
+          aria-controls={slashCommand.open ? "composer-slash-command-picker" : skillMention.open ? "composer-skill-mention-picker" : chatResearchMention.open ? "composer-chat-research-picker" : undefined}
+          aria-expanded={slashCommand.open || skillMention.open || chatResearchMention.open}
           placeholder=""
           rows={2}
           defaultValue=""
@@ -2053,11 +2373,17 @@ function ChatComposerComponent({
                 <Wand2 size={13} aria-hidden="true" />
               </span>
             ) : null}
-            {thinking.enabled ? (
-              <span title={composerThinkingLabel} aria-label={composerThinkingLabel}>
-                <BrainCircuit size={13} aria-hidden="true" />
-              </span>
-            ) : null}
+          </div>
+        ) : null}
+        {slashCommand.open ? (
+          <div id="composer-slash-command-picker">
+            <SlashCommandPicker
+              activeIndex={slashCommand.activeIndex}
+              matches={slashCommandMatches}
+              onActiveIndexChange={(activeIndex) => setSlashCommand((currentState) => ({ ...currentState, activeIndex }))}
+              onSelect={selectSlashCommand}
+              query={slashCommand.query}
+            />
           </div>
         ) : null}
         {skillMention.open ? (
@@ -2346,6 +2672,7 @@ function ChatComposerComponent({
         {voiceState === "unsupported" ? <span className="composer-status composer-status-warning">{voiceUnsupportedStatusMessage(voiceStatus)}</span> : null}
         {voiceState === "error" && voiceStatus ? <span className="composer-status composer-status-warning">{voiceStatus}</span> : null}
         {!voiceActive && voiceState !== "blocked" && voiceState !== "unsupported" && voiceState !== "error" && voiceStatus ? <span className="composer-status">{voiceStatus}</span> : null}
+        {projectGoalError ? <span className="composer-status composer-status-warning">{projectGoalError}</span> : null}
         {hasPendingAttachments ? <span className="composer-status">Preparing attachments</span> : null}
         {showMediaFallbackNotice ? <span className="composer-status">Media uploads use Nemotron Omni when needed</span> : null}
         {hasFailedAttachments ? <span className="composer-status composer-status-warning">Remove failed attachments to send</span> : null}
@@ -2383,6 +2710,7 @@ function areChatComposerPropsEqual(previous: ChatComposerProps, next: ChatCompos
     previous.lastProviderContextUsage === next.lastProviderContextUsage &&
     previous.model === next.model &&
     previous.modelContextWindows === next.modelContextWindows &&
+    previous.projectGoal === next.projectGoal &&
     previous.projects === next.projects &&
     previous.providerSettings === next.providerSettings &&
     previous.queuedMessageCount === next.queuedMessageCount &&
@@ -2831,6 +3159,10 @@ function GitStatusPopover({
     );
   }
 
+  const stageableFiles = getComposerGitStageableFileCount(status);
+  const worktreeSummary = formatComposerGitWorktreeSummary(status);
+  const syncSummary = formatComposerGitSyncSummary(status);
+
   if (compact) {
     return (
       <div className="composer-popover composer-popover-branch" role="dialog" aria-label="Git status" data-compact="true">
@@ -2842,12 +3174,13 @@ function GitStatusPopover({
           </span>
         </div>
         <div className="git-status-compact-metrics" aria-label="Git change summary">
-          <span>{status.changedFiles === 1 ? "1 changed" : `${status.changedFiles} changed`}</span>
+          <span>{worktreeSummary}</span>
+          {syncSummary ? <span>{syncSummary}</span> : null}
           <span className="git-additions">+{status.additions}</span>
           <span className="git-deletions">-{status.deletions}</span>
         </div>
         <div className="git-status-action-grid" data-compact="true">
-          <button type="button" disabled={Boolean(actionRunning) || status.changedFiles === 0} onClick={onStageAll}>
+          <button type="button" disabled={Boolean(actionRunning) || stageableFiles === 0} onClick={onStageAll}>
             {actionRunning === "stage" ? <LoaderCircle size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />}
             <span>Stage</span>
           </button>
@@ -2890,7 +3223,7 @@ function GitStatusPopover({
           <dd className="git-deletions">-{status.deletions}</dd>
         </div>
       </dl>
-      <div className="git-status-file-count">{status.changedFiles === 1 ? "1 changed file" : `${status.changedFiles} changed files`}</div>
+      <div className="git-status-file-count">{syncSummary ? `${worktreeSummary} · ${syncSummary}` : worktreeSummary}</div>
       <div className="git-status-actions" aria-label="Git actions">
         <div className="git-status-action-row">
           <input
@@ -2917,7 +3250,7 @@ function GitStatusPopover({
           </button>
         </div>
         <div className="git-status-action-grid">
-          <button type="button" disabled={Boolean(actionRunning) || status.changedFiles === 0} onClick={onStageAll}>
+          <button type="button" disabled={Boolean(actionRunning) || stageableFiles === 0} onClick={onStageAll}>
             {actionRunning === "stage" ? <LoaderCircle size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />}
             <span>Stage</span>
           </button>
@@ -3471,6 +3804,9 @@ function createUnavailableGitStatus(error?: string): ComputerGitStatus {
     deletions: 0,
     error,
     files: [],
+    stagedFiles: 0,
+    unstagedFiles: 0,
+    untrackedFiles: 0,
   };
 }
 
@@ -3484,6 +3820,190 @@ function readErrorMessage(error: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function SlashCommandPicker({
+  activeIndex,
+  matches,
+  onActiveIndexChange,
+  onSelect,
+  query,
+}: {
+  activeIndex: number;
+  matches: SlashCommandOption[];
+  onActiveIndexChange: (index: number) => void;
+  onSelect: (option: SlashCommandOption) => void;
+  query: string;
+}) {
+  return (
+    <div className="skill-mention-picker composer-command-picker" role="listbox" aria-label="Slash command suggestions">
+      <div className="skill-mention-heading">
+        <Target size={15} aria-hidden="true" />
+        <span>Commands</span>
+        <small>{query ? `/${query}` : "/ command"}</small>
+      </div>
+      <div className="skill-mention-list">
+        {matches.length > 0 ? (
+          matches.map((option, index) => (
+            <button
+              key={option.id}
+              type="button"
+              role="option"
+              aria-selected={activeIndex === index}
+              disabled={option.disabled}
+              data-active={activeIndex === index}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => onActiveIndexChange(index)}
+              onClick={() => onSelect(option)}
+            >
+              <span className="skill-mention-icon">
+                <Target size={16} aria-hidden="true" />
+              </span>
+              <span className="skill-mention-copy">
+                <strong>{option.title}</strong>
+                <small>{option.description}</small>
+              </span>
+              <span className="skill-mention-meta">
+                <strong>{option.command}</strong>
+              </span>
+            </button>
+          ))
+        ) : (
+          <div className="skill-mention-empty">
+            <Target size={16} aria-hidden="true" />
+            <span>No matching commands</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function getProjectGoalSlashCommandOptions(
+  query: string,
+  {
+    canUseProjectGoals,
+    isGenerating,
+    projectGoal,
+  }: {
+    canUseProjectGoals: boolean;
+    isGenerating: boolean;
+    projectGoal?: ProjectGoal;
+  },
+): SlashCommandOption[] {
+  const currentGoalSummary = projectGoal ? `${formatProjectGoalStatusLabel(projectGoal.status)} - ${truncateSlashCommandDescription(projectGoal.objective)}` : "";
+  const options: SlashCommandOption[] = [
+    {
+      action: "insert-goal",
+      command: "/goal",
+      description: projectGoal
+        ? `Update this Project Goal. ${currentGoalSummary}`
+        : canUseProjectGoals
+          ? "Start a Project Goal from the composer."
+          : "Choose or create a project before starting a Project Goal.",
+      id: "goal",
+      title: "Project Goals",
+    },
+  ];
+
+  if (projectGoal) {
+    options.push({
+      action: "continue-goal",
+      command: "/goal continue",
+      description: projectGoal.status === "active" ? "Continue working on the active Project Goal." : "Resume this Project Goal before continuing it.",
+      disabled: projectGoal.status !== "active" || isGenerating,
+      id: "goal-continue",
+      title: "Continue Project Goal",
+    });
+
+    if (projectGoal.status === "active") {
+      options.push({
+        action: "pause-goal",
+        command: "/goal pause",
+        description: "Pause Project Goal context until you resume it.",
+        id: "goal-pause",
+        title: "Pause Project Goal",
+      });
+    } else {
+      options.push({
+        action: "resume-goal",
+        command: "/goal resume",
+        description: "Make this Project Goal active again.",
+        id: "goal-resume",
+        title: "Resume Project Goal",
+      });
+    }
+
+    if (projectGoal.status !== "complete") {
+      options.push({
+        action: "complete-goal",
+        command: "/goal complete",
+        description: "Mark the current Project Goal complete.",
+        id: "goal-complete",
+        title: "Complete Project Goal",
+      });
+    }
+
+    options.push({
+      action: "clear-goal",
+      command: "/goal clear",
+      description: "Remove the saved Project Goal from this project.",
+      id: "goal-clear",
+      title: "Clear Project Goal",
+    });
+  }
+
+  const normalizedQuery = normalizeSlashCommandQuery(query);
+
+  if (!normalizedQuery) {
+    return options;
+  }
+
+  return options.filter((option) =>
+    [option.command, option.title, option.description]
+      .map(normalizeSlashCommandQuery)
+      .some((candidate) => candidate.includes(normalizedQuery)),
+  );
+}
+
+export function findComposerSlashCommandTrigger(message: string, cursorPosition: number): SlashCommandTrigger | null {
+  const beforeCursor = message.slice(0, cursorPosition);
+  const match = beforeCursor.match(/^\s*\/([a-z]{0,24})$/i);
+
+  if (!match) {
+    return null;
+  }
+
+  const query = match[1] ?? "";
+  const slashIndex = beforeCursor.lastIndexOf("/");
+
+  return {
+    query,
+    rangeEnd: cursorPosition,
+    rangeStart: slashIndex,
+  };
+}
+
+function formatProjectGoalStatusLabel(status: ProjectGoal["status"]) {
+  if (status === "active") {
+    return "Active";
+  }
+
+  if (status === "paused") {
+    return "Paused";
+  }
+
+  return "Complete";
+}
+
+function truncateSlashCommandDescription(value: string) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+
+  return normalized.length > 84 ? `${normalized.slice(0, 81)}...` : normalized;
+}
+
+function normalizeSlashCommandQuery(value: string) {
+  return value.toLowerCase().replace(/^\//, "").replace(/\s+/g, " ").trim();
 }
 
 function AttachmentPreview({ attachment }: { attachment: ComposerAttachmentDraft }) {

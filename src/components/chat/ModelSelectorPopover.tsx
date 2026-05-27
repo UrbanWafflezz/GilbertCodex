@@ -1,7 +1,7 @@
 import { type CSSProperties, type RefObject, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { BrainCircuit, Check, ChevronLeft, ChevronRight, Gauge, Route, Search, Sparkles, Zap } from "lucide-react";
-import { ThinkingModeControls } from "../thinking/ThinkingModeControls";
+import { ReasoningEffortPanel } from "./ReasoningEffortPanel";
 import {
   DEEPSEEK_V4_FLASH_FREE_MODEL,
   GLM_45_AIR_FREE_MODEL,
@@ -188,8 +188,8 @@ export function ModelSelectorPopover({
             </button>
           </div>
 
-          <div className="model-selector-thinking-panel">
-            <ThinkingModeControls settings={thinking} onChange={onThinkingChange} variant="panel" />
+          <div className="model-selector-reasoning-panel">
+            <ReasoningEffortPanel settings={thinking} onChange={onThinkingChange} />
           </div>
 
           <div className="model-selector-quick-list">

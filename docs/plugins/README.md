@@ -2,7 +2,7 @@
 
 Last updated: May 25, 2026 for the v0.8.2 build.
 
-Gilbert Codex now treats plugins as a marketplace-backed surface inside Apps instead of only three hand-built cards.
+Gilbert Codex now treats plugins as a marketplace-backed surface inside Apps instead of only hand-built first-party cards.
 
 ## What Gilbert Is Doing
 
@@ -20,7 +20,7 @@ Gilbert loads an upstream public plugin catalog in Apps so users can discover br
 Gilbert should only mark a plugin usable when there is a real local execution route:
 
 - Native route: Gmail, Google Calendar, and GitHub continue using Gilbert's app-owned auth and tool bridge.
-- MCP route: plugins such as Figma, Stripe, Vercel, Notion, Linear, Atlassian, Cloudflare, Supabase, and Sentry map to curated MCP presets, then reuse Save, Test, secure storage, and chat MCP tools.
+- MCP route: plugins such as LinkedIn, Figma, Stripe, Vercel, Notion, Linear, Atlassian, Cloudflare, Supabase, and Sentry map to curated MCP presets, then reuse Save, Test, secure storage, and chat MCP tools.
 - Skill route: plugins with bundled `SKILL.md` files can import those skills into Gilbert's local skill registry.
 - Registry route: app-only marketplace entries search the public MCP Registry for a runnable server replacement.
 

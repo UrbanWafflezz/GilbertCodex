@@ -2,7 +2,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import type { AppInfo } from "../../types/app";
 import type { AgentRun } from "../../types/agentRun";
-import type { ChatSummary } from "../../types/chat";
+import type { ChatSendInput, ChatSummary } from "../../types/chat";
 import type { DiscordBridgeSettings } from "../../types/discord";
 import type { LocalWorkspaceSettings } from "../../types/localWorkspace";
 import type { ProjectSummary } from "../../types/project";
@@ -33,9 +33,17 @@ export interface WorkspaceRuntimeDeps {
   queuedChatSendsRef: MutableRefObject<QueuedChatSend[]>;
   sendingChatIds: string[];
   terminalAttachedSession: TerminalAttachedSession | null;
+  queueAgentRunSave: (run: AgentRun, options?: { immediate?: boolean }) => void;
   updateQueuedChatSends: (updater: SetStateAction<QueuedChatSend[]>) => void;
+  handleClearProjectGoal: () => void;
+  handleCompleteProjectGoal: () => void;
+  handleCreateProjectGoal: (objective: string, options?: { input?: ChatSendInput; start?: boolean }) => void | Promise<void>;
+  handlePauseProjectGoal: () => void;
+  handleResumeProjectGoal: () => void;
+  handleUpdateProjectGoal: (objective: string) => void;
   setActiveChatId: Dispatch<SetStateAction<string>>;
   setAgentRuns: Dispatch<SetStateAction<AgentRun[]>>;
+  setAgentRunsLive: (runs: AgentRun[]) => void;
   setAppInfo: Dispatch<SetStateAction<AppInfo>>;
   setAppearanceMode: Dispatch<SetStateAction<AppearanceMode>>;
   setAppearanceSettings: Dispatch<SetStateAction<AppAppearanceSettings>>;

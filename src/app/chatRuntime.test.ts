@@ -26,6 +26,7 @@ import {
   hasConnectedToolEvidence,
   hasSuccessfulDeploymentToolCall,
   hasSuccessfulConnectedToolMutation,
+  hasSuccessfulMutatingFileToolCall,
   needsFreshLocalToolEvidence,
   promptRequestsConnectedToolAction,
   promptRequestsDeploymentAction,
@@ -309,7 +310,9 @@ describe("tool protocol leak guards", () => {
 
   it("requires real workspace tools for short UI edit prompts", () => {
     expect(requiresWorkspaceToolCallForPrompt("make it better more readable better design and more party like", true)).toBe(true);
+    expect(requiresWorkspaceToolCallForPrompt("make the game better and add more things to do", true)).toBe(true);
     expect(requiresWorkspaceToolCallForPrompt("when user sends message from ghome screen it should go to a chat workplace page for the chat and ide like experinec", true)).toBe(true);
+    expect(requiresWorkspaceToolCallForPrompt("when the player opens inventory it should pause the world scene", true)).toBe(true);
     expect(requiresWorkspaceToolCallForPrompt("when user sends message from ghome screen it should go to a chat workplace page for the chat and ide like experinec", false)).toBe(false);
     expect(requiresWorkspaceToolCallForPrompt([
       "do the job",
@@ -319,6 +322,13 @@ describe("tool protocol leak guards", () => {
     ].join("\n"), true)).toBe(true);
     expect(requiresWorkspaceToolCallForPrompt("make it better more readable better design and more party like", false)).toBe(false);
     expect(requiresWorkspaceToolCallForPrompt("thanks", true)).toBe(false);
+  });
+
+  it("requires a real mutation for local game improvement prompts", () => {
+    expect(requiresWorkspaceMutationForPrompt("make the game better and add more things to do", true)).toBe(true);
+    expect(requiresWorkspaceMutationForPrompt("improve the MindSpace gameplay, HUD, and world interactions", true)).toBe(true);
+    expect(requiresWorkspaceMutationForPrompt("what does this game do right now", true)).toBe(false);
+    expect(needsFreshLocalToolEvidence("what does this game do right now", true)).toBe(true);
   });
 
   it("requires real workspace tools for browser screenshots, console, and terminal diagnostics", () => {
@@ -354,6 +364,11 @@ describe("tool protocol leak guards", () => {
     expect(promptRequestsDeploymentAction("deploy this service to Heroku")).toBe(true);
     expect(promptRequestsDeploymentAction("preview and deploy the Pulumi stack")).toBe(true);
     expect(promptRequestsDeploymentAction("update the website without deploying it")).toBe(false);
+    expect(promptRequestsDeploymentAction([
+      "I could not complete the requested deployment cleanly.",
+      "No successful MCP or terminal deploy/publish tool result was recorded, so I cannot claim the site is live.",
+      "response still arent finishing correctly after tool calls mainly edits and writes etc",
+    ].join("\n"))).toBe(false);
     expect(requiresWorkspaceToolCallForPrompt("deploy the website to hosting", true)).toBe(true);
     expect(hasDeploymentToolAttempt([mcpDeploy])).toBe(true);
     expect(hasSuccessfulDeploymentToolCall([terminalDeploy])).toBe(true);
@@ -388,16 +403,39 @@ describe("tool protocol leak guards", () => {
       status: "complete" as const,
       toolId: "gmail_create_draft",
     };
+    const nativeGithubRead = {
+      id: "github-list",
+      label: "List GitHub repositories",
+      output: "UrbanWafflezz/GilbertCodex",
+      status: "complete" as const,
+      toolId: "codex_apps.list_repositories",
+    };
+    const nativeGithubMutation = {
+      id: "github-create-issue",
+      label: "Create GitHub issue",
+      output: "Issue created.",
+      status: "complete" as const,
+      toolId: "codex_apps.create_issue",
+    };
 
     expect(promptRequestsConnectedToolAction("use the Slack plugin to post a launch update")).toBe(true);
     expect(promptRequestsConnectedToolAction("use Apify to run a web scraper actor")).toBe(true);
     expect(promptRequestsConnectedToolAction("use Browserbase to navigate example.com")).toBe(true);
     expect(promptRequestsConnectedToolAction("use Exa to search the current docs")).toBe(true);
+    expect(promptRequestsConnectedToolAction("use GoDaddy MCP to check whether my launch domain is available")).toBe(true);
     expect(promptRequestsConnectedToolAction("use JetBrains to inspect the current project")).toBe(true);
+    expect(promptRequestsConnectedToolAction([
+      "response summary not working after ai is done i just get this error instead of summary",
+      "I could not complete the requested connected-tool action cleanly.",
+      "No MCP, native app, or connector tool result was recorded, so I cannot claim it ran.",
+      "fix issue so it works correctly like Claude Code and make thinking mode like Claude Code too",
+    ].join("\n"))).toBe(false);
     expect(promptRequestsConnectedToolAction("what tools and plugins are available?")).toBe(false);
     expect(hasConnectedToolEvidence([mcpInventory])).toBe(true);
+    expect(hasConnectedToolEvidence([nativeGithubRead])).toBe(true);
     expect(hasSuccessfulConnectedToolMutation([mcpMutation])).toBe(true);
     expect(hasSuccessfulConnectedToolMutation([gmailDraft])).toBe(true);
+    expect(hasSuccessfulConnectedToolMutation([nativeGithubMutation])).toBe(true);
     expect(looksLikeUnsupportedConnectedToolActionAnswer("I could not use Slack because no MCP tools are available.", [])).toBe(true);
     expect(looksLikeUnsupportedConnectedToolActionAnswer("I could not use Apify because I do not have Apify tools.", [])).toBe(true);
     expect(looksLikeUnsupportedConnectedToolActionAnswer("I could not use Browserbase because I do not have Browserbase tools.", [])).toBe(true);
@@ -405,7 +443,32 @@ describe("tool protocol leak guards", () => {
     expect(looksLikeUnsupportedConnectedToolActionAnswer("Updated the Pulumi stack.", [mcpInventory])).toBe(true);
     expect(looksLikeUnsupportedConnectedToolActionAnswer("Posted the Slack message.", [mcpInventory])).toBe(true);
     expect(looksLikeUnsupportedConnectedToolActionAnswer("Posted the Slack message.", [mcpMutation])).toBe(false);
+    expect(looksLikeUnsupportedConnectedToolActionAnswer("Listed the GitHub repositories.", [nativeGithubRead])).toBe(false);
+    expect(looksLikeUnsupportedConnectedToolActionAnswer("Created the GitHub issue.", [nativeGithubMutation])).toBe(false);
     expect(createConnectedToolEvidenceRecoveryInstruction("send the Slack update", "I cannot access Slack tools.")).toContain("mcp_list_servers");
+  });
+
+  it("recognizes completed file edits as local mutation evidence", () => {
+    expect(hasSuccessfulMutatingFileToolCall([
+      {
+        id: "replace-span",
+        label: "Replace file text span",
+        output: "Applied edit to src/App.jsx.",
+        status: "complete",
+        toolId: "files_replace_span",
+      },
+    ])).toBe(true);
+
+    expect(hasSuccessfulMutatingFileToolCall([
+      {
+        batchFileResults: [{ additions: 1, deletions: 1, path: "src/App.jsx", status: "ok" }],
+        id: "edit-many",
+        label: "Edit workspace files",
+        output: "Applied file changes to 1 file.",
+        status: "complete",
+        toolId: "files_edit_many",
+      },
+    ])).toBe(true);
   });
 
   it("does not ask for the provider tool-call channel when capability planning found no attached tools", () => {
@@ -459,6 +522,108 @@ describe("tool protocol leak guards", () => {
         toolId: "files_read",
       },
     ])).toBe(true);
+  });
+
+  it("rejects implementation summaries with changed files after read-only evidence", () => {
+    const content = [
+      "Implemented a gameplay and bug-fix pass for MindSpace.",
+      "",
+      "Summary",
+      "",
+      "Improved the core play loop with first-person controls, pointer-lock pause/resume behavior, sprinting, jumping, camera toggling, day/night toggling, and smoother camera movement.",
+      "Expanded world gameplay with resources, item drops, inventory slots, crafting, gathering, pickup/drop actions, garden growth, weather effects, and resource respawns.",
+      "Hardened save/load behavior so legacy or malformed world data is normalized instead of breaking the game.",
+      "",
+      "Changed Files",
+      "",
+      "src/main.ts - wired save/load into the runtime and HUD lifecycle.",
+      "src/render/app/MindSpaceRuntime.ts - added runtime input handling, camera behavior, picking/interactions, and render-loop improvements.",
+      "src/game/simulation/worldSimulation.ts - added/updated movement, weather, garden growth, inventory, resources, crafting, drops, respawns, and state migration.",
+      "src/game/types.ts - expanded gameplay state types.",
+    ].join("\n");
+
+    expect(looksLikeUnappliedFileEditAnswer(content, [
+      {
+        id: "read-package",
+        label: "Read workspace file",
+        status: "complete",
+        toolId: "files_read",
+      },
+      {
+        id: "search-src",
+        label: "Search workspace",
+        status: "complete",
+        toolId: "files_search",
+      },
+    ])).toBe(true);
+  });
+
+  it("rejects UI fix summaries with verification after read/browser/log-only evidence", () => {
+    const content = [
+      "Implemented UI bug fixes in MindSpace.",
+      "",
+      "Summary",
+      "",
+      "Fixed HUD/play-state behavior so the pause menu, play button, and pointer-lock UI states stay in sync.",
+      "Fixed inventory/world panel interaction so opening panels exits play mode cleanly and avoids hidden interactive UI conflicts.",
+      "Improved responsive HUD layout/styling so panels fit better on smaller screens and don't block/overlap as aggressively.",
+      "",
+      "Changed Files",
+      "",
+      "src/main.ts",
+      "src/style.css",
+      "src/ui/createHud.ts",
+      "src/render/app/MindSpaceRuntime.ts",
+      "",
+      "Verification",
+      "",
+      "Opened the local browser preview.",
+      "Checked browser console evidence: no runtime errors were reported in the retained console entries; only a local preview connection warning was present.",
+      "Reviewed existing dev-server logs; they showed Vite reload/HMR activity and a Three.js deprecation warning, not a blocking UI crash.",
+    ].join("\n");
+
+    expect(looksLikeUnappliedFileEditAnswer(content, [
+      {
+        id: "read-hud",
+        label: "Read workspace file",
+        status: "complete",
+        toolId: "files_read",
+      },
+      {
+        id: "browser-open",
+        label: "Open browser preview",
+        status: "complete",
+        toolId: "browser_preview_open",
+      },
+      {
+        id: "read-log",
+        label: "Read workspace file",
+        status: "complete",
+        toolId: "files_read",
+      },
+    ])).toBe(true);
+  });
+
+  it("allows read-only summaries that list an existing diff without claiming implementation", () => {
+    const content = [
+      "I reviewed the current diff.",
+      "",
+      "Changed Files",
+      "",
+      "src/main.ts - already modified before this review.",
+      "src/game/types.ts - already modified before this review.",
+      "",
+      "No file changes were made in this turn.",
+    ].join("\n");
+
+    expect(looksLikeUnappliedFileEditAnswer(content, [
+      {
+        id: "git-diff",
+        label: "Read git diff",
+        status: "complete",
+        toolId: "git_diff",
+      },
+    ])).toBe(false);
   });
 
   it("allows updated-file summaries after a mutating edit tool succeeds", () => {

@@ -1,0 +1,25 @@
+{
+  "apps": {
+    "linkedin": {
+      "id": "gilbert.linkedin",
+      "provider": "linkedin",
+      "auth": "oauth2-token-env",
+      "mcpPresetId": "linkedin",
+      "clientIdEnv": "LINKEDIN_CLIENT_ID",
+      "clientSecretEnv": "LINKEDIN_CLIENT_SECRET",
+      "redirect": "external",
+      "safety": {
+        "authenticatedUserOnly": true,
+        "noScraping": true,
+        "noProfileWrites": true,
+        "noPostPublishing": true,
+        "userSuppliedResearchOnly": true
+      },
+      "scopes": [
+        "openid",
+        "profile",
+        "email"
+      ]
+    }
+  }
+}

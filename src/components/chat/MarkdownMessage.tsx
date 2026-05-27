@@ -1,4 +1,4 @@
-import { Children, isValidElement, memo, type MouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Children, isValidElement, memo, type MouseEvent, type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -134,6 +134,7 @@ const markdownComponents: Components = {
     );
   },
 };
+const markdownRemarkPlugins = [remarkGfm];
 
 function isExternalUserLink(href: string) {
   return /^(?:https?:|mailto:)/i.test(href.trim());
@@ -179,7 +180,9 @@ function sanitizeMarkdownImageSrc(src?: string) {
 }
 
 function MarkdownMessageComponent({ className, content, isStreaming }: MarkdownMessageProps) {
-  const displayContent = useMemo(() => normalizeMarkdownForDisplay(content, { final: !isStreaming }), [content, isStreaming]);
+  const deferredContent = useDeferredValue(content);
+  const contentForRender = isStreaming ? deferredContent : content;
+  const displayContent = useMemo(() => normalizeMarkdownForDisplay(contentForRender, { final: !isStreaming }), [contentForRender, isStreaming]);
   const rootClassName = ["markdown-message", isStreaming ? "markdown-message-streaming" : "", className ?? ""].filter(Boolean).join(" ");
 
   if (!displayContent.trim()) {
@@ -188,7 +191,7 @@ function MarkdownMessageComponent({ className, content, isStreaming }: MarkdownM
 
   return (
     <div className={rootClassName} data-streaming={Boolean(isStreaming)}>
-      <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+      <ReactMarkdown components={markdownComponents} remarkPlugins={markdownRemarkPlugins}>
         {displayContent}
       </ReactMarkdown>
     </div>

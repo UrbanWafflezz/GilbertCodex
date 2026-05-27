@@ -1,22 +1,42 @@
 use crate::commands;
-use tauri::Manager;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{
+    menu::MenuBuilder,
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    Manager, Runtime, WindowEvent,
+};
+
+const MAIN_WINDOW_LABEL: &str = "main";
+const TRAY_ID: &str = "gilbert-codex-tray";
+const TRAY_OPEN_ID: &str = "tray-open";
+const TRAY_QUIT_ID: &str = "tray-quit";
+
+#[derive(Default)]
+pub(crate) struct AppLifecycleState {
+    exiting: AtomicBool,
+}
+
+impl AppLifecycleState {
+    fn is_exiting(&self) -> bool {
+        self.exiting.load(Ordering::SeqCst)
+    }
+
+    fn request_exit(&self) {
+        self.exiting.store(true, Ordering::SeqCst);
+    }
+}
 
 /// Builds the Tauri app, registers shared command state, and exposes command handlers.
 pub fn builder() -> tauri::Builder<tauri::Wry> {
     let window_state_flags = tauri_plugin_window_state::StateFlags::SIZE
         | tauri_plugin_window_state::StateFlags::POSITION
         | tauri_plugin_window_state::StateFlags::MAXIMIZED
-        | tauri_plugin_window_state::StateFlags::FULLSCREEN
-        | tauri_plugin_window_state::StateFlags::VISIBLE;
+        | tauri_plugin_window_state::StateFlags::FULLSCREEN;
 
     tauri::Builder::default()
         // Keep first so secondary launches are rejected before other plugin setup runs.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            show_main_window(app);
         }))
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -25,6 +45,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
         )
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(AppLifecycleState::default())
         .manage(commands::auth::AuthState::default())
         .manage(commands::computer::files::ComputerFileIndexState::default())
         .manage(commands::dictation::DictationState::default())
@@ -33,6 +54,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
         .manage(commands::google_calendar::CalendarState::default())
         .manage(commands::github::GithubState::default())
         .manage(commands::mcp::McpState::default())
+        .manage(commands::mobile_bridge::MobileBridgeState::default())
         .manage(commands::nine_router::NineRouterLocalState::default())
         .manage(commands::terminal::TerminalState::default())
         .manage(commands::updates::AppUpdateState::default())
@@ -42,7 +64,29 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
                     window.set_icon(icon.clone())?;
                 }
             }
+
+            setup_tray(app)?;
+            show_main_window(app.handle());
+
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != MAIN_WINDOW_LABEL {
+                return;
+            }
+
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let should_exit = window
+                    .app_handle()
+                    .try_state::<AppLifecycleState>()
+                    .map(|state| state.is_exiting())
+                    .unwrap_or(false);
+
+                if !should_exit {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::agent_runs::agent_run_delete,
@@ -54,6 +98,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             commands::auth::auth_login,
             commands::auth::auth_logout,
             commands::app_info::get_app_info,
+            commands::app_info::app_quit,
             commands::browser::browser_automation,
             commands::browser::browser_preview_capture,
             commands::browser::browser_preview_get_url,
@@ -166,6 +211,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             commands::github::github_read_file,
             commands::github::github_search_code,
             commands::mcp::mcp_call_tool,
+            commands::mcp::mcp_call_tool_stream,
             commands::mcp::mcp_get_state,
             commands::mcp::mcp_list_tools,
             commands::mcp::mcp_remove_server,
@@ -173,6 +219,13 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             commands::mcp::mcp_search_registry,
             commands::mcp::mcp_test_server,
             commands::mcp::mcp_test_server_stream,
+            commands::mobile_bridge::mobile_bridge_reset_pairing,
+            commands::mobile_bridge::mobile_bridge_start,
+            commands::mobile_bridge::mobile_bridge_status,
+            commands::mobile_bridge::mobile_bridge_stop,
+            commands::mobile_bridge::mobile_bridge_take_mobile_payloads,
+            commands::mobile_bridge::mobile_bridge_take_mobile_requests,
+            commands::mobile_bridge::mobile_bridge_update_desktop_payload,
             commands::nine_router::nine_router_local_http,
             commands::nine_router::nine_router_local_install,
             commands::nine_router::nine_router_local_ensure,
@@ -203,4 +256,56 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             commands::web::duckduckgo_search,
             commands::weather::weather_fetch_json
         ])
+}
+
+pub(crate) fn request_app_exit<R: Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(state) = app.try_state::<AppLifecycleState>() {
+        state.request_exit();
+    }
+
+    app.exit(0);
+}
+
+fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
+    let menu = MenuBuilder::new(app)
+        .text(TRAY_OPEN_ID, "Open Gilbert Codex")
+        .separator()
+        .text(TRAY_QUIT_ID, "Quit Gilbert Codex")
+        .build()?;
+
+    let mut tray = TrayIconBuilder::with_id(TRAY_ID)
+        .tooltip("Gilbert Codex")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_OPEN_ID => show_main_window(app),
+            TRAY_QUIT_ID => request_app_exit(app),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                ..
+            }
+            | TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } => show_main_window(tray.app_handle()),
+            _ => {}
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+
+    tray.build(app)?;
+    Ok(())
+}
+
+fn show_main_window<R: Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
 }

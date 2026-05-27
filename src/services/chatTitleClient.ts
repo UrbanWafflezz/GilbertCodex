@@ -115,7 +115,6 @@ function createTitleProviderSettings(settings: ProviderSettings): ProviderSettin
     thinking: {
       ...settings.thinking,
       enabled: false,
-      effort: "low",
     },
     tools: { ...DISABLED_TITLE_TOOLS },
     userInstructions: "",

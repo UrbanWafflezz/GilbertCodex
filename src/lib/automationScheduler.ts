@@ -3,9 +3,11 @@ import { getModelProvider, isModelProviderId, normalizeProviderModelId } from ".
 import type {
   AutomationCapabilityDefinition,
   AutomationCapabilityId,
+  AutomationMcpServerScope,
   AutomationNotificationPolicy,
   AutomationRun,
   AutomationRunLimits,
+  AutomationSkillScope,
   AutomationState,
   AutomationTask,
   AutomationTaskDraft,
@@ -13,6 +15,8 @@ import type {
 } from "../types/automation";
 import type { ChatSource, ChatToolCall } from "../types/chat";
 import type { ToolAutomationScope } from "../toolBridge/types";
+
+const MCP_BRIDGE_TOOL_IDS = ["mcp_list_servers", "mcp_list_tools", "mcp_call_tool"] as const;
 
 export const DEFAULT_AUTOMATION_RUN_LIMITS: AutomationRunLimits = {
   maxModelLoops: 8,
@@ -218,6 +222,8 @@ export function normalizeAutomationTask(value: unknown, now = new Date().toISOSt
       capabilityScope: {
         autonomyLevel: raw.capabilityScope?.autonomyLevel === "scoped" ? "scoped" : "review",
         capabilities: normalizeCapabilityIds(raw.capabilityScope?.capabilities),
+        mcpServers: normalizeMcpServerScopes(raw.capabilityScope?.mcpServers),
+        skills: normalizeSkillScopes(raw.capabilityScope?.skills),
       },
       chatId: normalizeOptionalString(raw.chatId),
       createdAt,
@@ -229,6 +235,7 @@ export function normalizeAutomationTask(value: unknown, now = new Date().toISOSt
       nextRunAt,
       notificationPolicy: normalizeNotificationPolicy(raw.notificationPolicy),
       prompt,
+      projectName: normalizeOptionalString(raw.projectName),
       provider: modelSelection.provider,
       runCount: normalizeInteger(raw.runCount, 0, 0, 1_000_000),
       sourceChatId: normalizeOptionalString(raw.sourceChatId),
@@ -249,6 +256,8 @@ export function createAutomationTaskFromDraft(draft: AutomationTaskDraft, now = 
     capabilityScope: {
       autonomyLevel: draft.capabilityScope?.autonomyLevel === "scoped" ? "scoped" : "review",
       capabilities: normalizeCapabilityIds(draft.capabilityScope?.capabilities),
+      mcpServers: normalizeMcpServerScopes(draft.capabilityScope?.mcpServers),
+      skills: normalizeSkillScopes(draft.capabilityScope?.skills),
     },
     createdAt: now,
     description: draft.description?.trim() || undefined,
@@ -257,6 +266,7 @@ export function createAutomationTaskFromDraft(draft: AutomationTaskDraft, now = 
     nextRunAt: undefined,
     notificationPolicy: normalizeNotificationPolicy(draft.notificationPolicy),
     prompt,
+    projectName: draft.projectName?.trim() || undefined,
     provider: modelSelection.provider,
     runCount: 0,
     sourceChatId: draft.sourceChatId?.trim() || undefined,
@@ -400,10 +410,13 @@ export function computeAutomationSchedulerDelayMs(
 }
 
 export function createAutomationRunPrompt(task: AutomationTask, options: { dryRun?: boolean; reason?: string } = {}) {
-  const capabilityHints = task.capabilityScope.capabilities
-    .map((capabilityId) => CAPABILITY_MAP.get(capabilityId)?.promptHint)
-    .filter(Boolean)
-    .join("\n- ");
+  const capabilityHints = [
+    ...task.capabilityScope.capabilities
+      .map((capabilityId) => CAPABILITY_MAP.get(capabilityId)?.promptHint)
+      .filter(Boolean),
+    ...formatMcpCapabilityHints(task.capabilityScope.mcpServers),
+    ...formatSkillCapabilityHints(task.capabilityScope.skills),
+  ];
   const autonomy = task.capabilityScope.autonomyLevel === "scoped"
     ? "Act autonomously only for the enabled capabilities listed below. Anything outside scope must pause for approval."
     : "Do not take mutating connected-app actions without an approval card.";
@@ -412,6 +425,7 @@ export function createAutomationRunPrompt(task: AutomationTask, options: { dryRu
     "LOCAL SCHEDULED TASK RUN",
     `Task: ${task.title}`,
     task.description ? `Description: ${task.description}` : "",
+    task.projectName ? `Project: ${task.projectName}` : "",
     `Run reason: ${options.reason ?? "manual"}`,
     options.dryRun ? "Simulation mode: do not call tools, send messages, or change external state. Explain what tools would be used." : "",
     "",
@@ -424,7 +438,7 @@ export function createAutomationRunPrompt(task: AutomationTask, options: { dryRu
       : "Use the user's current default chat model at run time.",
     "",
     "Enabled capabilities:",
-    capabilityHints ? `- ${capabilityHints}` : "- No connected app tools are enabled. Use plain reasoning only.",
+    capabilityHints.length > 0 ? `- ${capabilityHints.join("\n- ")}` : "- No connected app tools are enabled. Use plain reasoning only.",
     "",
     "Autonomy and privacy:",
     autonomy,
@@ -450,14 +464,18 @@ export function createAutomationUserMessageContent(task: AutomationTask, options
 }
 
 export function createAutomationToolSelectionPrompt(task: AutomationTask) {
-  const capabilityHints = task.capabilityScope.capabilities
-    .map((capabilityId) => CAPABILITY_MAP.get(capabilityId)?.promptHint)
-    .filter(Boolean)
-    .join("\n");
+  const capabilityHints = [
+    ...task.capabilityScope.capabilities
+      .map((capabilityId) => CAPABILITY_MAP.get(capabilityId)?.promptHint)
+      .filter(Boolean),
+    ...formatMcpCapabilityHints(task.capabilityScope.mcpServers),
+    ...formatSkillCapabilityHints(task.capabilityScope.skills),
+  ];
 
   return [
     task.prompt,
-    capabilityHints,
+    task.projectName ? `Project scope: ${task.projectName}` : "",
+    capabilityHints.join("\n"),
     "Use only the enabled task capabilities. If a needed tool is outside the task scope, request approval instead of silently skipping it.",
   ].filter(Boolean).join("\n");
 }
@@ -467,11 +485,22 @@ export function createAutomationToolScope(task: AutomationTask): ToolAutomationS
     const definition = CAPABILITY_MAP.get(capabilityId);
     return definition ? [definition] : [];
   });
-  const allowedToolIds = [...new Set(definitions.flatMap((definition) => definition.toolIds))];
-  const allowedFamilies = [...new Set(definitions.flatMap((definition) => definition.familyHints))];
+  const mcpServers = task.capabilityScope.mcpServers.filter((server) => server.toolNames.length > 0);
+  const allowedToolIds = [...new Set([
+    ...definitions.flatMap((definition) => definition.toolIds),
+    ...(mcpServers.length > 0 ? MCP_BRIDGE_TOOL_IDS : []),
+  ])];
+  const allowedFamilies = [...new Set([
+    ...definitions.flatMap((definition) => definition.familyHints),
+    ...(mcpServers.length > 0 ? ["mcp" as const] : []),
+  ])];
 
   return {
     allowedFamilies,
+    allowedMcpServers: mcpServers.map((server) => ({
+      serverId: server.serverId,
+      toolNames: [...server.toolNames],
+    })),
     allowedToolIds,
     autonomous: task.capabilityScope.autonomyLevel === "scoped",
     maxModelLoops: task.runLimits.maxModelLoops,
@@ -484,9 +513,11 @@ export function createAutomationToolScope(task: AutomationTask): ToolAutomationS
 
 export function createAutomationRuntimeToolOverrides(task: AutomationTask): Partial<ProviderSettings["tools"]> {
   const capabilities = new Set(task.capabilityScope.capabilities);
-  const overrides: Partial<ProviderSettings["tools"]> = {
-    mcpServers: true,
-  };
+  const overrides: Partial<ProviderSettings["tools"]> = {};
+
+  if (task.capabilityScope.mcpServers.some((server) => server.toolNames.length > 0)) {
+    overrides.mcpServers = true;
+  }
 
   if (capabilities.has("github.read")) {
     overrides.sourceControl = true;
@@ -566,16 +597,21 @@ export function createAutomationSimulationSummary(task: AutomationTask) {
   const capabilities = task.capabilityScope.capabilities
     .map((capabilityId) => CAPABILITY_MAP.get(capabilityId)?.label ?? capabilityId)
     .join(", ");
+  const mcpCapabilities = formatMcpCapabilitySummary(task.capabilityScope.mcpServers);
+  const skillCapabilities = formatSkillCapabilitySummary(task.capabilityScope.skills);
   const nextRun = computeNextRunAt(task, new Date().toISOString());
 
   return [
     "Simulation only. No tools ran and no notifications were sent.",
     `Would run prompt: ${task.prompt}`,
+    task.projectName ? `Project: ${task.projectName}.` : "",
     `Model: ${task.provider && task.model ? `${getModelProvider(task.provider).label} / ${task.model}` : "current default"}.`,
     `Enabled capabilities: ${capabilities || "none"}.`,
+    mcpCapabilities ? `Installed MCP tools: ${mcpCapabilities}.` : "",
+    skillCapabilities ? `Installed skills: ${skillCapabilities}.` : "",
     `Autonomy: ${task.capabilityScope.autonomyLevel}.`,
     nextRun ? `Next due time from now: ${nextRun}.` : "This task only runs manually.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 export function getAutomationCapabilityDefinition(id: AutomationCapabilityId) {
@@ -692,6 +728,127 @@ function normalizeCapabilityIds(value: unknown): AutomationCapabilityId[] {
   return [...new Set(value.filter((candidate): candidate is AutomationCapabilityId => CAPABILITY_MAP.has(candidate as AutomationCapabilityId)))];
 }
 
+function normalizeMcpServerScopes(value: unknown): AutomationMcpServerScope[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const scopes: AutomationMcpServerScope[] = [];
+  const seenServers = new Set<string>();
+
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const raw = item as Partial<AutomationMcpServerScope>;
+    const serverId = normalizeOptionalString(raw.serverId);
+
+    if (!serverId || seenServers.has(serverId)) {
+      continue;
+    }
+
+    const toolNames = normalizeStringList(raw.toolNames, 100);
+
+    if (toolNames.length === 0) {
+      continue;
+    }
+
+    seenServers.add(serverId);
+    scopes.push({
+      serverId,
+      serverName: normalizeOptionalString(raw.serverName) ?? serverId,
+      toolNames,
+    });
+  }
+
+  return scopes.slice(0, 40);
+}
+
+function normalizeSkillScopes(value: unknown): AutomationSkillScope[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const scopes: AutomationSkillScope[] = [];
+  const seenSkills = new Set<string>();
+
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const raw = item as Partial<AutomationSkillScope>;
+    const id = normalizeOptionalString(raw.id);
+
+    if (!id || seenSkills.has(id)) {
+      continue;
+    }
+
+    const name = normalizeOptionalString(raw.name) ?? id;
+    const trigger = normalizeSkillTrigger(raw.trigger) ?? `$${id}`;
+
+    seenSkills.add(id);
+    scopes.push({ id, name, trigger });
+  }
+
+  return scopes.slice(0, 80);
+}
+
+function normalizeStringList(value: unknown, maxItems: number) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const strings: string[] = [];
+
+  for (const item of value) {
+    const normalized = normalizeOptionalString(item);
+
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    strings.push(normalized);
+
+    if (strings.length >= maxItems) {
+      break;
+    }
+  }
+
+  return strings;
+}
+
+function formatMcpCapabilityHints(scopes: AutomationMcpServerScope[]) {
+  return scopes
+    .filter((scope) => scope.toolNames.length > 0)
+    .map((scope) => {
+      const tools = scope.toolNames.join(", ");
+      return `MCP server ${scope.serverName} (serverId: ${scope.serverId}); allowed tool names: ${tools}. Use MCP tools only for these exact server/tool names.`;
+    });
+}
+
+function formatMcpCapabilitySummary(scopes: AutomationMcpServerScope[]) {
+  return scopes
+    .filter((scope) => scope.toolNames.length > 0)
+    .map((scope) => `${scope.serverName}: ${scope.toolNames.join(", ")}`)
+    .join("; ");
+}
+
+function formatSkillCapabilityHints(scopes: AutomationSkillScope[]) {
+  return scopes.map((scope) =>
+    `Installed skill ${scope.name} (${scope.trigger}). Treat this selected skill as applicable task context and load/follow its instructions when relevant.`,
+  );
+}
+
+function formatSkillCapabilitySummary(scopes: AutomationSkillScope[]) {
+  return scopes
+    .map((scope) => `${scope.trigger} ${scope.name}`)
+    .join(", ");
+}
+
 function normalizeRunStatus(value: unknown): AutomationRun["status"] {
   if (value === "queued" || value === "running" || value === "failed" || value === "waiting_for_approval" || value === "cancelled") {
     return value;
@@ -712,6 +869,16 @@ function createTitleFromPrompt(prompt: string) {
 
 function normalizeOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function normalizeSkillTrigger(value: unknown) {
+  const normalized = normalizeOptionalString(value);
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  return normalized.startsWith("$") ? normalized : `$${normalized.replace(/^@+/, "")}`;
 }
 
 function normalizeIsoDate(value: unknown, fallback: string) {

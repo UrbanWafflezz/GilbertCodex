@@ -26,7 +26,7 @@ const EMPTY_CHAT_MESSAGES: ChatMessage[] = [];
 const EMPTY_STRING_ARRAY: string[] = [];
 
 export function renderUtilityPage(deps: WorkspaceRuntimeDeps) {
-  const { activeRoute, activeSettingsSection, appearanceMode, appearanceSettings, appInfo, AppsPage, automationDraft, automationState, discordBridgeSettings, generalSettings, handleAcknowledgeAutomationRun, handleCreateAutomationTask, handleDeleteAutomationTask, handleDuplicateAutomationTask, handleLocalWorkspaceChange, handleOpenAutomationRunChat, handlePauseAllAutomationTasks, handlePauseAutomationTask, handleProviderConnectionChoice, handleRouteChange, handleRunAutomationTask, handleSimulateAutomationTask, handleSnoozeAutomationRun, handleSubscriptionSandboxUninstalled, handleUpdateAutomationTask, localWorkspace, locationServicesEnabled, personalizationSettings, projects, providerSettings, setActiveRoute, setActiveSettingsSection, setAppearanceMode, setAppearanceSettings, setAutomationDraft, setDiscordBridgeSettings, setGeneralSettings, setPersonalizationSettings, setProviderSettings, SettingsPage, SupportPage, TasksPage, WeatherRadarPage } = deps;
+  const { activeChat, activeRoute, activeSettingsSection, appearanceMode, appearanceSettings, appInfo, AppsPage, automationDraft, automationMcpServers, automationSkillRegistry, automationState, discordBridgeSettings, generalSettings, handleAcknowledgeAutomationRun, handleCreateAutomationTask, handleDeleteAutomationTask, handleDuplicateAutomationTask, handleLocalWorkspaceChange, handleOpenAutomationRunChat, handlePauseAllAutomationTasks, handlePauseAutomationTask, handleProviderConnectionChoice, handleRunAutomationTask, handleSimulateAutomationTask, handleSnoozeAutomationRun, handleSubscriptionSandboxUninstalled, handleUpdateAutomationTask, localWorkspace, locationServicesEnabled, personalizationSettings, projects, providerSettings, setActiveRoute, setActiveSettingsSection, setAppearanceMode, setAppearanceSettings, setAutomationDraft, setDiscordBridgeSettings, setGeneralSettings, setPersonalizationSettings, setProviderSettings, SettingsPage, TasksPage, WeatherRadarPage } = deps;
 
     if (activeRoute === "apps") {
       return (
@@ -46,15 +46,6 @@ export function renderUtilityPage(deps: WorkspaceRuntimeDeps) {
             setActiveRoute("settings");
           }}
           onOpenRadar={() => handleRouteChange("radar")}
-          onOpenSupport={() => handleRouteChange("support")}
-        />
-      );
-    }
-
-    if (activeRoute === "support") {
-      return (
-        <SupportPage
-          onBackToChat={() => setActiveRoute("chat")}
         />
       );
     }
@@ -62,10 +53,14 @@ export function renderUtilityPage(deps: WorkspaceRuntimeDeps) {
     if (activeRoute === "tasks") {
       return (
         <TasksPage
+          activeProjectName={activeChat.project}
           discordSettings={discordBridgeSettings}
           draft={automationDraft}
           globalPaused={automationState.globalPaused}
+          mcpServers={automationMcpServers ?? []}
+          projects={projects}
           runs={automationState.runs}
+          skillRegistry={automationSkillRegistry}
           tasks={automationState.tasks}
           onAcknowledgeRun={handleAcknowledgeAutomationRun}
           onBackToChat={() => setActiveRoute("chat")}
@@ -132,7 +127,7 @@ export function renderUtilityPage(deps: WorkspaceRuntimeDeps) {
   }
 
 export function renderChatPage(deps: WorkspaceRuntimeDeps) {
-  const { activeChat, activeChatProviderSettings, activeRoute, activeToolAwareProviderSettings, agentRuns, appInfo, browserPreviewTarget, ChatPage, chats, composerDraftToRestore, contextWindow, generalSettings, getModelProvider, getProviderApiKey, handleActiveChatModelChange, handleAddAutomation, handleArchiveActiveChat, handleComposerDraftChange, handleCopyChatDeeplink, handleCopyChatMarkdown, handleCopySessionId, handleCopyWorkingDirectory, handleDeleteQueuedMessage, handleEditUserMessageAndRegenerate, handleForkActiveChatLocal, handleForkChatFromMessage, handleForkActiveChatWorktree, handleHoldQueuedMessage, handleLocalWorkspaceChange, handleMessageFeedback, handleNewChat, handleOpenActiveChatInNewWindow, handleOpenProjectInTool, handleOpenProjectRun, handleOpenRenameChat, handleRegenerateResponse, handleRequestPlanRevision, handleResolveToolApproval, handleSelectChat, handleSelectProject, handleSendMessage, handleSteerQueuedMessage, handleStopGeneration, handleSubmitPlanningInput, handleTogglePin, handleToggleTerminal, isChatSending, lastContextCompaction, lastProviderContextUsage, loadingChatIds, localWorkspace, modelContextWindows, openCreateProjectDialog, projects, queuedChatSends, setBrowserPreviewTarget, setComposerDraftToRestore, setProviderSettings, terminalOpen, toolSettings } = deps;
+  const { activeChat, activeChatProviderSettings, activeRoute, activeToolAwareProviderSettings, agentRuns, appInfo, browserPreviewTarget, ChatPage, chats, composerDraftToRestore, contextWindow, generalSettings, getModelProvider, getProviderApiKey, handleActiveChatModelChange, handleAddAutomation, handleArchiveActiveChat, handleClearProjectGoal, handleCompleteProjectGoal, handleComposerDraftChange, handleCopyChatDeeplink, handleCopyChatMarkdown, handleCopySessionId, handleCopyWorkingDirectory, handleCreateProjectGoal, handleDeleteQueuedMessage, handleEditUserMessageAndRegenerate, handleForkActiveChatLocal, handleForkChatFromMessage, handleForkActiveChatWorktree, handleHoldQueuedMessage, handleLocalWorkspaceChange, handleMessageFeedback, handleNewChat, handleOpenActiveChatInNewWindow, handleOpenProjectInTool, handleOpenProjectRun, handleOpenRenameChat, handlePauseProjectGoal, handleRegenerateResponse, handleRequestPlanRevision, handleResolveToolApproval, handleResumeProjectGoal, handleSelectChat, handleSelectProject, handleSendMessage, handleSteerQueuedMessage, handleStopGeneration, handleSubmitPlanningInput, handleTogglePin, handleToggleTerminal, handleUpdateProjectGoal, isChatSending, lastContextCompaction, lastProviderContextUsage, loadingChatIds, localWorkspace, modelContextWindows, openCreateProjectDialog, projects, queuedChatSends, setBrowserPreviewTarget, setComposerDraftToRestore, setProviderSettings, terminalOpen, toolSettings } = deps;
   const activeQueuedSends = queuedChatSends.filter((queuedSend) => queuedSend.chatId === activeChat.id);
   const activeQueuedMessages = activeQueuedSends.length === 0 ? EMPTY_CHAT_MESSAGES : activeQueuedSends.map((queuedSend) => {
     const existingMessage = activeChat.messages.find((message) => message.id === queuedSend.userMessageId);
@@ -210,6 +205,12 @@ export function renderChatPage(deps: WorkspaceRuntimeDeps) {
         onOpenProjectTool={(target) => handleOpenProjectInTool(activeChat.project, target)}
         onLocalWorkspaceChange={handleLocalWorkspaceChange}
         onModelChange={handleActiveChatModelChange}
+        onProjectGoalClear={handleClearProjectGoal}
+        onProjectGoalComplete={handleCompleteProjectGoal}
+        onProjectGoalCreate={handleCreateProjectGoal}
+        onProjectGoalPause={handlePauseProjectGoal}
+        onProjectGoalResume={handleResumeProjectGoal}
+        onProjectGoalUpdate={handleUpdateProjectGoal}
         onEditUserMessage={handleEditUserMessageAndRegenerate}
         onRequestPlanRevision={handleRequestPlanRevision}
         onRegenerateResponse={handleRegenerateResponse}
@@ -223,6 +224,7 @@ export function renderChatPage(deps: WorkspaceRuntimeDeps) {
         lastProviderContextUsage={lastProviderContextUsage?.chatId === activeChat.id ? lastProviderContextUsage.usage : null}
         onCreateProject={openCreateProjectDialog}
         providerSettings={activeToolAwareProviderSettings}
+        projectGoal={projects.find((project) => project.name.toLowerCase() === activeChat.project.toLowerCase())?.projectGoal}
         projects={projects}
         queuedMessageCount={activeQueuedSends.length}
         queuedMessageDetails={activeQueuedMessages}

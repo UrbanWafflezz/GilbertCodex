@@ -485,7 +485,7 @@ export function createToolAwareProviderSettings(deps: WorkspaceRuntimeDeps, over
       maxTokens,
       thinking: {
         ...mergedSettings.thinking,
-        enabled: mergedSettings.tools.thinking && mergedSettings.thinking.enabled && supportsProviderThinking(mergedSettings.provider, mergedSettings.thinking.effort, mergedSettings.model),
+        enabled: mergedSettings.thinking.enabled && supportsProviderThinking(mergedSettings.provider, mergedSettings.thinking.effort, mergedSettings.model),
       },
     };
   }
@@ -519,20 +519,6 @@ export function createPromptAwareThinkingSettings(deps: WorkspaceRuntimeDeps, th
   void deps;
   void prompt;
     return thinking;
-  }
-
-export function shouldUseLighterThinkingForPrompt(deps: WorkspaceRuntimeDeps, prompt: string) {
-  const { COMPLEX_THINKING_PROMPT_PATTERN, SIMPLE_THINKING_PROMPT_MAX_WORDS, SIMPLE_THINKING_PROMPT_PATTERN } = deps;
-
-    const normalizedPrompt = prompt.replace(/\s+/g, " ").trim();
-
-    if (!normalizedPrompt || COMPLEX_THINKING_PROMPT_PATTERN.test(normalizedPrompt)) {
-      return false;
-    }
-
-    const wordCount = normalizedPrompt.split(/\s+/).filter(Boolean).length;
-
-    return wordCount <= SIMPLE_THINKING_PROMPT_MAX_WORDS && SIMPLE_THINKING_PROMPT_PATTERN.test(normalizedPrompt);
   }
 
 export function createFinalOnlyProviderSettings(deps: WorkspaceRuntimeDeps, prompt: string, chat: ChatSummary | null | undefined, overrides: Partial<ProviderSettings> = {}): ProviderSettings {

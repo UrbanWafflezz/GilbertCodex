@@ -17,6 +17,8 @@ node_modules/
 !/plugins/google-calendar/**
 !/plugins/github/
 !/plugins/github/**
+!/plugins/linkedin/
+!/plugins/linkedin/**
 src/toolBridge/
 src/toolBridge/tools/
 src/toolBridge/memory/

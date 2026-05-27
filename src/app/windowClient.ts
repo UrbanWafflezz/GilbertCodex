@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { isTauriDesktopRuntime } from "./tauriClient";
@@ -20,6 +21,19 @@ export async function maximizeWindow() {
 
 export async function closeWindow() {
   await withWindow((window) => window.close());
+}
+
+export async function quitApp() {
+  if (!isTauriDesktopRuntime()) {
+    window.close();
+    return;
+  }
+
+  try {
+    await invoke<void>("app_quit");
+  } catch {
+    await closeWindow();
+  }
 }
 
 export async function startWindowDrag() {
@@ -69,6 +83,9 @@ export async function openChatWindow(chatId: string, title: string) {
     void webview.once("tauri://created", () => resolve());
     void webview.once("tauri://error", (event) => reject(new Error(String(event.payload || "Could not open chat window."))));
   });
+
+  await webview.show().catch(() => undefined);
+  await webview.setFocus().catch(() => undefined);
 }
 
 export function createChatRouteUrl(chatId: string) {

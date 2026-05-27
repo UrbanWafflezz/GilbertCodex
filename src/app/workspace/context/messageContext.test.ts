@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createActiveProjectBoundaryMessage, createChatToolSelectionPrompt, resolveEnabledWorkspaceRoots } from "./messageContext";
+import { createActiveProjectBoundaryMessage, createChatToolSelectionPrompt, createMessagesForProvider, resolveEnabledWorkspaceRoots } from "./messageContext";
 import type { ChatMessage } from "../../../types/chat";
 import type { LocalWorkspaceSettings } from "../../../types/localWorkspace";
+import type { ProviderSettings } from "../../../types/settings";
 
 const deps = {
   referencesSelectedWorkspaceForToolSelection: () => false,
@@ -55,6 +56,97 @@ describe("createChatToolSelectionPrompt", () => {
     );
 
     expect(prompt).toBe("thanks");
+  });
+
+  it("carries an active Project Goal into terse continuation turns", () => {
+    const prompt = createChatToolSelectionPrompt(
+      {
+        activeChat: {
+          id: "chat-1",
+          messages: [],
+          project: "GilbertCodex",
+          title: "Goal chat",
+          updatedAt: "2026-05-25T12:00:00.000Z",
+        },
+        normalizeProjectName: (name: string) => name,
+        projects: [
+          {
+            createdAt: "2026-05-25T12:00:00.000Z",
+            id: "project-1",
+            name: "GilbertCodex",
+            projectGoal: {
+              createdAt: "2026-05-25T12:00:00.000Z",
+              id: "goal-1",
+              objective: "Finish Project Goals end to end.",
+              status: "active",
+              updatedAt: "2026-05-25T12:00:00.000Z",
+            },
+            updatedAt: "2026-05-25T12:00:00.000Z",
+          },
+        ],
+        referencesSelectedWorkspaceForToolSelection: () => false,
+        shouldAttachWebSearch: () => false,
+      } as any,
+      "continue",
+      [],
+      workspaceDisabled,
+    );
+
+    expect(prompt).toContain("Active Project Goal for tool selection only:");
+    expect(prompt).toContain("Finish Project Goals end to end.");
+  });
+});
+
+describe("createMessagesForProvider", () => {
+  it("injects the active Project Goal as provider context", async () => {
+    const userMessage = message("user", "continue");
+    const messages: ChatMessage[] = await createMessagesForProvider(
+      {
+        compactProviderMessages: (inputMessages: ChatMessage[]) => ({ messages: inputMessages }),
+        createActiveProjectBoundaryMessage: (projectName: string, workspace: LocalWorkspaceSettings) =>
+          createActiveProjectBoundaryMessage(
+            {
+              createMessage: (role: ChatMessage["role"], content: string) => message(role, content),
+              normalizeProjectName: (name: string) => name,
+            } as any,
+            projectName,
+            workspace,
+          ),
+        createChatResearchContextMessages: () => [],
+        createLocalWorkspaceContextMessages: async () => [],
+        createMessage: (role: ChatMessage["role"], content: string) => message(role, content),
+        createPdfLibraryContextMessages: () => [],
+        createSourceControlContextMessages: async () => [],
+        normalizeProjectName: (name: string) => name,
+        projects: [
+          {
+            createdAt: "2026-05-25T12:00:00.000Z",
+            id: "project-1",
+            name: "GilbertCodex",
+            projectGoal: {
+              createdAt: "2026-05-25T12:00:00.000Z",
+              id: "goal-1",
+              objective: "Finish Project Goals end to end.",
+              status: "active",
+              updatedAt: "2026-05-25T12:00:00.000Z",
+            },
+            updatedAt: "2026-05-25T12:00:00.000Z",
+          },
+        ],
+        shouldSkipLocalContextForGithub: () => false,
+      } as any,
+      [],
+      userMessage,
+      "GilbertCodex",
+      workspaceDisabled,
+      "continue",
+      [],
+      { thinking: { enabled: true, effort: "medium" } } as ProviderSettings,
+      () => undefined,
+    );
+
+    expect(messages.map((candidate) => candidate.content).join("\n\n")).toContain("PROJECT GOAL");
+    expect(messages.map((candidate) => candidate.content).join("\n\n")).toContain("Finish Project Goals end to end.");
   });
 });
 

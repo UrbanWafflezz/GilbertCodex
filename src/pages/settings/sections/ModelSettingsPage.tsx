@@ -1,5 +1,4 @@
 import { BadgeDollarSign, Check, Eye, EyeOff, ServerCog, SlidersHorizontal } from "lucide-react";
-import { ThinkingModeControls } from "../../../components/thinking/ThinkingModeControls";
 import { DEFAULT_LOCAL_CONTEXT_WINDOW_TOKENS, getAutomaticHostedMaxOutputTokens, isLocalModelProvider } from "../../../lib/generationSettings";
 import { formatTokenCount } from "../../../lib/contextWindow";
 import { MODEL_PROVIDERS, formatModelCapabilitySummary, formatModelPricingSummary, formatModelPricingTitle, getEffectiveProviderModelContextWindowTokens, getModelRouteSourceInfo, isNineRouterCodexModelId, type ChatModelOption, type ModelProviderCatalogItem } from "../../../lib/models";
@@ -8,7 +7,6 @@ import type { LiveModelCatalogStatus } from "../types";
 import { SettingsSectionHeading } from "../components/SettingsSectionHeading";
 
 interface ModelSettingsPageProps {
-  activeModelSupportsThinking: boolean;
   activeProvider: ModelProviderCatalogItem;
   activeProviderAllModels: ChatModelOption[];
   activeProviderDisabledModels: string[];
@@ -26,7 +24,6 @@ interface ModelSettingsPageProps {
 }
 
 export function ModelSettingsPage({
-  activeModelSupportsThinking,
   activeProvider,
   activeProviderAllModels,
   activeProviderDisabledModels,
@@ -97,7 +94,7 @@ export function ModelSettingsPage({
 
   return (
     <>
-      {showHeading ? <SettingsSectionHeading detail="Model identity, system prompt, generation, and reasoning controls." icon={ServerCog} title="Model" /> : null}
+      {showHeading ? <SettingsSectionHeading detail="Model identity, system prompt, and generation controls." icon={ServerCog} title="Model" /> : null}
       <div className="settings-section-grid">
         <article className="settings-card settings-card-wide model-settings-card">
           <div className="settings-card-heading">
@@ -327,22 +324,6 @@ export function ModelSettingsPage({
               />
             </label>
           </div>
-        </article>
-
-        <article className="settings-card settings-card-wide">
-          <div className="settings-card-heading">
-            <SlidersHorizontal size={19} aria-hidden="true" />
-            <div>
-              <h2>Reasoning</h2>
-              <p>{activeModelSupportsThinking ? "Codex-style effort for harder tasks." : "This model does not expose compatible reasoning controls."}</p>
-            </div>
-          </div>
-          <ThinkingModeControls
-            disabledReason={activeModelSupportsThinking ? undefined : "Not available for this model"}
-            settings={settings.thinking}
-            variant="panel"
-            onChange={(thinking) => onSettingsPatch({ thinking })}
-          />
         </article>
       </div>
     </>

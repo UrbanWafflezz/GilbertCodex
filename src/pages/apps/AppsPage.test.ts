@@ -312,8 +312,10 @@ describe("MCP app setup validation", () => {
       "exa",
       "filesystem",
       "firecrawl",
+      "godaddy",
       "heroku",
       "jetbrains",
+      "linkedin",
       "memory",
       "netlify",
       "neon",
@@ -333,8 +335,11 @@ describe("MCP app setup validation", () => {
     expect(getMcpFeaturedPresetIdsForSearch("BROWSERBASE_API_KEY")).toEqual(["browserbase"]);
     expect(getMcpFeaturedPresetIdsForSearch("EXA_API_KEY")).toEqual(["exa"]);
     expect(getMcpFeaturedPresetIdsForSearch("FIRECRAWL_API_KEY")).toEqual(["firecrawl"]);
+    expect(getMcpFeaturedPresetIdsForSearch("GoDaddy domain availability")).toEqual(["godaddy"]);
     expect(getMcpFeaturedPresetIdsForSearch("HEROKU_API_KEY")).toEqual(["heroku"]);
     expect(getMcpFeaturedPresetIdsForSearch("JetBrains IDE")).toEqual(["jetbrains"]);
+    expect(getMcpFeaturedPresetIdsForSearch("LINKEDIN_ACCESS_TOKEN")).toEqual(["linkedin"]);
+    expect(getMcpFeaturedPresetIdsForSearch("profile setup")).toEqual(["linkedin"]);
     expect(getMcpFeaturedPresetIdsForSearch("page inspection")).toEqual(["playwright"]);
     expect(getMcpFeaturedPresetIdsForSearch("PULUMI_ACCESS_TOKEN")).toEqual(["pulumi"]);
     expect(getMcpFeaturedPresetIdsForSearch("Sequential Thinking")).toEqual(["sequential-thinking"]);
@@ -354,6 +359,7 @@ describe("MCP app setup validation", () => {
       "EXA_API_KEY",
       "FIRECRAWL_API_KEY",
       "HEROKU_API_KEY",
+      "LINKEDIN_ACCESS_TOKEN",
       "NETLIFY_PERSONAL_ACCESS_TOKEN",
       "PULUMI_ACCESS_TOKEN",
       "SLACK_BOT_TOKEN",

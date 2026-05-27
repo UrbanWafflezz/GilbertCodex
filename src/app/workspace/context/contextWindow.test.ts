@@ -61,11 +61,9 @@ describe("chat-scoped approval sessions", () => {
   });
 });
 
-describe("prompt-aware thinking settings", () => {
-  it("preserves the user-selected thinking depth instead of silently downgrading it", () => {
-    const deps = {
-      shouldUseLighterThinkingForPrompt: () => true,
-    };
+describe("prompt-aware reasoning settings", () => {
+  it("keeps the saved runtime reasoning setting", () => {
+    const deps = {};
 
     expect(createPromptAwareThinkingSettings(deps as any, { enabled: true, effort: "high" }, "summarize this")).toEqual({
       enabled: true,

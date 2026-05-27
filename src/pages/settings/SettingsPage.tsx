@@ -32,7 +32,6 @@ import {
   getProviderApiKey,
   getProviderBaseUrl,
   prefersLiveModelCatalog,
-  supportsProviderThinking,
   usesLiveModelCatalog,
   type ProviderModelMetadata,
 } from "../../lib/models";
@@ -44,6 +43,7 @@ import { BrowserSettingsPage } from "./browser/BrowserSettingsPage";
 import { BraveSearchSettingsPage } from "./brave-search/BraveSearchSettingsPage";
 import { SettingsSectionHeading } from "./components/SettingsSectionHeading";
 import { MapboxSettingsPage } from "./mapbox/MapboxSettingsPage";
+import { MobilePairingSettingsPage } from "./mobile/MobilePairingSettingsPage";
 import { NineRouterSettingsPage } from "./nine-router/NineRouterSettingsPage";
 import { AppearanceSettingsPage } from "./sections/AppearanceSettingsPage";
 import { ConfigurationSettingsPage } from "./sections/ConfigurationSettingsPage";
@@ -168,7 +168,6 @@ function SettingsPageComponent({
     () => filterEnabledProviderModelOptions(activeProviderAllModels, activeProviderDisabledModels),
     [activeProviderAllModels, activeProviderDisabledModels],
   );
-  const activeModelSupportsThinking = supportsProviderThinking(settings.provider, settings.thinking.effort, settings.model);
   const liveProviderModelCount = settings.provider === "openrouter" ? activeProviderAllModels.length : (liveProviderModels?.length ?? 0);
   const githubRequestedScope = getDefaultGithubOAuthScope();
   const missingGithubScopes = useMemo(() => getMissingGithubFullAccessScopes(githubConnection), [githubConnection]);
@@ -820,6 +819,10 @@ function SettingsPageComponent({
       return <BrowserSettingsPage settings={settings} onSettingsPatch={updateSettings} />;
     }
 
+    if (displaySection === "mobile") {
+      return <MobilePairingSettingsPage />;
+    }
+
     if (displaySection === "database") {
       return (
         <>
@@ -898,7 +901,6 @@ function SettingsPageComponent({
             onUpdateActiveProviderBaseUrl={updateActiveProviderBaseUrl}
           />
           <ModelSettingsPage
-            activeModelSupportsThinking={activeModelSupportsThinking}
             activeProvider={activeProvider}
             activeProviderAllModels={activeProviderAllModels}
             activeProviderDisabledModels={activeProviderDisabledModels}

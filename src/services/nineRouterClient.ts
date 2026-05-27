@@ -5,7 +5,23 @@ import {
   openExternalUrl,
   startNineRouterOAuthCallback,
 } from "../app/tauriClient";
-import { getDefaultModelForProvider, getModelRouteSourceInfo, isNineRouterCodexModelId, NINE_ROUTER_CODEX_MODEL_IDS, NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS, normalizeNineRouterDiscoveredModelId } from "../lib/models";
+import {
+  getDefaultModelForProvider,
+  getModelRouteSourceInfo,
+  isNineRouterCodexModelId,
+  NINE_ROUTER_ANTIGRAVITY_MODEL_IDS,
+  NINE_ROUTER_CLAUDE_CODE_MODEL_IDS,
+  NINE_ROUTER_CLINE_MODEL_IDS,
+  NINE_ROUTER_CODEX_MODEL_IDS,
+  NINE_ROUTER_GEMINI_CLI_MODEL_IDS,
+  NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS,
+  NINE_ROUTER_IFLOW_MODEL_IDS,
+  NINE_ROUTER_KILO_CODE_MODEL_IDS,
+  NINE_ROUTER_KIMI_CODING_MODEL_IDS,
+  NINE_ROUTER_KIRO_MODEL_IDS,
+  NINE_ROUTER_QWEN_CODE_MODEL_IDS,
+  normalizeNineRouterDiscoveredModelId,
+} from "../lib/models";
 import { headersToRecord, normalizeNativeRequestBody, normalizeNativeRequestMethod } from "./nativeHttp";
 
 export const NINE_ROUTER_PROVIDER_ID = "9router" as const;
@@ -192,11 +208,11 @@ export interface NineRouterConnectOptions {
 
 export const NINE_ROUTER_ACCOUNT_PROVIDERS: NineRouterAccountProvider[] = [
   {
-    description: "Codex subscription routes for GPT-5.5, GPT-5.4, and Codex 5.3.",
+    description: "Codex subscription routes for GPT-5.5, GPT-5.4, Codex 5.3, and Spark.",
     flow: "codex",
     id: "codex",
     name: "Codex subscription",
-    usageNote: "Shows Codex quota windows when available.",
+    usageNote: "Shows Codex 5-hour, weekly, review, and Spark windows when available.",
   },
   {
     description: "Claude Code subscription routes for coding models.",
@@ -381,8 +397,17 @@ const NINE_ROUTER_ACCOUNT_ROUTE_GROUPS: Record<string, string> = {
 };
 
 const NINE_ROUTER_ACCOUNT_MODEL_PRIORITIES: Record<string, readonly string[]> = {
+  antigravity: NINE_ROUTER_ANTIGRAVITY_MODEL_IDS,
+  claude: NINE_ROUTER_CLAUDE_CODE_MODEL_IDS,
+  cline: NINE_ROUTER_CLINE_MODEL_IDS,
   codex: NINE_ROUTER_CODEX_MODEL_IDS,
+  "gemini-cli": NINE_ROUTER_GEMINI_CLI_MODEL_IDS,
   github: NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS,
+  iflow: NINE_ROUTER_IFLOW_MODEL_IDS,
+  "kimi-coding": NINE_ROUTER_KIMI_CODING_MODEL_IDS,
+  kilocode: NINE_ROUTER_KILO_CODE_MODEL_IDS,
+  kiro: NINE_ROUTER_KIRO_MODEL_IDS,
+  qwen: NINE_ROUTER_QWEN_CODE_MODEL_IDS,
 };
 
 export function chooseNineRouterModelForAccount(providerId: string, savedModel: string, models: string[]) {
@@ -403,7 +428,11 @@ export function chooseNineRouterModelForAccount(providerId: string, savedModel: 
     return liveProviderModel;
   }
 
-  return priorityModels[0] ?? chooseNineRouterModel(savedModel, models);
+  if (priorityModels.length > 0) {
+    return priorityModels[0];
+  }
+
+  return "";
 }
 
 export function chooseNineRouterConnectedAccountProvider(connections: NineRouterConnection[], excludedProviderId?: string) {

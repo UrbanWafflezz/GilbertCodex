@@ -1,9 +1,9 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { AlertTriangle, Check, ChevronDown, ChevronRight, ExternalLink, FileCode2, FileText, Globe2, LoaderCircle, Pencil, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronRight, ExternalLink, FileCode2, FileText, Globe2, LoaderCircle, Pencil, Plug, X } from "lucide-react";
 import type { AgentApproval, AgentApprovalDecision } from "../../types/agentRun";
 import type { ChatMessage, ChatSource, ChatToolCall, ChatToolFileChange } from "../../types/chat";
 
-type RunStageKey = "planning" | "reading" | "editing" | "terminal" | "browser" | "web" | "approval" | "summary";
+type RunStageKey = "planning" | "reading" | "editing" | "terminal" | "browser" | "web" | "mcp" | "approval" | "summary";
 type RunStageStatus = "active" | "complete" | "idle" | "issue" | "skipped" | "waiting";
 type RunLaneStatus = ChatToolCall["status"] | "pending";
 
@@ -48,6 +48,14 @@ interface RunBrowserItem {
   target?: string;
 }
 
+interface RunMcpItem {
+  detail?: string;
+  id: string;
+  server?: string;
+  status: RunLaneStatus;
+  tool: string;
+}
+
 interface RunSummary {
   changed: string;
   failed: string;
@@ -60,6 +68,7 @@ interface AssistantRunView {
   fileItems: RunFileItem[];
   hasWebLane: boolean;
   live: boolean;
+  mcpItems: RunMcpItem[];
   needsAttention: boolean;
   sources: ChatSource[];
   stages: RunStage[];
@@ -78,9 +87,25 @@ const STAGE_LABELS: Array<{ key: RunStageKey; label: string }> = [
   { key: "terminal", label: "Terminal" },
   { key: "browser", label: "Browser" },
   { key: "web", label: "Web" },
+  { key: "mcp", label: "MCP" },
   { key: "approval", label: "Approval" },
   { key: "summary", label: "Summary" },
 ];
+
+export function hasAssistantRunDetails(message: ChatMessage, responseStarted = false) {
+  const run = createAssistantRunView(message, responseStarted);
+
+  return Boolean(
+    run &&
+      (run.fileItems.length > 0 ||
+        run.terminalItems.length > 0 ||
+        run.browserItems.length > 0 ||
+        run.mcpItems.length > 0 ||
+        run.hasWebLane ||
+        run.approvals.length > 0 ||
+        run.needsAttention),
+  );
+}
 
 export function AssistantRunCard({ embedded = false, message, onResolveToolApproval, responseStarted = false }: AssistantRunCardProps) {
   const run = useMemo(() => createAssistantRunView(message, responseStarted), [message, responseStarted]);
@@ -118,6 +143,7 @@ export function AssistantRunCard({ embedded = false, message, onResolveToolAppro
           <RunTerminalLane items={run.terminalItems} />
           <RunBrowserLane items={run.browserItems} />
           <RunSourceLane detail={run.webDetail} hasWebLane={run.hasWebLane} sources={run.sources} />
+          <RunMcpLane items={run.mcpItems} />
           <RunApprovalLane approvals={run.approvals} messageId={message.id} onResolveToolApproval={onResolveToolApproval} />
           <RunSummaryLane summary={run.summary} />
         </div>
@@ -134,13 +160,21 @@ export function AssistantRunToolProcessRow({ toolCall }: { toolCall: ChatToolCal
   const fileItems = collectRunFileItems([toolCall]);
   const terminalItems = collectRunTerminalItems([toolCall]);
   const browserItems = collectRunBrowserItems([toolCall]);
+  const mcpItems = collectRunMcpItems([toolCall]);
 
   if (fileItems.length > 0) {
-    const group = createInlineFileGroups(fileItems)[0];
+    const group = createInlineBatchFileGroup(toolCall, fileItems) ?? createInlineFileGroups(fileItems)[0];
 
     if (group) {
       return (
-        <InlineProcessRow collapsible detail={group.detail} icon={group.icon} status={group.status} title={group.title}>
+        <InlineProcessRow
+          collapsible
+          defaultExpanded={false}
+          detail={group.detail}
+          icon={group.icon}
+          status={group.status}
+          title={group.title}
+        >
           <InlineFileItems files={group.files} />
         </InlineProcessRow>
       );
@@ -166,6 +200,21 @@ export function AssistantRunToolProcessRow({ toolCall }: { toolCall: ChatToolCal
         status={getInlineStatus(browserItems.map((item) => item.status))}
         title={`${browserItems.some((item) => item.status === "active") ? "Checking" : "Checked"} browser`}
       />
+    );
+  }
+
+  if (mcpItems.length > 0) {
+    return (
+      <InlineProcessRow
+        collapsible={mcpItems.length > 0}
+        defaultExpanded={true}
+        detail={formatMcpInlineDetail(mcpItems)}
+        icon={<Plug size={16} />}
+        status={getInlineStatus(mcpItems.map((item) => item.status))}
+        title={formatMcpInlineTitle(mcpItems)}
+      >
+        <InlineMcpItems items={mcpItems} />
+      </InlineProcessRow>
     );
   }
 
@@ -201,6 +250,7 @@ function AssistantRunInline({
       {fileGroups.map((group) => (
         <InlineProcessRow
           collapsible={group.files.length > 0}
+          defaultExpanded={true}
           detail={group.detail}
           icon={group.icon}
           key={group.key}
@@ -229,6 +279,19 @@ function AssistantRunInline({
           status={getInlineStatus(run.browserItems.map((item) => item.status))}
           title={`${run.browserItems.some((item) => item.status === "active") ? "Checking" : "Checked"} browser`}
         />
+      ) : null}
+
+      {run.mcpItems.length > 0 ? (
+        <InlineProcessRow
+          collapsible
+          defaultExpanded={true}
+          detail={formatMcpInlineDetail(run.mcpItems)}
+          icon={<Plug size={16} />}
+          status={getInlineStatus(run.mcpItems.map((item) => item.status))}
+          title={formatMcpInlineTitle(run.mcpItems)}
+        >
+          <InlineMcpItems items={run.mcpItems} />
+        </InlineProcessRow>
       ) : null}
 
       {run.hasWebLane ? (
@@ -297,14 +360,35 @@ function InlineFileItems({ files }: { files: RunFileItem[] }) {
   return (
     <div className="assistant-run-inline-files">
       {files.slice(0, 10).map((file) => (
-        <span data-action={file.action} data-status={file.status} key={file.id} title={file.path}>
+        <div className="assistant-run-inline-file-line" data-action={file.action} data-status={file.status} key={file.id} title={file.path}>
+          <em>{formatInlineFileVerb(file)}</em>
           <b>{formatActivityPath(file.path)}</b>
           {isChangedFileItem(file) ? (
-            <small>+{formatNumber(file.additions ?? 0)} / -{formatNumber(file.deletions ?? 0)}</small>
+            <small>
+              <i data-kind="add">+{formatNumber(file.additions ?? 0)}</i>
+              <i data-kind="delete">-{formatNumber(file.deletions ?? 0)}</i>
+            </small>
           ) : null}
-        </span>
+          <i className="assistant-run-inline-file-state" aria-hidden="true" />
+        </div>
       ))}
-      {files.length > 10 ? <em>+{files.length - 10} more</em> : null}
+      {files.length > 10 ? <div className="assistant-run-inline-file-line" data-action="more">+{files.length - 10} more</div> : null}
+    </div>
+  );
+}
+
+function InlineMcpItems({ items }: { items: RunMcpItem[] }) {
+  return (
+    <div className="assistant-run-inline-mcp">
+      {items.slice(0, 8).map((item) => (
+        <div className="assistant-run-inline-mcp-line" data-status={item.status} key={item.id}>
+          <em>{formatInlineMcpVerb(item.status)}</em>
+          <b>{item.tool}</b>
+          {item.server ? <small>{item.server}</small> : null}
+          <i className="assistant-run-inline-file-state" aria-hidden="true" />
+        </div>
+      ))}
+      {items.length > 8 ? <div className="assistant-run-inline-mcp-line" data-status="complete">+{items.length - 8} more MCP calls</div> : null}
     </div>
   );
 }
@@ -312,6 +396,7 @@ function InlineFileItems({ files }: { files: RunFileItem[] }) {
 function InlineProcessRow({
   children,
   collapsible = false,
+  defaultExpanded = false,
   detail,
   icon,
   status,
@@ -319,12 +404,13 @@ function InlineProcessRow({
 }: {
   children?: ReactNode;
   collapsible?: boolean;
+  defaultExpanded?: boolean;
   detail?: string;
   icon: ReactNode;
   status: RunLaneStatus | RunStageStatus;
   title: string;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const canExpand = Boolean(collapsible && children);
   const header = (
     <>
@@ -436,6 +522,28 @@ function RunBrowserLane({ items }: { items: RunBrowserItem[] }) {
               <strong>{item.label}</strong>
               {item.target ? <small>{item.target}</small> : item.detail ? <small>{item.detail}</small> : null}
             </span>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RunMcpLane({ items }: { items: RunMcpItem[] }) {
+  if (items.length === 0) return null;
+
+  return (
+    <section className="assistant-run-lane" data-lane="mcp" aria-label="MCP activity">
+      <RunLaneHeading icon={<Plug size={14} />} title="MCP" detail={`${items.length} call${items.length === 1 ? "" : "s"}`} />
+      <div className="assistant-run-mcp-list">
+        {items.map((item) => (
+          <article className="assistant-run-mcp-row" data-status={item.status} key={item.id}>
+            <span>
+              <strong>{formatInlineMcpVerb(item.status)}</strong>
+              <b>{item.tool}</b>
+              {item.server ? <small>{item.server}</small> : null}
+            </span>
+            {item.detail ? <small>{item.detail}</small> : null}
           </article>
         ))}
       </div>
@@ -555,6 +663,7 @@ function createAssistantRunView(message: ChatMessage, responseStarted: boolean):
   const fileItems = collectRunFileItems(toolCalls);
   const terminalItems = collectRunTerminalItems(toolCalls);
   const browserItems = collectRunBrowserItems(toolCalls);
+  const mcpItems = collectRunMcpItems(toolCalls);
   const hasWebLane = hasRealWebSearchRun(message);
   const sources = hasWebLane ? getUniqueSources(message.sources ?? []) : [];
   const planningStatus = getPlanningStageStatus(message, responseStarted);
@@ -563,6 +672,7 @@ function createAssistantRunView(message: ChatMessage, responseStarted: boolean):
   const terminalStatus = getToolFamilyStageStatus(toolCalls.filter(isTerminalToolCall));
   const browserStatus = getToolFamilyStageStatus(toolCalls.filter(isBrowserToolCall));
   const webStatus = getWebStageStatus(message, toolCalls);
+  const mcpStatus = getToolFamilyStageStatus(toolCalls.filter(isMcpToolCall));
   const approvalStatus = getApprovalStageStatus(approvals);
   const summaryStatus = getSummaryStageStatus(message, responseStarted, approvals);
   const live = Boolean(
@@ -595,6 +705,7 @@ function createAssistantRunView(message: ChatMessage, responseStarted: boolean):
     fileItems,
     hasWebLane,
     live,
+    mcpItems,
     needsAttention: pendingApprovalCount > 0 || issueCount > 0,
     sources,
     stages: STAGE_LABELS.map(({ key, label }) => ({
@@ -605,6 +716,7 @@ function createAssistantRunView(message: ChatMessage, responseStarted: boolean):
         approval: approvalStatus,
         browser: browserStatus,
         editing: editingStatus,
+        mcp: mcpStatus,
         planning: planningStatus,
         reading: readingStatus,
         summary: summaryStatus,
@@ -624,7 +736,7 @@ function createAssistantRunView(message: ChatMessage, responseStarted: boolean):
 function getPlanningStageStatus(message: ChatMessage, responseStarted: boolean): RunStageStatus {
   if (message.planning?.inputRequest && !message.planning.inputRequest.answeredAt) return "waiting";
   if (message.isStreaming && !responseStarted) return "active";
-  if (message.planning || message.thinking || message.responseThinking?.trim() || message.workTrace?.some((item) => item.kind === "thinking")) return "complete";
+  if (message.planning) return "complete";
   return message.toolCalls?.length || responseStarted ? "complete" : "idle";
 }
 
@@ -758,6 +870,55 @@ function createInlineFileGroups(fileItems: RunFileItem[]) {
   return groups.filter((group) => group.files.length > 0);
 }
 
+function createInlineBatchFileGroup(toolCall: ChatToolCall, fileItems: RunFileItem[]) {
+  const operation = getBatchOperation(toolCall);
+
+  if (!operation || fileItems.length === 0) {
+    return null;
+  }
+
+  const status = getInlineStatus(fileItems.map((file) => file.status));
+  const live = isLiveLaneStatus(status) || toolCall.status === "active" || toolCall.status === "waiting_approval";
+  const summary = toolCall.batchSummary;
+  const totalCount = Math.max(summary?.fileCount ?? 0, fileItems.length);
+  const successCount = summary?.successCount ?? fileItems.filter((file) => file.status === "complete").length;
+  const failureCount = summary?.failureCount ?? fileItems.filter((file) => file.status === "error").length;
+  const skippedCount = summary?.skippedCount ?? fileItems.filter((file) => file.status === "skipped").length;
+  const processedCount = Math.min(totalCount, successCount + failureCount + skippedCount);
+  const verb = operation === "write"
+    ? live ? "writing" : "wrote"
+    : live ? "editing" : "edited";
+  const title = live && processedCount > 0
+    ? `Batch ${verb} ${formatFileRatio(processedCount, totalCount)}`
+    : `Batch ${verb} ${formatCount(live ? totalCount : Math.max(successCount, fileItems.length), "file")}`;
+  const changedFiles = fileItems.filter(isChangedFileItem);
+  const additions = changedFiles.reduce((total, file) => total + (file.additions ?? 0), 0);
+  const deletions = changedFiles.reduce((total, file) => total + (file.deletions ?? 0), 0);
+  const firstFile = fileItems[0] ? formatActivityPath(fileItems[0].path) : "";
+  const extraCount = Math.max(0, fileItems.length - 1);
+  const filePreview = firstFile ? `${firstFile}${extraCount > 0 ? ` and ${extraCount} more` : ""}` : "";
+  const diffPreview = changedFiles.length > 0 && (additions > 0 || deletions > 0)
+    ? `+${formatNumber(additions)} / -${formatNumber(deletions)}`
+    : "";
+  const pendingCount = live ? Math.max(0, totalCount - processedCount) : 0;
+  const outcomeDetail = [
+    successCount > 0 ? `${successCount} OK` : "",
+    failureCount > 0 ? `${failureCount} failed` : "",
+    skippedCount > 0 ? `${skippedCount} skipped` : "",
+    pendingCount > 0 && processedCount > 0 ? `${pendingCount} pending` : "",
+  ].filter(Boolean).join(", ");
+  const detail = outcomeDetail || [filePreview, diffPreview].filter(Boolean).join(" ");
+
+  return {
+    detail,
+    files: fileItems,
+    icon: <Pencil size={16} />,
+    key: `${operation}-${toolCall.id}`,
+    status,
+    title,
+  };
+}
+
 function createInlineFileGroup(key: string, files: RunFileItem[], label: string, icon: ReactNode, detailOverride = "") {
   const status = getInlineStatus(files.map((file) => file.status));
   const changedFiles = files.filter(isChangedFileItem);
@@ -779,6 +940,14 @@ function createInlineFileGroup(key: string, files: RunFileItem[], label: string,
     status,
     title: `${label} ${formatCount(files.length, "file")}`,
   };
+}
+
+function isLiveLaneStatus(status: RunLaneStatus | RunStageStatus) {
+  return status === "active" || status === "waiting_approval" || status === "waiting";
+}
+
+function formatFileRatio(count: number, total: number) {
+  return `${formatNumber(count)} of ${formatCount(Math.max(total, count), "file")}`;
 }
 
 function getChangedFileGroupLabel(files: RunFileItem[]) {
@@ -850,6 +1019,13 @@ function collectRunFileItems(toolCalls: ChatToolCall[]): RunFileItem[] {
     const key = getToolKey(toolCall);
 
     if (isFileEditingToolCall(toolCall)) {
+      const estimatedItems = collectEstimatedEditingFileItems(toolCall, parsedInput);
+
+      if (estimatedItems.length > 0) {
+        items.push(...estimatedItems);
+        continue;
+      }
+
       const action = getEditingAction(toolCall);
       const editPaths = paths.length > 0 ? paths : getEditInputPaths(parsedInput);
       for (const path of editPaths) items.push(createRunFileItem(toolCall, path, action));
@@ -860,6 +1036,149 @@ function collectRunFileItems(toolCalls: ChatToolCall[]): RunFileItem[] {
   }
 
   return dedupeFileItems(items).slice(0, 24);
+}
+
+function collectEstimatedEditingFileItems(toolCall: ChatToolCall, input: Record<string, unknown> | null): RunFileItem[] {
+  if (!input) {
+    return [];
+  }
+
+  if (isWriteToolCall(toolCall)) {
+    return getWriteInputRecords(input).flatMap((file, index) => {
+      const path = stringValue(file.path);
+      if (!path) {
+        return [];
+      }
+
+      return [{
+        action: file.overwrite === false ? "created" : "wrote",
+        additions: countTextLines(stringValue(file.content)),
+        deletions: 0,
+        id: `${toolCall.id}:write-estimate:${path}:${index}`,
+        path,
+        status: toolCall.status,
+      }];
+    });
+  }
+
+  return getEditInputRecords(input).flatMap((edit, index) => {
+    const path = stringValue(edit.path);
+    if (!path) {
+      return [];
+    }
+
+    const operation = stringValue(edit.operation ?? edit.type).toLowerCase();
+    return [{
+      action: "edited",
+      additions: estimateEditAdditions(edit, operation),
+      deletions: estimateEditDeletions(edit, operation),
+      id: `${toolCall.id}:edit-estimate:${path}:${index}`,
+      path,
+      status: toolCall.status,
+    }];
+  });
+}
+
+function getWriteInputRecords(input: Record<string, unknown>): Record<string, unknown>[] {
+  const files = recordArrayValue(input.files);
+  if (files.length > 0) {
+    return files;
+  }
+
+  const paths = stringArrayValue(input.paths);
+  const contents = stringArrayValue(input.contents);
+  const content = stringValue(input.content);
+
+  if (paths.length > 0) {
+    return paths.map((path, index) => ({
+      content: contents[index] ?? content,
+      overwrite: input.overwrite,
+      path,
+    }));
+  }
+
+  const path = stringValue(input.path);
+  return path ? [{ content, overwrite: input.overwrite, path }] : [];
+}
+
+function getEditInputRecords(input: Record<string, unknown>): Record<string, unknown>[] {
+  const edits = recordArrayValue(input.edits);
+  if (edits.length > 0) {
+    return edits;
+  }
+
+  const path = stringValue(input.path);
+  if (path) {
+    return [{ ...input, path }];
+  }
+
+  const paths = stringArrayValue(input.paths);
+  const oldTexts = stringArrayValue(input.oldTexts ?? input.old_texts);
+  const newTexts = stringArrayValue(input.newTexts ?? input.new_texts);
+  const oldText = stringValue(input.oldText ?? input.old_text);
+  const newText = stringValue(input.newText ?? input.new_text);
+
+  return paths.map((editPath, index) => ({
+    newText: newTexts[index] ?? newText,
+    oldText: oldTexts[index] ?? oldText,
+    operation: "exact_replace",
+    path: editPath,
+  }));
+}
+
+function estimateEditAdditions(edit: Record<string, unknown>, operation: string) {
+  if (operation === "exact_replace" || edit.oldText !== undefined || edit.old_text !== undefined) {
+    return countTextLines(stringValue(edit.newText ?? edit.new_text));
+  }
+
+  return countTextLines(stringValue(edit.content));
+}
+
+function estimateEditDeletions(edit: Record<string, unknown>, operation: string) {
+  if (isSpanEdit(edit, operation)) {
+    return estimateSpanDeletionCount(edit);
+  }
+
+  if (operation === "replace_range" || edit.startLine !== undefined || edit.start_line !== undefined) {
+    const startLine = numberValue(edit.startLine ?? edit.start_line);
+    const endLine = numberValue(edit.endLine ?? edit.end_line);
+    return startLine && endLine && endLine >= startLine ? endLine - startLine + 1 : 0;
+  }
+
+  if (operation === "exact_replace" || edit.oldText !== undefined || edit.old_text !== undefined) {
+    return countTextLines(stringValue(edit.oldText ?? edit.old_text));
+  }
+
+  return 0;
+}
+
+function isSpanEdit(edit: Record<string, unknown>, operation: string) {
+  return operation === "replace_span" || operation === "span_replace" || operation === "line_column_span" || operation === "column_range" || operation === "char_range" || operation === "replace_chars"
+    || edit.startColumn !== undefined
+    || edit.start_column !== undefined
+    || edit.startChar !== undefined
+    || edit.start_char !== undefined
+    || edit.endColumn !== undefined
+    || edit.end_column !== undefined
+    || edit.endChar !== undefined
+    || edit.end_char !== undefined;
+}
+
+function estimateSpanDeletionCount(input: Record<string, unknown>) {
+  const startLine = numberValue(input.startLine ?? input.start_line);
+  const endLine = numberValue(input.endLine ?? input.end_line) ?? startLine;
+  const startColumn = numberValue(input.startColumn ?? input.start_column ?? input.startChar ?? input.start_char);
+  const endColumn = numberValue(input.endColumn ?? input.end_column ?? input.endChar ?? input.end_char);
+
+  if (startLine && endLine && endLine > startLine) {
+    return endLine - startLine + 1;
+  }
+
+  if (startLine && endLine === startLine && startColumn && endColumn && endColumn > startColumn) {
+    return 1;
+  }
+
+  return 0;
 }
 
 function collectExplicitFileResultItems(toolCall: ChatToolCall): RunFileItem[] {
@@ -982,6 +1301,23 @@ function collectRunBrowserItems(toolCalls: ChatToolCall[]): RunBrowserItem[] {
   });
 }
 
+function collectRunMcpItems(toolCalls: ChatToolCall[]): RunMcpItem[] {
+  return toolCalls.filter(isMcpToolCall).map((toolCall) => {
+    const parsedInput = parseToolInput(toolCall.input);
+    const server = getMcpServerName(toolCall, parsedInput);
+    const tool = getMcpToolName(toolCall, parsedInput);
+    const detail = cleanInlineText(toolCall.detail || createMcpOutputPreview(toolCall.output));
+
+    return {
+      detail,
+      id: toolCall.id,
+      server,
+      status: toolCall.status,
+      tool,
+    };
+  });
+}
+
 function hasRealWebSearchRun(message: ChatMessage) {
   return Boolean(
     message.webSearch?.searchedAt ||
@@ -1085,6 +1421,23 @@ function isWriteToolCall(toolCall: ChatToolCall) {
   return /\bwrite\b|\bfiles[._-]write/.test(getToolKey(toolCall));
 }
 
+function getBatchOperation(toolCall: ChatToolCall): NonNullable<ChatToolCall["batchSummary"]>["operation"] | undefined {
+  if (toolCall.batchSummary?.operation) {
+    return toolCall.batchSummary.operation;
+  }
+
+  const key = getToolKey(toolCall);
+  if (/\bfiles[._-]write_many\b|\bwrite many workspace files\b|\bbatch write\b/.test(key)) {
+    return "write";
+  }
+
+  if (/\bfiles[._-]edit_many\b|\bedit many workspace files\b|\bbatch edit\b/.test(key)) {
+    return "edit";
+  }
+
+  return undefined;
+}
+
 function isCopyToolCall(toolCall: ChatToolCall) {
   return /\bcopy\b|\bfiles[._-]copy/.test(getToolKey(toolCall));
 }
@@ -1169,6 +1522,7 @@ function formatStageDetail(key: RunStageKey) {
   if (key === "terminal") return "Terminal commands and dev server work";
   if (key === "browser") return "Browser preview, screenshots, and console checks";
   if (key === "web") return "External web search and source gathering";
+  if (key === "mcp") return "MCP server and connector tool calls";
   if (key === "approval") return "Human review gates";
   return "Final user-facing summary";
 }
@@ -1227,6 +1581,20 @@ function cleanInlineText(value: string) {
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : undefined;
+}
+
+function countTextLines(content: string) {
+  if (!content) {
+    return 0;
+  }
+
+  const normalized = content.replace(/\r\n/g, "\n");
+  const trimmed = normalized.endsWith("\n") ? normalized.slice(0, -1) : normalized;
+  return trimmed ? trimmed.split("\n").length : 0;
 }
 
 function limitText(value: string, maxChars: number) {

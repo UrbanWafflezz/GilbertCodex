@@ -14,7 +14,6 @@ import type { DiscordBridgeSettings } from "../../../types/discord";
 import type { LocalWorkspaceSettings } from "../../../types/localWorkspace";
 import type { PrimaryRoute } from "../../../types/navigation";
 import type { CreateProjectOptions, ProjectSummary } from "../../../types/project";
-import type { ProviderReasoningState } from "../../../types/reasoning";
 import type { AppPersonalizationSettings, AppearanceMode, ProviderSettings, WebSearchSettings } from "../../../types/settings";
 import type { ToolRegistrySettings } from "../../../types/tools";
 import type { SettingsSectionId } from "../../../pages/settings/types";
@@ -23,7 +22,7 @@ import type { ActiveGeneration, ApprovedPlanExecutionContext, AssistantToolRespo
 import type { WorkspaceRuntimeDeps } from "../runtimeTypes";
 
 export async function handleRegenerateResponse(deps: WorkspaceRuntimeDeps, messageId: string) {
-  const { activeChat, compactProviderMessages, createActiveGeneration, createActiveProjectBoundaryMessage, createContextCompactionProgress, createInterruptedResponseContextMessages, createLocalWorkspaceContextMessages, createPlanningAnswerMessages, createPlanningExecutionApproval, createPlanningProgress, createPromptAwareProviderSettings, createToolAwareProviderSettings, finishActiveGeneration, getLatestUserPrompt, getPlanningInputRequests, isAbortError, isChatSending, isInterruptedAssistantMessage, isRequestInactive, localWorkspaceRef, mergeAgentApprovals, mergeChatArtifacts, notifyRunComplete, notifyRunNeedsAttention, preserveVisibleResponseThinking, recordPlanningProviderRequest, recordPlanningProviderUsage, resolveWorkspaceForChatProject, runPlanningMode, setActiveChatId, setActiveGenerationTarget, setActiveRoute, setAgentRunCompleted, setAgentRunContinuing, setAgentRunFailed, setAgentRunWaiting, setChats, setNoticeDialog, sortChatsByUpdatedAt, stopStaleStreamingMessages, streamAssistantWithLocalTools, toolSettings, touchProject, updateGeneratedMessage, withContextCompactionMarker, withContextCompactionProgress, withLocalComputerProgress, withWebSearchProgress } = deps;
+  const { activeChat, compactProviderMessages, createActiveGeneration, createActiveProjectBoundaryMessage, createContextCompactionProgress, createInterruptedResponseContextMessages, createLocalWorkspaceContextMessages, createPlanningAnswerMessages, createPlanningExecutionApproval, createPlanningProgress, createToolAwareProviderSettings, finishActiveGeneration, getLatestUserPrompt, getPlanningInputRequests, isAbortError, isChatSending, isInterruptedAssistantMessage, isRequestInactive, localWorkspaceRef, mergeAgentApprovals, mergeChatArtifacts, notifyRunComplete, notifyRunNeedsAttention, preserveVisibleResponseThinking, recordPlanningProviderRequest, recordPlanningProviderUsage, resolveWorkspaceForChatProject, runPlanningMode, setActiveChatId, setActiveGenerationTarget, setActiveRoute, setAgentRunCompleted, setAgentRunContinuing, setAgentRunFailed, setAgentRunWaiting, setChats, setNoticeDialog, sortChatsByUpdatedAt, stopStaleStreamingMessages, streamAssistantWithLocalTools, toolSettings, touchProject, updateGeneratedMessage, withContextCompactionMarker, withContextCompactionProgress, withLocalComputerProgress, withWebSearchProgress } = deps;
 
     if (!toolSettings.provider) {
       setNoticeDialog({
@@ -59,7 +58,6 @@ export async function handleRegenerateResponse(deps: WorkspaceRuntimeDeps, messa
     const regeneratePrompt = getLatestUserPrompt(priorMessages);
     const { controller, requestId } = createActiveGeneration(currentChat.id, currentChat, true);
     const now = new Date().toISOString();
-    const effectiveThinkingSettings = createPromptAwareProviderSettings(regeneratePrompt, {}, currentChat).thinking;
     const regeneratedAssistantMessage: ChatMessage = {
       ...assistantMessage,
       artifacts: undefined,
@@ -82,12 +80,6 @@ export async function handleRegenerateResponse(deps: WorkspaceRuntimeDeps, messa
       progress: isPlanningMode ? createPlanningProgress("drafting") : undefined,
       sources: continueInterruptedResponse ? assistantMessage.sources : undefined,
       status: undefined,
-      thinking: toolSettings.thinking && (isPlanningMode || effectiveThinkingSettings.enabled)
-        ? {
-            effort: isPlanningMode ? "high" : effectiveThinkingSettings.effort,
-            startedAt: now,
-          }
-        : undefined,
       toolCalls: continueInterruptedResponse ? assistantMessage.toolCalls : undefined,
       webSearch: undefined,
     };
@@ -166,6 +158,7 @@ export async function handleRegenerateResponse(deps: WorkspaceRuntimeDeps, messa
                               ...message,
                               content: snapshot.content ?? message.content,
                               progress: withWebSearchProgress(message.webSearch, snapshot.progress),
+                              reasoning: snapshot.reasoning ?? message.reasoning,
                             })
                           : message,
                       ),
@@ -205,12 +198,7 @@ export async function handleRegenerateResponse(deps: WorkspaceRuntimeDeps, messa
                                 }
                               : undefined,
                             progress: withWebSearchProgress(message.webSearch, assistantResponse.progress),
-                            thinking: message.thinking
-                              ? {
-                                  ...message.thinking,
-                                  completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-                                }
-                              : undefined,
+                            reasoning: assistantResponse.reasoning ?? message.reasoning,
                           })
                         : message,
                     ),
@@ -289,13 +277,8 @@ export async function handleRegenerateResponse(deps: WorkspaceRuntimeDeps, messa
                             content: assistantResponse.content,
                             isStreaming: false,
                             progress: withLocalComputerProgress(assistantResponse.progress, message.progress),
+                            reasoning: assistantResponse.reasoning ?? message.reasoning,
                             toolCalls: assistantResponse.toolCalls ?? message.toolCalls,
-                            thinking: message.thinking
-                              ? {
-                                  ...message.thinking,
-                                  completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-                                }
-                              : undefined,
                           })
                         : message,
                     ),
@@ -356,12 +339,6 @@ export async function handleRegenerateResponse(deps: WorkspaceRuntimeDeps, messa
                           content: errorContent,
                           isStreaming: false,
                           status: "error",
-                          thinking: message.thinking
-                            ? {
-                                ...message.thinking,
-                                completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-                              }
-                            : undefined,
                         }
                       : message,
                   ),

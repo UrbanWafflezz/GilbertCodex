@@ -244,117 +244,129 @@ pub async fn gilbert_database_set_values(
 }
 
 #[tauri::command]
-pub fn gilbert_database_cleanup_legacy_storage(
+pub async fn gilbert_database_cleanup_legacy_storage(
     app: AppHandle,
 ) -> Result<LegacyStorageCleanupResponse, String> {
-    let (removed_paths, failed_paths) = cleanup_paths(&legacy_storage_paths(&app)?);
-    if let Some(error) = failed_paths.first() {
-        return Err(error.clone());
-    }
+    run_database_worker("Database legacy cleanup", move || {
+        let (removed_paths, failed_paths) = cleanup_paths(&legacy_storage_paths(&app)?);
+        if let Some(error) = failed_paths.first() {
+            return Err(error.clone());
+        }
 
-    Ok(LegacyStorageCleanupResponse { removed_paths })
-}
-
-#[tauri::command]
-pub fn gilbert_database_get_overview(app: AppHandle) -> Result<DatabaseOverviewResponse, String> {
-    let active_namespace = auth::current_user_storage_namespace(&app)?;
-    let database_path = storage::database_path(&app)
-        .map_err(|error| format!("Could not resolve the local database path: {error}"))?;
-    let exists = database_path.exists();
-    if exists {
-        storage::with_database_connection(&app, |_| Ok(()))?;
-    }
-    let metadata = fs::metadata(&database_path).ok();
-    let file_size_bytes = metadata
-        .as_ref()
-        .map(|metadata| metadata.len())
-        .unwrap_or(0);
-    let last_modified = metadata
-        .as_ref()
-        .and_then(|metadata| metadata.modified().ok())
-        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64);
-
-    let stored_records = if exists {
-        read_database_records(&database_path, &active_namespace)?
-    } else {
-        Vec::new()
-    };
-
-    let mut categories = Vec::new();
-    let mut context = DatabaseContextSummary::default();
-    let mut namespaces = BTreeSet::new();
-    let mut records = Vec::new();
-
-    for record in stored_records {
-        namespaces.insert(record.namespace.clone());
-        add_record_context(&record.key, &record.value, &mut context);
-
-        let definition = category_for_key(&record.key);
-        let size_bytes = record.value.len() as u64;
-        add_category_usage(&mut categories, &definition, size_bytes);
-
-        records.push(DatabaseStorageRecord {
-            namespace: record.namespace,
-            key: record.key.clone(),
-            label: label_for_key(&record.key).to_string(),
-            category: definition.id.to_string(),
-            size_bytes,
-            updated_at: record.updated_at,
-            summary: summarize_record(&record.key, &record.value),
-            sensitive: is_sensitive_key(&record.key),
-        });
-    }
-
-    context.estimated_tokens =
-        ((context.content_bytes + context.reasoning_bytes + context.thinking_bytes) as f64 / 4.0)
-            .ceil() as u64;
-
-    let engine = inspect_database_engine(&database_path).unwrap_or_default();
-    let migration =
-        inspect_database_migration(&database_path, &active_namespace).unwrap_or_default();
-    let legacy_storage = inspect_legacy_storage(&app)?;
-
-    Ok(DatabaseOverviewResponse {
-        database_path: path_to_string(&database_path),
-        exists,
-        file_size_bytes,
-        last_modified,
-        record_count: records.len(),
-        namespace_count: namespaces.len(),
-        categories,
-        records,
-        context,
-        engine,
-        migration,
-        legacy_storage,
+        Ok(LegacyStorageCleanupResponse { removed_paths })
     })
+    .await
 }
 
 #[tauri::command]
-pub fn gilbert_database_backup(app: AppHandle) -> Result<DatabaseBackupResponse, String> {
-    create_database_backup(&app)
+pub async fn gilbert_database_get_overview(
+    app: AppHandle,
+) -> Result<DatabaseOverviewResponse, String> {
+    run_database_worker("Database overview", move || {
+        let active_namespace = auth::current_user_storage_namespace(&app)?;
+        let database_path = storage::database_path(&app)
+            .map_err(|error| format!("Could not resolve the local database path: {error}"))?;
+        let exists = database_path.exists();
+        if exists {
+            storage::with_database_connection(&app, |_| Ok(()))?;
+        }
+        let metadata = fs::metadata(&database_path).ok();
+        let file_size_bytes = metadata
+            .as_ref()
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        let last_modified = metadata
+            .as_ref()
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64);
+
+        let stored_records = if exists {
+            read_database_records(&database_path, &active_namespace)?
+        } else {
+            Vec::new()
+        };
+
+        let mut categories = Vec::new();
+        let mut context = DatabaseContextSummary::default();
+        let mut namespaces = BTreeSet::new();
+        let mut records = Vec::new();
+
+        for record in stored_records {
+            namespaces.insert(record.namespace.clone());
+            add_record_context(&record.key, &record.value, &mut context);
+
+            let definition = category_for_key(&record.key);
+            let size_bytes = record.value.len() as u64;
+            add_category_usage(&mut categories, &definition, size_bytes);
+
+            records.push(DatabaseStorageRecord {
+                namespace: record.namespace,
+                key: record.key.clone(),
+                label: label_for_key(&record.key).to_string(),
+                category: definition.id.to_string(),
+                size_bytes,
+                updated_at: record.updated_at,
+                summary: summarize_record(&record.key, &record.value),
+                sensitive: is_sensitive_key(&record.key),
+            });
+        }
+
+        context.estimated_tokens =
+            ((context.content_bytes + context.reasoning_bytes + context.thinking_bytes) as f64
+                / 4.0)
+                .ceil() as u64;
+
+        let engine = inspect_database_engine(&database_path).unwrap_or_default();
+        let migration =
+            inspect_database_migration(&database_path, &active_namespace).unwrap_or_default();
+        let legacy_storage = inspect_legacy_storage(&app)?;
+
+        Ok(DatabaseOverviewResponse {
+            database_path: path_to_string(&database_path),
+            exists,
+            file_size_bytes,
+            last_modified,
+            record_count: records.len(),
+            namespace_count: namespaces.len(),
+            categories,
+            records,
+            context,
+            engine,
+            migration,
+            legacy_storage,
+        })
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn gilbert_database_finalize_migration(
+pub async fn gilbert_database_backup(app: AppHandle) -> Result<DatabaseBackupResponse, String> {
+    run_database_worker("Database backup", move || create_database_backup(&app)).await
+}
+
+#[tauri::command]
+pub async fn gilbert_database_finalize_migration(
     app: AppHandle,
 ) -> Result<DatabaseMigrationFinalizeResponse, String> {
-    let backup = create_database_backup_with_label(&app, "secure-v3")?;
-    let removed_storage_keys = storage::finalize_schema_v3_migration(&app)?;
-    let (removed_legacy_paths, failed_legacy_paths) =
-        cleanup_paths(&safe_legacy_replacement_paths(&app)?);
+    run_database_worker("Database migration finalizer", move || {
+        let backup = create_database_backup_with_label(&app, "secure-v3")?;
+        let removed_storage_keys = storage::finalize_schema_v3_migration(&app)?;
+        let (removed_legacy_paths, failed_legacy_paths) =
+            cleanup_paths(&safe_legacy_replacement_paths(&app)?);
 
-    if failed_legacy_paths.is_empty() {
-        storage::mark_schema_v3_auto_finalized(&app)?;
-    }
+        if failed_legacy_paths.is_empty() {
+            storage::mark_schema_v3_auto_finalized(&app)?;
+        }
 
-    Ok(DatabaseMigrationFinalizeResponse {
-        backup,
-        removed_storage_keys,
-        removed_legacy_paths,
-        failed_legacy_paths,
+        Ok(DatabaseMigrationFinalizeResponse {
+            backup,
+            removed_storage_keys,
+            removed_legacy_paths,
+            failed_legacy_paths,
+        })
     })
+    .await
 }
 
 #[tauri::command]
@@ -461,30 +473,33 @@ fn create_database_backup_with_label(
 }
 
 #[tauri::command]
-pub fn gilbert_database_reset(app: AppHandle) -> Result<DatabaseResetResponse, String> {
-    let database_path = storage::database_path(&app)
-        .map_err(|error| format!("Could not resolve the local database path: {error}"))?;
-    let mut removed_paths = Vec::new();
-    let mut failed_paths = Vec::new();
+pub async fn gilbert_database_reset(app: AppHandle) -> Result<DatabaseResetResponse, String> {
+    run_database_worker("Database reset", move || {
+        let database_path = storage::database_path(&app)
+            .map_err(|error| format!("Could not resolve the local database path: {error}"))?;
+        let mut removed_paths = Vec::new();
+        let mut failed_paths = Vec::new();
 
-    for path in storage::database_file_family(&database_path) {
-        if delete_path(&path)? {
-            removed_paths.push(path_to_string(&path));
+        for path in storage::database_file_family(&database_path) {
+            if delete_path(&path)? {
+                removed_paths.push(path_to_string(&path));
+            }
         }
-    }
 
-    for path in legacy_storage_paths(&app)? {
-        match delete_path(&path) {
-            Ok(true) => removed_paths.push(path_to_string(&path)),
-            Ok(false) => {}
-            Err(error) => failed_paths.push(error),
+        for path in legacy_storage_paths(&app)? {
+            match delete_path(&path) {
+                Ok(true) => removed_paths.push(path_to_string(&path)),
+                Ok(false) => {}
+                Err(error) => failed_paths.push(error),
+            }
         }
-    }
 
-    Ok(DatabaseResetResponse {
-        removed_paths,
-        failed_paths,
+        Ok(DatabaseResetResponse {
+            removed_paths,
+            failed_paths,
+        })
     })
+    .await
 }
 
 fn legacy_storage_paths(app: &AppHandle) -> Result<Vec<PathBuf>, String> {

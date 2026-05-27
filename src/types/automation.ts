@@ -24,9 +24,23 @@ export type AutomationCapabilityId =
 
 export type AutomationAutonomyLevel = "review" | "scoped";
 
+export interface AutomationMcpServerScope {
+  serverId: string;
+  serverName: string;
+  toolNames: string[];
+}
+
+export interface AutomationSkillScope {
+  id: string;
+  name: string;
+  trigger: string;
+}
+
 export interface AutomationCapabilityScope {
   autonomyLevel: AutomationAutonomyLevel;
   capabilities: AutomationCapabilityId[];
+  mcpServers: AutomationMcpServerScope[];
+  skills: AutomationSkillScope[];
 }
 
 export type AutomationNotificationPrivacy = "private" | "summary";
@@ -58,6 +72,7 @@ export interface AutomationTask {
   nextRunAt?: string;
   notificationPolicy: AutomationNotificationPolicy;
   prompt: string;
+  projectName?: string;
   provider?: ModelProviderId;
   runCount: number;
   sourceChatId?: string;
@@ -114,6 +129,7 @@ export interface AutomationTaskDraft {
   notificationPolicy?: Partial<AutomationNotificationPolicy>;
   model?: string;
   prompt?: string;
+  projectName?: string;
   provider?: ModelProviderId;
   sourceChatId?: string;
   status?: AutomationTaskStatus;

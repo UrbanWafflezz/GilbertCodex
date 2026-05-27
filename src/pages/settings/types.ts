@@ -16,6 +16,7 @@ export type SettingsSectionId =
   | "github"
   | "google"
   | "mapbox"
+  | "mobile"
   | "keys"
   | "model"
   | "nineRouter"

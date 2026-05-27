@@ -21,6 +21,7 @@ import type { SettingsSectionId } from "../../../pages/settings/types";
 import type { DiscordInteractionEvent } from "../../tauriClient";
 import type { ActiveGeneration, ApprovedPlanExecutionContext, AssistantToolResponse, ComposerDraftRestoreRequest, DiscordReplyTarget, DiscordStreamUpdate, QueuedChatSend, SessionApprovalDecisionMap, SessionApprovalDecisionsByWorkspace, StartSendMessageOptions } from "../WorkspaceApp";
 import type { WorkspaceRuntimeDeps } from "../runtimeTypes";
+import { createProjectGoalContextContent, getActiveProjectGoal } from "../../../lib/projectGoals";
 
 const WORKSPACE_ROOT_RESOLUTION_TIMEOUT_MS = 1_500;
 
@@ -101,12 +102,6 @@ export async function steerActiveResponse(deps: WorkspaceRuntimeDeps, {
                   isStreaming: true,
                   progress: withSteeringProgress(assistantMessage.progress),
                   status: undefined,
-                  thinking: assistantMessage.thinking
-                    ? {
-                        ...assistantMessage.thinking,
-                        completedAt: undefined,
-                      }
-                    : assistantMessage.thinking,
                 } satisfies ChatMessage,
                 ...messagesAfterAssistant,
               ],
@@ -180,13 +175,8 @@ export async function steerActiveResponse(deps: WorkspaceRuntimeDeps, {
                             content: assistantResponse.content,
                           isStreaming: false,
                           progress: withLocalComputerProgress(assistantResponse.progress, removeSteeringProgress(message.progress)),
+                          reasoning: assistantResponse.reasoning ?? message.reasoning,
                           toolCalls: assistantResponse.toolCalls ?? message.toolCalls,
-                          thinking: message.thinking
-                            ? {
-                                ...message.thinking,
-                                completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-                              }
-                            : undefined,
                         })
                       : message,
                   ),
@@ -221,12 +211,6 @@ export async function steerActiveResponse(deps: WorkspaceRuntimeDeps, {
           isStreaming: false,
           progress: removeSteeringProgress(message.progress),
           status: "error",
-          thinking: message.thinking
-            ? {
-                ...message.thinking,
-                completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-              }
-            : undefined,
         }),
         true,
       );
@@ -238,11 +222,16 @@ export async function steerActiveResponse(deps: WorkspaceRuntimeDeps, {
   }
 
 export async function createMessagesForProvider(deps: WorkspaceRuntimeDeps, existingMessages: ChatMessage[], userMessage: ChatMessage, projectName: string, workspaceSettings: LocalWorkspaceSettings, prompt: string, webContextMessages: ChatMessage[], settings: ProviderSettings, onCompaction: (notice: ContextCompactionNotice) => void) {
-  const { compactProviderMessages, createActiveProjectBoundaryMessage, createChatResearchContextMessages, createLocalWorkspaceContextMessages, createPdfLibraryContextMessages, createSourceControlContextMessages, shouldSkipLocalContextForGithub } = deps;
+  const { compactProviderMessages, createActiveProjectBoundaryMessage, createChatResearchContextMessages, createLocalWorkspaceContextMessages, createMessage, createPdfLibraryContextMessages, createSourceControlContextMessages, normalizeProjectName, projects, shouldSkipLocalContextForGithub } = deps;
 
     const visibleMessages = existingMessages.filter((message) => message.status !== "error");
+    const normalizedProjectName = normalizeProjectName(projectName);
+    const projectGoal = getActiveProjectGoal(projects ?? [], normalizedProjectName);
     const sourceControlContextMessages = await createSourceControlContextMessages(prompt);
     const projectBoundaryMessages = [createActiveProjectBoundaryMessage(projectName, workspaceSettings)];
+    const projectGoalContextMessages = projectGoal
+      ? [createMessage("user", createProjectGoalContextContent(normalizedProjectName, projectGoal))]
+      : [];
     const chatResearchContextMessages = createChatResearchContextMessages(userMessage.researchReferences);
     const pdfContextMessages = createPdfLibraryContextMessages(projectName);
     const localContextMessages = shouldSkipLocalContextForGithub(prompt)
@@ -253,6 +242,7 @@ export async function createMessagesForProvider(deps: WorkspaceRuntimeDeps, exis
         ...visibleMessages,
         ...sourceControlContextMessages,
         ...projectBoundaryMessages,
+        ...projectGoalContextMessages,
         ...chatResearchContextMessages,
         ...pdfContextMessages,
         ...localContextMessages,
@@ -280,7 +270,7 @@ const CONNECTED_APP_TOOL_FOLLOWUP_PATTERN =
   /\b(?:again|check|look|now|one more time|1 more time|refresh|recheck|re-check|same|show|today|tomorrow|yesterday)\b/i;
 
 export function createChatToolSelectionPrompt(deps: WorkspaceRuntimeDeps, prompt: string, existingMessages: ChatMessage[], workspaceSettings: LocalWorkspaceSettings) {
-  const { referencesSelectedWorkspaceForToolSelection, shouldAttachWebSearch } = deps;
+  const { activeChat, normalizeProjectName, projects, referencesSelectedWorkspaceForToolSelection, shouldAttachWebSearch } = deps;
 
     const trimmedPrompt = prompt.trim();
 
@@ -303,6 +293,21 @@ export function createChatToolSelectionPrompt(deps: WorkspaceRuntimeDeps, prompt
       CONNECTED_APP_TOOL_CONTEXT_PATTERN.test(recentContext) &&
       looksLikeFollowUp &&
       CONNECTED_APP_TOOL_FOLLOWUP_PATTERN.test(trimmedPrompt);
+    const activeProjectGoal = getActiveProjectGoal(projects ?? [], activeChat?.project ?? "");
+    const projectGoalContext = activeProjectGoal
+      ? [
+          "Active Project Goal for tool selection only:",
+          `Project: ${normalizeProjectName(activeChat.project)}`,
+          activeProjectGoal.objective,
+          "Keep local project tools available when the user is continuing, steering, or verifying this goal.",
+        ].join("\n")
+      : "";
+
+    if (projectGoalContext) {
+      return [trimmedPrompt, projectGoalContext, recentContext ? `Recent conversation context for tool selection only:\n${recentContext}` : ""]
+        .filter(Boolean)
+        .join("\n\n");
+    }
 
     if (shouldAttachWebSearch(trimmedPrompt) && !referencesSelectedWorkspaceForToolSelection(trimmedPrompt) && !looksLikeConnectedAppFollowUp) {
       return trimmedPrompt;

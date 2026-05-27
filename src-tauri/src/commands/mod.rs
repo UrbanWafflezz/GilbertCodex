@@ -10,6 +10,7 @@ pub mod github;
 pub mod gmail;
 pub mod google_calendar;
 pub mod mcp;
+pub mod mobile_bridge;
 pub mod nine_router;
 pub mod notifications;
 pub mod project_open;

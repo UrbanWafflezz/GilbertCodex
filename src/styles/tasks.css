@@ -63,6 +63,8 @@
 .tasks-task-card small,
 .tasks-run-card small,
 .tasks-capability-option small,
+.tasks-skill-option small,
+.tasks-mcp-server-option small,
 .tasks-radio-grid small {
   color: var(--text-dim);
   font-size: var(--font-size-12, 12px);
@@ -79,6 +81,7 @@
 .tasks-tabs button,
 .tasks-template-button,
 .tasks-builder-steps button,
+.tasks-mini-button,
 .tasks-task-card footer button,
 .tasks-run-card footer button {
   display: inline-flex;
@@ -103,6 +106,7 @@
 .tasks-tabs button:disabled,
 .tasks-template-button:disabled,
 .tasks-builder-steps button:disabled,
+.tasks-mini-button:disabled,
 .tasks-task-card footer button:disabled,
 .tasks-run-card footer button:disabled {
   cursor: not-allowed;
@@ -119,6 +123,7 @@
 .tasks-tabs button:not(:disabled):hover,
 .tasks-template-button:not(:disabled):hover,
 .tasks-builder-steps button:not(:disabled):hover,
+.tasks-mini-button:not(:disabled):hover,
 .tasks-task-card footer button:not(:disabled):hover,
 .tasks-run-card footer button:not(:disabled):hover {
   color: var(--text);
@@ -322,6 +327,8 @@
 .tasks-form-grid,
 .tasks-model-grid,
 .tasks-capability-grid,
+.tasks-skill-grid,
+.tasks-mcp-server-grid,
 .tasks-radio-grid,
 .tasks-review dl {
   display: grid;
@@ -411,7 +418,13 @@
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
+.tasks-skill-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .tasks-capability-option,
+.tasks-skill-option,
+.tasks-mcp-server-option,
 .tasks-radio-grid label {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -424,6 +437,8 @@
 }
 
 .tasks-capability-option input,
+.tasks-skill-option input,
+.tasks-mcp-server-option input,
 .tasks-radio-grid input,
 .tasks-notify-grid input[type="checkbox"] {
   accent-color: var(--blue);
@@ -438,6 +453,8 @@
 }
 
 .tasks-capability-option span,
+.tasks-skill-option span,
+.tasks-mcp-server-option span,
 .tasks-radio-grid span {
   display: grid;
   min-width: 0;
@@ -445,6 +462,8 @@
 }
 
 .tasks-capability-option strong,
+.tasks-skill-option strong,
+.tasks-mcp-server-option strong,
 .tasks-radio-grid strong {
   color: var(--text);
   font-size: var(--font-size-13, 13px);
@@ -461,6 +480,99 @@
 .tasks-radio-grid label[data-active="true"] {
   border-color: color-mix(in srgb, var(--blue) 52%, var(--border));
   background: color-mix(in srgb, var(--blue-soft) 52%, var(--surface));
+}
+
+.tasks-tools-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.tasks-tool-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  background: var(--field-bg);
+}
+
+.tasks-tool-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 38px;
+  padding: 0;
+  color: var(--text);
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-size-13, 13px);
+  font-weight: 650;
+}
+
+.tasks-tool-search:focus-within {
+  border-color: color-mix(in srgb, var(--blue) 58%, var(--field-border));
+}
+
+.tasks-tool-section {
+  display: grid;
+  gap: 12px;
+}
+
+.tasks-tool-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 10px;
+}
+
+.tasks-tool-section-header {
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.tasks-tool-section-title {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.tasks-tool-section-title span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.tasks-tool-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.tasks-mini-button {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: var(--font-size-12, 12px);
+}
+
+.tasks-tool-section-header strong {
+  color: var(--text);
+  font-size: var(--font-size-13, 13px);
+}
+
+.tasks-tool-section-header small {
+  color: var(--text-muted);
+}
+
+.tasks-mcp-server-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .tasks-notify-grid {
@@ -577,6 +689,8 @@
   .tasks-form-grid,
   .tasks-model-grid,
   .tasks-form-grid-compact,
+  .tasks-skill-grid,
+  .tasks-mcp-server-grid,
   .tasks-radio-grid,
   .tasks-review dl {
     grid-template-columns: 1fr;

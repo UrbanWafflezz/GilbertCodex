@@ -7,6 +7,7 @@ vi.mock("../../app/windowClient", () => ({
   closeWindow: vi.fn(),
   maximizeWindow: vi.fn(),
   minimizeWindow: vi.fn(),
+  quitApp: vi.fn(),
 }));
 
 describe("desktop chrome platform rendering", () => {

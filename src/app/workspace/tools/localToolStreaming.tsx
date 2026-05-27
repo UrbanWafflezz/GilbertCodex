@@ -4,7 +4,7 @@ import type { SetStateAction } from "react";
 import type { AgentRuntimeDecision } from "../../../agentRuntime/codingAgent";
 import type { LocalComputerToolExecutionPolicy, LocalSubagentResult, LocalSubagentTask } from "../../../localWorkspace/localToolRuntimeDisabled";
 import type { ContextCompactionNotice, ContextWindowUsage, ModelContextWindowMap, compactMessagesForContext } from "../../../lib/contextWindow";
-import { createVisibleToolApprovalThinking, createVisibleToolPlanThinking, createVisibleToolResultThinking } from "../../../lib/thinkingTrace";
+import { mergeVisibleReasoningSummaries } from "../../../lib/reasoningSummary";
 import type { PlanningProviderRequest } from "../../../services/planningClient";
 import type { ProviderToolBridgeOptions, ToolBridgeExecutionBatch, ToolBridgeToolFamily, ToolCallRequest, ToolCapabilityPlan, ToolDefinition, ToolExecutionContext, ToolIntent, ToolMemorySearchRequest, ToolResultMessage } from "../../../toolBridge";
 import type { AppInfo } from "../../../types/app";
@@ -34,6 +34,7 @@ import {
   createDeploymentEvidenceRecoveryInstruction,
   hasConnectedToolEvidence,
   hasDeploymentToolAttempt,
+  hasSuccessfulMutatingFileToolCall,
   looksLikeUnsupportedConnectedToolActionAnswer,
   looksLikeUnsupportedDeploymentAnswer,
   promptRequestsConnectedToolAction,
@@ -49,6 +50,25 @@ function hasMcpToolEvidence(toolCalls: ChatToolCall[] = []) {
     toolCall.toolId.startsWith("mcp_") &&
     (toolCall.status === "complete" || toolCall.status === "error" || toolCall.status === "skipped")
   );
+}
+
+function hasSuccessfulLocalWorkEvidence(toolCalls: ChatToolCall[] = []) {
+  if (hasSuccessfulMutatingFileToolCall(toolCalls)) {
+    return true;
+  }
+
+  return toolCalls.some((toolCall) => {
+    if (toolCall.status !== "complete") {
+      return false;
+    }
+
+    const toolId = toolCall.toolId ?? "";
+    return (
+      toolId === "terminal_run" ||
+      /^git_/i.test(toolId) ||
+      /^browser_/i.test(toolId)
+    );
+  });
 }
 
 function markFirstVisibleStreamToken(timing: ChatStreamTiming | undefined, visibleContent: string): ChatStreamTiming | undefined {
@@ -114,7 +134,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
     webSearchSettingsOverride?: WebSearchSettings;
     workspaceSettings: LocalWorkspaceSettings;
   }): Promise<AssistantToolResponse> {
-  const { activeChat, appendAutoCompactionContinuation, attachLiveTerminalSession, BRIDGE_TOOL_APPROVAL_RESUME_KIND, coalesceToolBridgeCalls, compactProviderMessages, completeStreamingWorkThinking, contextWindowRef, createActiveLocalToolCalls, createApprovalSessionDecisionKey, createApprovedPlanExecutionFailedAnswer, createApprovedPlanExecutionRetryInstruction, createAssistantToolRequestContent, createBridgeChatToolCall, createContextBoundLocalToolExecutionPolicy, createContextCompactionProgress, createDefaultToolRegistry, createFabricatedToolProgressRecoveryInstruction, createFinalAnswerRecoveryInstruction, createFinalOnlyProviderSettings, createFreshLocalToolEvidenceInstruction, createId, createLocalComputerProgress, createLocalToolBudgetFinalInstruction, createLocalToolFinalInstruction, createMalformedToolCallRecoveryInstruction, createMemorySearchForRequest, createMessage, createNeutralToolSynthesisFailureMessage, createNoExecutedToolFinalAnswer, createNoExecutedToolFinalInstruction, createPromptAwareProviderSettings, createRecoverableBridgeToolRetryInstruction, createRecoverableLocalEditRetryInstruction, createRuntimeApprovalDecisions, createSimpleLocalTaskCompletionAnswer, createToolActionPromiseRecoveryInstruction, createToolFinalAnswerUnavailableMessage, createToolProtocolNarrationRecoveryInstruction, createUnappliedFileEditRecoveryInstruction, createUnnecessaryLocalActionConfirmationRecoveryInstruction, detectSimpleLocalTaskCompletion, executeToolBridgeCalls, formatDiscordToolStatus, formatLocalToolPreviewProgress, generalSettings, getModelVisibleToolResultCharBudget, getRuntimeWebSearchSettings, getToolMemoryProjectName, hasLocalComputerToolCalls, hasRequestScopedWorkspaceToolsEnabled, hasSuccessfulApprovedPlanMutation, hasSuccessfulApprovedPlanWorkspaceTool, inferProviderToolBridgeFormat, isAbortError, isEmptySelectedScaffoldProbe, isMissingFileReadError, isRecoverableLocalEditFailure, isRequestInactive, isSimpleLocalScaffoldRequest, isVisibleToolResultLeak, LOCAL_TOOL_FINAL_MIN_TOKENS, looksLikeContradictedSuccessfulFileMutationAnswer, looksLikeFabricatedToolProgress, looksLikeInFlightToolPlanning, looksLikeInternalToolRecoveryAnswer, looksLikeOnlyToolPrelude, looksLikePrivateThinkingNarration, looksLikeSubstantiveVisibleAnswer, looksLikeToolProtocolNarration, looksLikeUnappliedFileEditAnswer, looksLikeUnexecutedToolActionPromise, looksLikeUnnecessaryLocalActionConfirmation, MAX_LOCAL_TOOL_EXECUTIONS, MAX_LOCAL_TOOL_PASSES, MAX_MALFORMED_TOOL_RECOVERY_RETRIES, MAX_RECOVERABLE_LOCAL_EDIT_RETRIES, MAX_TOOL_FINALIZATION_RETRIES, mergeAgentApprovals, mergeChatArtifacts, mergeChatSources, needsFreshLocalToolEvidence, parseVisibleTextToolCalls, pendingChatsRef, providerSettings, recordProviderActualUsage, recordProviderContextUsage, rememberProjectToolMemoryFromBridgeRun, rememberProjectToolMemoryFromChatToolCalls, requiresWorkspaceMutationForPrompt, requiresWorkspaceToolCallForPrompt, resolveContextWindowForModel, resolveEnabledWorkspaceRoots, resolveToolPermission, routePrimitiveEvidenceBatchToWorkflow, runLocalComputerToolCalls, runParallelSubagents, sanitizeLocalToolCallsForDisplay, selectToolCapabilityPlan, sendProviderMessage, setBrowserPreviewTarget, shouldAttachWebSearch, shouldHoldStreamingContentForToolCalls, shouldSynthesizeEmptyFinalFromToolResults, stampLocalToolCallIds, STANDARD_LOCAL_COMPUTER_TOOL_EXECUTION_POLICY, streamProviderMessageWithRetry, stripLeadingToolPreludeForDisplay, supportsProviderParallelToolCalls, toolSettings, updateAgentRun, updateGeneratedMessage, upsertToolCall, validateToolArguments, withContextCompactionMarker, withContextCompactionProgress, withLocalComputerProgress, withStreamingWorkThinking } = deps;
+  const { activeChat, appendAutoCompactionContinuation, attachLiveTerminalSession, BRIDGE_TOOL_APPROVAL_RESUME_KIND, coalesceToolBridgeCalls, compactProviderMessages, contextWindowRef, createActiveLocalToolCalls, createApprovalSessionDecisionKey, createApprovedPlanExecutionFailedAnswer, createApprovedPlanExecutionRetryInstruction, createAssistantToolRequestContent, createBridgeChatToolCall, createContextBoundLocalToolExecutionPolicy, createContextCompactionProgress, createDefaultToolRegistry, createFabricatedToolProgressRecoveryInstruction, createFinalAnswerRecoveryInstruction, createFinalOnlyProviderSettings, createFreshLocalToolEvidenceInstruction, createId, createLocalComputerProgress, createLocalToolBudgetFinalInstruction, createLocalToolFinalInstruction, createMalformedToolCallRecoveryInstruction, createMemorySearchForRequest, createMessage, createNeutralToolSynthesisFailureMessage, createNoExecutedToolFinalAnswer, createNoExecutedToolFinalInstruction, createPromptAwareProviderSettings, createRecoverableBridgeToolRetryInstruction, createRecoverableLocalEditRetryInstruction, createRuntimeApprovalDecisions, createSimpleLocalTaskCompletionAnswer, createToolActionPromiseRecoveryInstruction, createToolFinalAnswerUnavailableMessage, createToolProtocolNarrationRecoveryInstruction, createUnappliedFileEditRecoveryInstruction, createUnnecessaryLocalActionConfirmationRecoveryInstruction, detectSimpleLocalTaskCompletion, executeToolBridgeCalls, formatDiscordToolStatus, formatLocalToolPreviewProgress, generalSettings, getModelVisibleToolResultCharBudget, getRuntimeWebSearchSettings, getToolMemoryProjectName, hasLocalComputerToolCalls, hasRequestScopedWorkspaceToolsEnabled, hasSuccessfulApprovedPlanMutation, hasSuccessfulApprovedPlanWorkspaceTool, inferProviderToolBridgeFormat, isAbortError, isEmptySelectedScaffoldProbe, isMissingFileReadError, isRecoverableLocalEditFailure, isRequestInactive, isSimpleLocalScaffoldRequest, isVisibleToolResultLeak, LOCAL_TOOL_FINAL_MIN_TOKENS, looksLikeContradictedSuccessfulFileMutationAnswer, looksLikeFabricatedToolProgress, looksLikeInFlightToolPlanning, looksLikeInternalToolRecoveryAnswer, looksLikeOnlyToolPrelude, looksLikePrivateThinkingNarration, looksLikeSubstantiveVisibleAnswer, looksLikeToolProtocolNarration, looksLikeUnappliedFileEditAnswer, looksLikeUnexecutedToolActionPromise, looksLikeUnnecessaryLocalActionConfirmation, MAX_LOCAL_TOOL_EXECUTIONS, MAX_LOCAL_TOOL_PASSES, MAX_MALFORMED_TOOL_RECOVERY_RETRIES, MAX_RECOVERABLE_LOCAL_EDIT_RETRIES, MAX_TOOL_FINALIZATION_RETRIES, mergeAgentApprovals, mergeChatArtifacts, mergeChatSources, needsFreshLocalToolEvidence, parseVisibleTextToolCalls, pendingChatsRef, providerSettings, recordProviderActualUsage, recordProviderContextUsage, rememberProjectToolMemoryFromBridgeRun, rememberProjectToolMemoryFromChatToolCalls, requiresWorkspaceMutationForPrompt, requiresWorkspaceToolCallForPrompt, resolveContextWindowForModel, resolveEnabledWorkspaceRoots, resolveToolPermission, routePrimitiveEvidenceBatchToWorkflow, runLocalComputerToolCalls, runParallelSubagents, sanitizeLocalToolCallsForDisplay, selectToolCapabilityPlan, sendProviderMessage, setBrowserPreviewTarget, shouldAttachWebSearch, shouldHoldStreamingContentForToolCalls, shouldSynthesizeEmptyFinalFromToolResults, stampLocalToolCallIds, STANDARD_LOCAL_COMPUTER_TOOL_EXECUTION_POLICY, streamProviderMessageWithRetry, stripLeadingToolPreludeForDisplay, supportsProviderParallelToolCalls, toolSettings, updateAgentRun, updateGeneratedMessage, upsertToolCall, validateToolArguments, withContextCompactionMarker, withContextCompactionProgress, withLocalComputerProgress } = deps;
 
     function applyToolOverrides(settings: ProviderSettings): ProviderSettings {
       if (!runtimeToolOverrides) return settings;
@@ -153,6 +173,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       ? await resolveEnabledWorkspaceRoots(workspaceSettings)
       : (workspaceSettings.enabled ? workspaceSettings.roots : []);
     let bridgeReasoningState: ProviderReasoningState | undefined;
+    let latestVisibleReasoning = "";
     let approvalRevisionPrompt: string | undefined;
     let approvalRevisionRequiredFamilies: ToolBridgeToolFamily[] = [];
     let approvalRevisionRequiresToolCall = false;
@@ -298,7 +319,6 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         tools.webSearch ? "Web search for current/source-backed facts when enabled for the run" : "",
         tools.imageGeneration ? "Image generation" : "",
         tools.planning ? "Planning mode" : "",
-        tools.thinking ? "Thinking mode" : "",
         tools.mcpServers ? "MCP/server-backed integrations" : "",
       ].filter(Boolean);
     }
@@ -316,7 +336,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       let liveToolCalls = activeToolCalls;
 
       updateGeneratedMessage(chatId, messageId, (message) => ({
-        ...(activeToolCalls.length > 0 ? withStreamingWorkThinking(message, createVisibleToolPlanThinking(activeToolCalls), "active") : message),
+        ...message,
         agentRunStatus: "running",
         content: "",
         progress: withLocalComputerProgress(activeProgress, message.progress),
@@ -389,11 +409,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       finalResponse.waitingForApproval = toolRun.waitingForApproval;
 
       updateGeneratedMessage(chatId, messageId, (message) => ({
-        ...withStreamingWorkThinking(
-          message,
-          toolRun.waitingForApproval ? createVisibleToolApprovalThinking(allToolCalls) : createVisibleToolResultThinking(completedToolCalls),
-          "complete",
-        ),
+        ...message,
         agentRunStatus: toolRun.waitingForApproval ? "waiting_for_approval" : "running",
         approvals: toolRun.waitingForApproval ? mergeAgentApprovals(message.approvals ?? [], finalResponse.approvalRequests ?? []) : message.approvals,
         artifacts: mergeChatArtifacts(message.artifacts, toolRun.artifacts),
@@ -445,7 +461,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         : {
             detail: "Continuing from the work log",
             id: "final-answer-recovery",
-            label: "Thinking",
+            label: "Finalizing",
             status: "active",
           };
       updateGeneratedMessage(chatId, messageId, (message) => ({
@@ -463,11 +479,6 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       const synthesisSettings: ProviderSettings = {
         ...baseSynthesisSettings,
         maxTokens: Math.max(baseSynthesisSettings.maxTokens, LOCAL_TOOL_FINAL_MIN_TOKENS),
-        thinking: {
-          ...baseSynthesisSettings.thinking,
-          enabled: false,
-          effort: "low",
-        },
         temperature: Math.min(baseSynthesisSettings.temperature, 0.25),
       };
       const synthesisRetries = [
@@ -528,13 +539,13 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
             continue;
           }
 
-          return {
+          return guardRecoveryFinalResponse({
             content,
             artifacts: allArtifacts.length > 0 ? allArtifacts : undefined,
             progress: localProgress,
             sources: allSources.length > 0 ? allSources : undefined,
             toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-          };
+          });
         } catch (error) {
           if (isAbortError(error) || isRequestInactive(requestId, controller)) {
             throw error;
@@ -609,12 +620,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
           continue;
         }
 
-        const toolId = toolCall.toolId ?? "";
-        const isMutatingFileTool =
-          /^files_(?:append|apply_patch|create_directory|edit_many|exact_replace|insert_at_line|move|replace_range|replace_span|write|write_many)\b/i.test(toolId) ||
-          toolCall.batchSummary?.operation === "edit" ||
-          toolCall.batchSummary?.operation === "write" ||
-          (toolCall.fileChanges?.length ?? 0) > 0;
+        const isMutatingFileTool = hasSuccessfulMutatingFileToolCall([toolCall]);
 
         if (!isMutatingFileTool) {
           continue;
@@ -667,6 +673,30 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
           "An edit used a stale file hash.",
           "Do not stop on that error. Re-read the current file or nearby section, then retry the same edit against the latest content.",
           "For append or exact_replace, omit stale expectedSha256 on retry and anchor to the current text; for line or column edits, use fresh coordinates from the new read.",
+        ].join("\n");
+      }
+
+      if (failedOutputs.some((output) => /\bfiles[_\s-]*edit[_\s-]*many\b[\s\S]{0,120}\b(?:insert[_\s-]*at[_\s-]*line|append)\b[\s\S]{0,120}\brequires\s+non-empty\s+content\b/i.test(output) || /\bfiles[_\s-]*insert[_\s-]*at[_\s-]*line\b[\s\S]{0,120}\brequires\s+non-empty\s+content\b/i.test(output))) {
+        return [
+          "An edit operation had empty insertion/append content, so no file change was applied.",
+          "Do not stop on that validation error and do not retry the same empty-content edit.",
+          "Re-read the target section if needed, then retry with files_edit_many using non-empty content, exact_replace, replace_range, or files_apply_patch anchored to current text.",
+        ].join("\n");
+      }
+
+      if (failedOutputs.some((output) => /\bExact text matched\s+\d+\s+times(?:\s+after\s+normalizing\s+line\s+endings)?\.\s+Set replaceAll true or make oldText more specific\b/i.test(output))) {
+        return [
+          "An exact replacement matched multiple locations, so no file change was applied.",
+          "Do not stop on that error and do not set replaceAll unless every matching occurrence should change.",
+          "Re-read the intended block if needed, then retry with a more specific oldText that includes unique surrounding context, replace_span/replace_range from fresh coordinates, or files_apply_patch anchored to the intended block.",
+        ].join("\n");
+      }
+
+      if (failedOutputs.some((output) => /\bRefusing broad edit\b[\s\S]{0,240}\bfiles[_\s-]*edit[_\s-]*many\b/i.test(output))) {
+        return [
+          "A batch edit was refused because it tried to replace too much of a file.",
+          "Do not recover by sending most or all of the file through files_edit_many.",
+          "Re-read the intended section and retry with a smaller unique oldText, replace_span, replace_range from fresh coordinates, or files_apply_patch anchored to the target block.",
         ].join("\n");
       }
 
@@ -1271,7 +1301,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       };
 
       updateGeneratedMessage(chatId, messageId, (message) => ({
-        ...withStreamingWorkThinking(message, createVisibleToolApprovalThinking(waitingStampedToolCalls), "complete"),
+        ...message,
         agentRunStatus: "waiting_for_approval",
         approvals: mergeAgentApprovals(message.approvals ?? [], approvals),
         content: "",
@@ -1439,8 +1469,8 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
           requiredFamilies: approvalRevisionRequiredFamilies,
         };
 
-        updateGeneratedMessage(chatId, messageId, (message) => ({
-          ...withStreamingWorkThinking(message, "I\u2019m revising the pending tool action before it runs.", "active"),
+      updateGeneratedMessage(chatId, messageId, (message) => ({
+          ...message,
           agentRunStatus: "running",
           content: "",
           progress: withLocalComputerProgress(revisionProgress, message.progress),
@@ -1481,7 +1511,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       let liveToolCalls: ChatToolCall[] = activeApprovedBridgeToolCalls;
 
       updateGeneratedMessage(chatId, messageId, (message) => ({
-        ...withStreamingWorkThinking(message, "I’m resuming the approved tool action now.", "active"),
+        ...message,
         agentRunStatus: "running",
         content: "",
         progress: withLocalComputerProgress(activeProgress, message.progress),
@@ -1521,7 +1551,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       localProgress = createLocalComputerProgress("complete", formatBridgeToolRunProgress(bridgeRun, "approved tool"));
 
       updateGeneratedMessage(chatId, messageId, (message) => ({
-        ...withStreamingWorkThinking(message, createVisibleToolResultThinking(completedBridgeToolCalls), "complete"),
+        ...message,
         content: "",
         progress: withLocalComputerProgress(localProgress, message.progress),
         toolCalls: allToolCalls,
@@ -1548,7 +1578,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       let liveToolCalls = activeToolCalls;
 
       updateGeneratedMessage(chatId, messageId, (message) => ({
-        ...(activeToolCalls.length > 0 ? withStreamingWorkThinking(message, createVisibleToolPlanThinking(activeToolCalls), "active") : message),
+        ...message,
         agentRunStatus: "running",
         content: "",
         progress: withLocalComputerProgress(activeProgress, message.progress),
@@ -1621,11 +1651,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       finalResponse.waitingForApproval = toolRun.waitingForApproval;
 
       updateGeneratedMessage(chatId, messageId, (message) => ({
-        ...withStreamingWorkThinking(
-          message,
-          toolRun.waitingForApproval ? createVisibleToolApprovalThinking(allToolCalls) : createVisibleToolResultThinking(completedToolCalls),
-          "complete",
-        ),
+        ...message,
         agentRunStatus: toolRun.waitingForApproval ? "waiting_for_approval" : "running",
         approvals: toolRun.waitingForApproval ? mergeAgentApprovals(message.approvals ?? [], finalResponse.approvalRequests ?? []) : message.approvals,
         artifacts: mergeChatArtifacts(message.artifacts, toolRun.artifacts),
@@ -1662,7 +1688,11 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
     }
 
     while (!isRequestInactive(requestId, controller)) {
-      const toolBudgetReached = passIndex >= maxToolPasses || totalExecutedToolCalls >= maxToolExecutions;
+      const rawToolBudgetReached = passIndex >= maxToolPasses || totalExecutedToolCalls >= maxToolExecutions;
+      const recoverableBridgeBudgetInstruction = rawToolBudgetReached && recoverableBridgeToolRetries < MAX_MALFORMED_TOOL_RECOVERY_RETRIES
+        ? createRecoverableBridgeToolRetryInstruction(allToolCalls, prompt)
+        : "";
+      const toolBudgetReached = rawToolBudgetReached && !recoverableBridgeBudgetInstruction;
       const approvedPlanNeedsWorkspaceTool = Boolean(approvedPlanExecution && !hasSuccessfulApprovedPlanWorkspaceTool(allToolCalls));
       const approvedPlanNeedsMutation = Boolean(approvedPlanExecution?.requiresMutation && !hasSuccessfulApprovedPlanMutation(allToolCalls));
       const approvedPlanNeedsToolExecution = approvedPlanNeedsWorkspaceTool || approvedPlanNeedsMutation;
@@ -1671,7 +1701,8 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         ? approvalRevisionPrompt ?? toolSelectionPrompt ?? prompt
         : toolSelectionPrompt ?? prompt;
       const workspaceMutationNeeded = !approvedPlanExecution && requiresWorkspaceMutationForPrompt(bridgeSelectionPrompt, workspaceSettings.enabled);
-      const workspaceMutationIncomplete = Boolean(workspaceMutationNeeded && !hasSuccessfulApprovedPlanMutation(allToolCalls) && !toolBudgetReached);
+      const workspaceMutationMissing = Boolean(workspaceMutationNeeded && !hasSuccessfulApprovedPlanMutation(allToolCalls));
+      const workspaceMutationIncomplete = Boolean(workspaceMutationMissing && !toolBudgetReached);
       const deploymentActionRequested = promptRequestsDeploymentAction(bridgeSelectionPrompt);
       const deploymentEvidenceRequiredForPass = Boolean(deploymentActionRequested && !hasDeploymentToolAttempt(allToolCalls) && !toolBudgetReached);
       const connectedToolActionRequested = !deploymentActionRequested && promptRequestsConnectedToolAction(bridgeSelectionPrompt);
@@ -1841,8 +1872,8 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
               maxExecutions: maxToolExecutions,
               maxPasses: maxToolPasses,
               maxToolResultContentChars: bridgeToolResultCharBudget,
-              remainingExecutions: Math.max(maxToolExecutions - totalExecutedToolCalls, 0),
-              remainingPasses: Math.max(maxToolPasses - passIndex, 0),
+              remainingExecutions: Math.max(maxToolExecutions - totalExecutedToolCalls, recoverableBridgeBudgetInstruction ? 1 : 0),
+              remainingPasses: Math.max(maxToolPasses - passIndex, recoverableBridgeBudgetInstruction ? 1 : 0),
             },
             toolChoice: toolCapabilityPlan.toolChoice,
             toolResultDelivery: bridgeToolResultMessages.length > 0 ? "native" as const : undefined,
@@ -1892,7 +1923,21 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
           toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
         };
       }
-      const passCompaction = compactProviderMessages(messages, passSettings, { toolBridge: bridgeOptions });
+      const providerPassMessages = recoverableBridgeBudgetInstruction
+        ? [
+            ...messages,
+            createMessage("user", [
+              recoverableBridgeBudgetInstruction,
+              "This recovery pass is allowed even though the normal tool budget was reached because the previous tool call failed before applying the requested file mutation.",
+            ].join("\n\n")),
+          ]
+        : messages;
+
+      if (recoverableBridgeBudgetInstruction) {
+        recoverableBridgeToolRetries += 1;
+      }
+
+      const passCompaction = compactProviderMessages(providerPassMessages, passSettings, { toolBridge: bridgeOptions });
       if (passCompaction.compacted) {
         const compactionProgress = createContextCompactionProgress(passCompaction);
 
@@ -1952,7 +1997,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
             const inFlightToolPlanning = !heldToolCallContent && !hasSubstantiveVisibleAnswer && looksLikeInFlightToolPlanning(rawSanitizedContent);
             const privateThinkingNarration = !heldToolCallContent && looksLikePrivateThinkingNarration(rawSanitizedContent);
             const promisedToolAction = !hasStreamingLocalToolCalls && !hasSubstantiveVisibleAnswer && looksLikeUnexecutedToolActionPromise(snapshot.content);
-            const unappliedFileEditAnswer = !hasStreamingLocalToolCalls && (workspaceMutationIncomplete || !hasSubstantiveVisibleAnswer) && looksLikeUnappliedFileEditAnswer(rawSanitizedContent, allToolCalls);
+            const unappliedFileEditAnswer = !hasStreamingLocalToolCalls && looksLikeUnappliedFileEditAnswer(rawSanitizedContent, allToolCalls);
             const unnecessaryConfirmation = !hasStreamingLocalToolCalls && !hasSubstantiveVisibleAnswer && looksLikeUnnecessaryLocalActionConfirmation(rawSanitizedContent, allToolCalls);
             const waitingForRevisedApprovalToolCall =
               approvalRevisionToolCallRequiredForPass &&
@@ -1987,15 +2032,15 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
             const hiddenWorkStatus = shouldHideVisibleContent
               ? streamingLocalProgress?.label || (privateThinkingNarration || inFlightToolPlanning || promisedToolAction ? "Preparing tool action" : "Preparing response")
               : "";
-            const hostThinkingContent = createVisibleToolPlanThinking([...streamingToolCalls, ...streamingBridgeToolCalls]) || hiddenWorkStatus;
             const streamTiming = markFirstVisibleStreamToken(snapshot.streamTiming, visibleContent);
+            latestVisibleReasoning = mergeVisibleReasoningSummaries(latestVisibleReasoning, snapshot.reasoningSummary);
 
             updateGeneratedMessage(chatId, messageId, (message) => ({
-              ...(hostThinkingContent ? withStreamingWorkThinking(message, hostThinkingContent, "active") : completeStreamingWorkThinking(message)),
+              ...message,
               content: visibleContent,
               progress: streamingLocalProgress ? withLocalComputerProgress(streamingLocalProgress, message.progress) : message.progress,
+              reasoning: mergeVisibleReasoningSummaries(message.reasoning, latestVisibleReasoning) || undefined,
               streamTiming: streamTiming ?? message.streamTiming,
-              thinking: message.thinking,
               toolCalls: streamingToolCalls.length > 0
                 ? [...allToolCalls, ...streamingToolCalls]
                 : streamingBridgeToolCalls.length > 0
@@ -2017,7 +2062,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
                   ? "Preparing tool action..."
                     : visibleContent
                       ? "Streaming answer..."
-                      : "Thinking...",
+                      : "Preparing response...",
             });
           },
           {
@@ -2051,6 +2096,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       }
 
       bridgeReasoningState = assistantResponse.reasoningState ?? bridgeReasoningState;
+      latestVisibleReasoning = mergeVisibleReasoningSummaries(latestVisibleReasoning, assistantResponse.reasoningSummary);
       const visibleToolCallRecoveryText = assistantResponse.content;
       const rawBridgeToolCalls = assistantResponse.toolCalls?.length
         ? assistantResponse.toolCalls
@@ -2084,7 +2130,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
           };
 
           updateGeneratedMessage(chatId, messageId, (message) => ({
-            ...withStreamingWorkThinking(message, createVisibleToolApprovalThinking(waitingToolCalls), "complete"),
+            ...message,
             agentRunStatus: "waiting_for_approval",
             approvals: mergeAgentApprovals(message.approvals ?? [], finalResponse.approvalRequests ?? []),
             content: "",
@@ -2103,7 +2149,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         const activeBridgeToolCalls = createActiveBridgeToolPreviews(bridgeToolCalls, passIndex);
         liveBridgeToolCalls = activeBridgeToolCalls;
         updateGeneratedMessage(chatId, messageId, (message) => ({
-          ...withStreamingWorkThinking(message, createVisibleToolPlanThinking(activeBridgeToolCalls), "active"),
+          ...message,
           content: "",
           progress: withLocalComputerProgress(activeProgress, message.progress),
           toolCalls: [...allToolCalls, ...activeBridgeToolCalls],
@@ -2151,7 +2197,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         localProgress = createLocalComputerProgress("complete", formatBridgeToolRunProgress(bridgeRun, "bridge tool"));
 
         updateGeneratedMessage(chatId, messageId, (message) => ({
-          ...withStreamingWorkThinking(message, createVisibleToolResultThinking(completedBridgeToolCalls), "complete"),
+          ...message,
           content: "",
           progress: withLocalComputerProgress(localProgress, message.progress),
           toolCalls: allToolCalls,
@@ -2184,6 +2230,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       finalResponse = {
         artifacts: allArtifacts.length > 0 ? allArtifacts : undefined,
         content: finalVisibleContent,
+        reasoning: latestVisibleReasoning || undefined,
         sources: allSources.length > 0 ? allSources : undefined,
         streamTiming: markFirstVisibleStreamToken(assistantResponse.streamTiming, finalVisibleContent),
         toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
@@ -2193,7 +2240,15 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         return guardRecoveryFinalResponse(finalResponse);
       }
 
-      if (!assistantHasLocalToolCalls && shouldSynthesizeEmptyFinalFromToolResults(finalResponse.content, allToolCalls)) {
+      const requiredToolWorkStillMissing =
+        Boolean(approvedPlanExecution && !toolBudgetReached && approvedPlanNeedsToolExecution) ||
+        workspaceMutationIncomplete ||
+        deploymentEvidenceRequiredForPass ||
+        connectedToolEvidenceRequiredForPass ||
+        (approvalRevisionRequiresToolCall && !toolBudgetReached) ||
+        (allToolCalls.length === 0 && freshLocalToolEvidenceRetries < 2 && !toolBudgetReached && freshLocalEvidenceNeeded);
+
+      if (!assistantHasLocalToolCalls && !requiredToolWorkStillMissing && shouldSynthesizeEmptyFinalFromToolResults(finalResponse.content, allToolCalls)) {
         const recoverableBridgeRetryInstruction = createRecoverableBridgeToolRetryInstruction(allToolCalls, prompt);
 
         if (recoverableBridgeRetryInstruction && recoverableBridgeToolRetries < MAX_MALFORMED_TOOL_RECOVERY_RETRIES) {
@@ -2295,7 +2350,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         const privateThinkingNarration = looksLikePrivateThinkingNarration(finalResponse.content);
         const toolProtocolNarration = looksLikeToolProtocolNarration(finalResponse.content);
         const unexecutedToolActionPromise = !hasSubstantiveFinalAnswer && looksLikeUnexecutedToolActionPromise(finalResponse.content);
-        const unappliedFileEditAnswer = (workspaceMutationIncomplete || !hasSubstantiveFinalAnswer) && looksLikeUnappliedFileEditAnswer(finalResponse.content, allToolCalls);
+        const unappliedFileEditAnswer = looksLikeUnappliedFileEditAnswer(finalResponse.content, allToolCalls);
         const unnecessaryConfirmation = !hasSubstantiveFinalAnswer && looksLikeUnnecessaryLocalActionConfirmation(finalResponse.content, allToolCalls);
         const contradictedSuccessfulFileMutation = looksLikeContradictedSuccessfulFileMutationAnswer(finalResponse.content, allToolCalls);
         const visibleToolResultLeak = isVisibleToolResultLeak(finalResponse.content, allToolCalls);
@@ -2355,7 +2410,32 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
               };
             }
 
+            if (workspaceMutationMissing && toolBudgetReached && unappliedFileEditAnswer) {
+              return {
+                artifacts: allArtifacts.length > 0 ? allArtifacts : undefined,
+                content: "I could not complete the requested workspace edit cleanly. The run reached its tool budget without any successful file edit/write result, so no file changes were applied.",
+                progress: localProgress,
+                sources: allSources.length > 0 ? allSources : undefined,
+                toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+              };
+            }
+
             if (deploymentEvidenceRequiredForPass) {
+              const synthesizedLocalWorkResponse = hasSuccessfulLocalWorkEvidence(allToolCalls)
+                ? await synthesizeAnswerFromSavedToolResults(
+                    [...messages, createMessage("assistant", assistantResponse.content)],
+                    [
+                      "The saved tool results include completed local workspace work such as file edits, git checks, browser checks, or terminal build/test commands.",
+                      "Do not replace those completed results with a generic missing deployment warning.",
+                      "Summarize the completed local work and verification. If deployment was requested, state plainly that no deploy/publish tool or command completed, so the site was not proven live. Do not claim deployed, published, or live without current deploy evidence.",
+                    ].join(" "),
+                  )
+                : null;
+
+              if (synthesizedLocalWorkResponse) {
+                return synthesizedLocalWorkResponse;
+              }
+
               return {
                 artifacts: allArtifacts.length > 0 ? allArtifacts : undefined,
                 content: "I could not complete the requested deployment cleanly. No successful MCP or terminal deploy/publish tool result was recorded, so I cannot claim the site is live.",
@@ -2366,6 +2446,21 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
             }
 
             if (connectedToolEvidenceRequiredForPass) {
+              const synthesizedWorkspaceResponse = hasSuccessfulMutatingFileToolCall(allToolCalls)
+                ? await synthesizeAnswerFromSavedToolResults(
+                    [...messages, createMessage("assistant", assistantResponse.content)],
+                    [
+                      "The saved tool results include completed local workspace file changes.",
+                      "Do not replace those completed results with a generic missing connected-tool warning.",
+                      "Summarize the completed local changes. If a separate connected app, connector, plugin, or MCP action still lacks current tool evidence, mention that as the remaining blocker without claiming it ran.",
+                    ].join(" "),
+                  )
+                : null;
+
+              if (synthesizedWorkspaceResponse) {
+                return synthesizedWorkspaceResponse;
+              }
+
               return {
                 artifacts: allArtifacts.length > 0 ? allArtifacts : undefined,
                 content: "I could not complete the requested connected-tool action cleanly. No MCP, native app, or connector tool result was recorded, so I cannot claim it ran.",
@@ -2395,8 +2490,10 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
                   ? "The previous finalization attempt asked for confirmation instead of executing an ordinary requested local action. Use real tools instead."
                 : unexecutedToolActionPromise
                   ? "The previous finalization attempt promised a tool action without executing it. Do not repeat the promise."
+                : unappliedFileEditAnswer && workspaceMutationMissing && toolBudgetReached
+                  ? "The previous finalization attempt claimed workspace file changes, but no successful file edit/write tool result exists and this run reached the configured tool budget. Do not claim any files were changed. Answer honestly from the completed read/search evidence and state plainly that no file changes were applied."
                 : unappliedFileEditAnswer
-                  ? "The previous finalization attempt pasted proposed updated files, but no mutating edit/write tool call succeeded. Apply the edit with real tools instead."
+                  ? "The previous finalization attempt claimed or pasted updated files, but no mutating edit/write tool call succeeded. Apply the edit with real tools instead."
                 : contradictedSuccessfulFileMutation
                   ? "The previous finalization attempt contradicted successful file edit/write tool evidence. Treat the saved file mutation results as already applied and write a normal answer."
                 : unsupportedDeploymentAnswer
@@ -2434,7 +2531,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
             : {
                 detail: "Continuing from the work log",
                 id: "final-answer-recovery",
-                label: "Thinking",
+                label: "Preparing response",
                 status: "active",
               });
           updateGeneratedMessage(chatId, messageId, (message) => ({
@@ -2503,6 +2600,11 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
                   ? createUnnecessaryLocalActionConfirmationRecoveryInstruction(prompt, finalResponse.content)
                 : unexecutedToolActionPromise
                   ? createToolActionPromiseRecoveryInstruction(prompt, finalResponse.content)
+                : unappliedFileEditAnswer && workspaceMutationMissing && toolBudgetReached
+                  ? createFinalAnswerRecoveryInstruction(
+                      prompt,
+                      "The previous response claimed workspace file changes, but no successful file edit/write tool result exists and the run has reached its configured tool budget. Do not claim files were changed. State plainly that no file changes were applied, then summarize only the read/search evidence that was actually gathered.",
+                    )
                 : unappliedFileEditAnswer
                   ? createUnappliedFileEditRecoveryInstruction(prompt, finalResponse.content)
                 : contradictedSuccessfulFileMutation
@@ -2538,7 +2640,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       let liveToolCalls = activeToolCalls;
 
       updateGeneratedMessage(chatId, messageId, (message) => ({
-        ...(activeToolCalls.length > 0 ? withStreamingWorkThinking(message, createVisibleToolPlanThinking(activeToolCalls), "active") : message),
+        ...message,
         content: "",
         progress: withLocalComputerProgress(activeProgress, message.progress),
         toolCalls: activeToolCalls.length > 0 ? [...allToolCalls, ...activeToolCalls] : message.toolCalls,
@@ -2611,7 +2713,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
 
       if (toolRun.waitingForApproval) {
         updateGeneratedMessage(chatId, messageId, (message) => ({
-          ...withStreamingWorkThinking(message, createVisibleToolApprovalThinking(allToolCalls), "complete"),
+          ...message,
           agentRunStatus: "waiting_for_approval",
           approvals: mergeAgentApprovals(message.approvals ?? [], finalResponse.approvalRequests ?? []),
           artifacts: mergeChatArtifacts(message.artifacts, toolRun.artifacts),
@@ -2671,7 +2773,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       }
 
       updateGeneratedMessage(chatId, messageId, (message) => ({
-        ...withStreamingWorkThinking(message, createVisibleToolResultThinking(completedToolCalls), "complete"),
+        ...message,
         artifacts: mergeChatArtifacts(message.artifacts, toolRun.artifacts),
         content: "",
         progress: withLocalComputerProgress(localProgress, message.progress),
@@ -2796,6 +2898,14 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         return {
           ...response,
           content: createNeutralToolSynthesisFailureMessage(),
+          progress: localProgress,
+        };
+      }
+
+      if (looksLikeUnappliedFileEditAnswer(content, allToolCalls)) {
+        return {
+          ...response,
+          content: "I could not complete the requested workspace edit cleanly. No successful file edit/write result was recorded, so no file changes were applied.",
           progress: localProgress,
         };
       }

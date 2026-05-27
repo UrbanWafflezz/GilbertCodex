@@ -24,7 +24,7 @@ import type { WorkspaceRuntimeDeps } from "../runtimeTypes";
 import { createInitialCodingEvidence, finalizeCodingEvidenceForMessage } from "../../../coding/evidence";
 
 export function persistAgentRun(deps: WorkspaceRuntimeDeps, nextRun: AgentRun) {
-  const { agentRunsRef, saveAgentRun, setAgentRuns } = deps;
+  const { agentRunsRef, queueAgentRunSave, saveAgentRun, setAgentRuns, setAgentRunsLive } = deps;
 
     const normalizedRun: AgentRun = {
       ...nextRun,
@@ -42,8 +42,18 @@ export function persistAgentRun(deps: WorkspaceRuntimeDeps, nextRun: AgentRun) {
     );
 
     agentRunsRef.current = nextRuns;
-    setAgentRuns(nextRuns);
-    void saveAgentRun(normalizedRun);
+    if (setAgentRunsLive) {
+      setAgentRunsLive(nextRuns);
+    } else {
+      setAgentRuns(nextRuns);
+    }
+
+    const shouldSaveImmediately = normalizedRun.status !== "running";
+    if (queueAgentRunSave) {
+      queueAgentRunSave(normalizedRun, { immediate: shouldSaveImmediately });
+    } else {
+      void saveAgentRun(normalizedRun);
+    }
 
     return normalizedRun;
   }

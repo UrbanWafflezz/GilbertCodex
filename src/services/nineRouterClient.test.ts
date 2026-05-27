@@ -51,6 +51,24 @@ describe("nineRouterClient model selection", () => {
     ])).toBe("gh/gpt-4o");
   });
 
+  it("falls back to the connected provider's own default instead of a saved model from another subscription", () => {
+    expect(chooseNineRouterModelForAccount("claude", "cx/gpt-5.5", [])).toBe("cc/claude-opus-4-7");
+    expect(chooseNineRouterModelForAccount("gemini-cli", "cx/gpt-5.5", [])).toBe("gc/gemini-3-flash-preview");
+    expect(chooseNineRouterModelForAccount("antigravity", "cx/gpt-5.5", [])).toBe("ag/gemini-3-flash");
+    expect(chooseNineRouterModelForAccount("kiro", "cx/gpt-5.5", [])).toBe("kr/claude-sonnet-4.5");
+    expect(chooseNineRouterModelForAccount("kilocode", "cx/gpt-5.5", [])).toBe("kc/anthropic/claude-sonnet-4-20250514");
+    expect(chooseNineRouterModelForAccount("cline", "cx/gpt-5.5", [])).toBe("cl/anthropic/claude-opus-4.7");
+    expect(chooseNineRouterModelForAccount("qwen", "cx/gpt-5.5", [])).toBe("qw/qwen3-coder-plus");
+    expect(chooseNineRouterModelForAccount("iflow", "cx/gpt-5.5", [])).toBe("if/qwen3-coder-plus");
+    expect(chooseNineRouterModelForAccount("kimi-coding", "cx/gpt-5.5", [])).toBe("kmc/kimi-k2.6");
+  });
+
+  it("does not invent a cross-provider model for providers that only expose live catalog routes", () => {
+    expect(chooseNineRouterModelForAccount("qoder", "cx/gpt-5.5", [])).toBe("");
+    expect(chooseNineRouterModelForAccount("codebuddy", "cx/gpt-5.5", [])).toBe("");
+    expect(chooseNineRouterModelForAccount("qoder", "cx/gpt-5.5", ["qoder/default"])).toBe("qoder/default");
+  });
+
   it("chooses another signed-in subscription provider after sign-out", () => {
     expect(chooseNineRouterConnectedAccountProvider([
       { id: "codex-1", provider: "codex", testStatus: "active" },
@@ -63,6 +81,13 @@ describe("nineRouterClient model selection", () => {
 
   it("chooses subscription routes from connected accounts only", () => {
     expect(getNineRouterAccountProviderForModel("cc/claude-opus-4-7")).toBe("claude");
+    expect(getNineRouterAccountProviderForModel("gc/gemini-3-pro-preview")).toBe("gemini-cli");
+    expect(getNineRouterAccountProviderForModel("kr/claude-sonnet-4.5")).toBe("kiro");
+    expect(getNineRouterAccountProviderForModel("kc/openai/gpt-4.1")).toBe("kilocode");
+    expect(getNineRouterAccountProviderForModel("cl/anthropic/claude-opus-4.7")).toBe("cline");
+    expect(getNineRouterAccountProviderForModel("qw/qwen3-coder-plus")).toBe("qwen");
+    expect(getNineRouterAccountProviderForModel("if/qwen3-max")).toBe("iflow");
+    expect(getNineRouterAccountProviderForModel("kmc/kimi-k2.6")).toBe("kimi-coding");
     expect(chooseNineRouterModelForConnectedAccounts("cc/claude-opus-4-7", [
       "cc/claude-opus-4-7",
       "cx/gpt-5.5",

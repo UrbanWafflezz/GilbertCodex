@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildDictationTextMessage,
   calculateDictationWaveLevel,
+  findComposerSlashCommandTrigger,
   formatDictationElapsedTime,
+  getComposerGitStageableFileCount,
   getComposerPlaceholderOptions,
+  getProjectGoalSlashCommandOptions,
   isEmptyDictationTranscript,
   nativeDictationStatusMessage,
   nativeDictationVoiceState,
@@ -62,6 +65,37 @@ describe("chat composer workspace control", () => {
   });
 });
 
+describe("chat composer slash commands", () => {
+  it("opens slash commands only from the command position", () => {
+    expect(findComposerSlashCommandTrigger("/", 1)).toEqual({ query: "", rangeEnd: 1, rangeStart: 0 });
+    expect(findComposerSlashCommandTrigger("/go", 3)).toEqual({ query: "go", rangeEnd: 3, rangeStart: 0 });
+    expect(findComposerSlashCommandTrigger("open /go", 8)).toBeNull();
+    expect(findComposerSlashCommandTrigger("/goal build", 11)).toBeNull();
+  });
+
+  it("offers Project Goal commands from the slash picker", () => {
+    expect(getProjectGoalSlashCommandOptions("", { canUseProjectGoals: true, isGenerating: false }).map((option) => option.command)).toEqual(["/goal"]);
+
+    const commands = getProjectGoalSlashCommandOptions("goal", {
+      canUseProjectGoals: true,
+      isGenerating: false,
+      projectGoal: {
+        createdAt: "2026-05-25T12:00:00.000Z",
+        id: "goal-1",
+        objective: "Ship Project Goals through slash commands.",
+        status: "active",
+        updatedAt: "2026-05-25T12:00:00.000Z",
+      },
+    }).map((option) => option.command);
+
+    expect(commands).toContain("/goal");
+    expect(commands).toContain("/goal continue");
+    expect(commands).toContain("/goal pause");
+    expect(commands).toContain("/goal complete");
+    expect(commands).toContain("/goal clear");
+  });
+});
+
 describe("chat composer Git status", () => {
   const unavailableStatus: ComputerGitStatus = {
     additions: 0,
@@ -84,6 +118,23 @@ describe("chat composer Git status", () => {
 
   it("does not mask completed unavailable Git statuses as loading", () => {
     expect(shouldShowComposerGitStatusLoading(unavailableStatus, false, String.raw`C:\Users\Kobe Work\Documents\GilbertCodex`)).toBe(false);
+  });
+
+  it("treats only unstaged and untracked files as stageable", () => {
+    expect(
+      getComposerGitStageableFileCount({
+        additions: 3,
+        ahead: 0,
+        available: true,
+        behind: 0,
+        changedFiles: 3,
+        clean: false,
+        deletions: 0,
+        stagedFiles: 1,
+        unstagedFiles: 1,
+        untrackedFiles: 1,
+      }),
+    ).toBe(2);
   });
 });
 

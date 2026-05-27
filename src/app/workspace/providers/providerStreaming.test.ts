@@ -7,6 +7,7 @@ import {
   createProviderRetryInstruction,
   hasLocalToolEvidence,
   isRetryableProviderMessageError,
+  preserveVisibleResponseThinking,
   type ProviderStreamingDeps,
 } from "./providerStreaming";
 
@@ -58,7 +59,7 @@ describe("provider streaming recovery", () => {
 
     expect(retrySettings.maxTokens).toBe(4096);
     expect(retrySettings.temperature).toBe(0.25);
-    expect(retrySettings.thinking).toEqual({ enabled: false, effort: "low" });
+    expect(retrySettings.thinking).toEqual({ enabled: false, effort: "high" });
   });
 
   it("classifies transient provider failures as retryable but leaves validation errors alone", () => {
@@ -70,5 +71,23 @@ describe("provider streaming recovery", () => {
     expect(isRetryableProviderMessageError(deps, new Error("HTTP 429: rate limit"))).toBe(true);
     expect(isRetryableProviderMessageError(deps, new Error("maximum context length exceeded"))).toBe(true);
     expect(isRetryableProviderMessageError(deps, new Error("HTTP 401: invalid API key"))).toBe(false);
+  });
+
+  it("preserves earlier visible reasoning when later updates add a new summary", () => {
+    const deps = {
+      mergeMessageWorkTrace: () => undefined,
+    } as unknown as ProviderStreamingDeps;
+    const previous = {
+      ...message(""),
+      reasoning: "I inspected the project tree and metadata files.",
+    };
+    const next = {
+      ...previous,
+      reasoning: "I synthesized the run commands and near-term risks from that evidence.",
+    };
+
+    expect(preserveVisibleResponseThinking(deps, previous, next).reasoning).toBe(
+      "I inspected the project tree and metadata files.\n\nI synthesized the run commands and near-term risks from that evidence.",
+    );
   });
 });

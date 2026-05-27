@@ -26,7 +26,6 @@ Delivered:
 - SQL-backed local database for desktop auth, chats, settings, integrations, browser preview state, and agent-run records, with database work shifted off the UI path.
 - Discord slash-command bridge setup/runtime for forwarding requests into Gilbert chat.
 - GitHub OAuth device-flow setup, account state, repository actions, and release/workflow surfaces.
-- Voluntary support/funding page using public hosted links only, with secret-like values rejected before display.
 - Apps page with live Gmail, Google Calendar, GitHub, MCP, plugin, and Skills management surfaces.
 - Documentation refreshed for the current public alpha story, updater release path, and contributor readiness.
 - Repository licensing now separates MIT-licensed implementation code from proprietary Gilbert Codex UI, visual design, branding, screenshots, installer artwork, promotional assets, and agent tool system.
@@ -37,7 +36,6 @@ Delivered:
 - Context-window and research surfaces now replace embedded data URLs with short metadata placeholders instead of feeding large media blobs into text context.
 - Automations now generate cleaner task prompts/results, filter source cards to actual web-search runs, and avoid empty or protocol-style sections in inbox summaries.
 - Coding review now reports captured tool activity and tool coverage so users can see what the agent actually used during a run.
-- Support/funding docs and app defaults now expose the public Cash App funding path while keeping payment handling outside the desktop app.
 - v0.8.1 improves Firebase MCP fallback guidance, local MCP result synthesis, 9Router private-LAN URL surfacing, Discord ngrok executable discovery, and CI/release runner selection for steadier all-platform builds.
 
 Known alpha limits:

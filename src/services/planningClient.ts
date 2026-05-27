@@ -1,4 +1,5 @@
 import { sanitizeLocalToolCallsForDisplay } from "../localWorkspace/localToolRuntimeDisabled";
+import { mergeVisibleReasoningSummaries } from "../lib/reasoningSummary";
 import { FINAL_RESPONSE_STYLE_GUIDANCE } from "../prompts/agent/finalResponseStyle";
 import type { ChatMessage, ChatPlanningInputAnswer, ChatPlanningInputRequest, ChatPlanningQuestion, ChatPlanningQuestionOption, ChatProgressItem } from "../types/chat";
 import type { ProviderSettings } from "../types/settings";
@@ -45,6 +46,7 @@ interface PlanningRequestOptions {
 export interface PlanningSnapshot {
   content?: string;
   progress: ChatProgressItem[];
+  reasoning?: string;
 }
 
 export interface PlanningRunResult extends PlanningSnapshot {
@@ -140,15 +142,18 @@ export async function runPlanningMode({ messages, onProviderRequest, onProviderU
   onProviderRequest?.(providerRequest);
 
   let finalContent = "";
+  let finalReasoning = "";
 
   const finalResponse = await streamProviderMessage(
     providerRequest.settings,
     providerRequest.messages,
     (snapshot) => {
       finalContent = snapshot.content;
+      finalReasoning = mergeVisibleReasoningSummaries(finalReasoning, snapshot.reasoningSummary);
       onUpdate({
         content: cleanFinalAnswerContent(finalContent),
         progress: createPlanningProgress("drafting"),
+        reasoning: finalReasoning || undefined,
       });
     },
     {
@@ -162,6 +167,7 @@ export async function runPlanningMode({ messages, onProviderRequest, onProviderU
     content,
     providerRequest,
     progress: createPlanningProgress("complete"),
+    reasoning: mergeVisibleReasoningSummaries(finalReasoning, finalResponse.reasoningSummary) || undefined,
     usage: finalResponse.usage,
   };
 }
@@ -256,8 +262,7 @@ function createPlanningInputSettings(settings: ProviderSettings): ProviderSettin
     temperature: 0.1,
     thinking: {
       ...settings.thinking,
-      effort: "low",
-      enabled: settings.tools.thinking,
+      enabled: settings.thinking.enabled,
     },
     tools: disablePlanningExecutionTools(settings.tools),
   };
@@ -275,8 +280,7 @@ function createFinalAnswerSettings(settings: ProviderSettings): ProviderSettings
     temperature: Math.min(settings.temperature, 0.25),
     thinking: {
       ...settings.thinking,
-      effort: "high",
-      enabled: settings.tools.thinking,
+      enabled: settings.thinking.enabled,
     },
     tools: disablePlanningExecutionTools(settings.tools),
   };

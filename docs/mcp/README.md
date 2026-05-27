@@ -45,7 +45,9 @@ When MCP is enabled in tool settings and the request asks for MCP or external co
 - `mcp_list_tools` to initialize one server and refresh its `tools/list` schema
 - `mcp_call_tool` to call one server tool with JSON object arguments
 
-The selector also treats well-known MCP-backed service names such as Firebase, Figma, Supabase, AWS, Azure, GitLab, GitHub MCP, Linear, Stripe, Atlassian, Vercel, Netlify, Heroku, Pulumi, Neon, Notion, Cloudflare, Context7, Brave Search, Exa, Firecrawl, Tavily, Apify, Browserbase, Redis, MongoDB, Postgres, Slack, Filesystem, Memory, Sequential Thinking, Playwright, Puppeteer, JetBrains, Sentry, and Kubernetes as MCP-intent prompts when MCP tools are enabled. This lets a user ask for the service naturally without having to say "MCP" first.
+The selector also treats well-known MCP-backed service names such as Firebase, GoDaddy Domains, Figma, Supabase, AWS, Azure, GitLab, GitHub MCP, Linear, LinkedIn, Stripe, Atlassian, Vercel, Netlify, Heroku, Pulumi, Neon, Notion, Cloudflare, Context7, Brave Search, Exa, Firecrawl, Tavily, Apify, Browserbase, Redis, MongoDB, Postgres, Slack, Filesystem, Memory, Sequential Thinking, Playwright, Puppeteer, JetBrains, Sentry, and Kubernetes as MCP-intent prompts when MCP tools are enabled. This lets a user ask for the service naturally without having to say "MCP" first.
+
+GoDaddy's official Domains MCP endpoint is included as a public read-only preset for domain search and availability checks. It does not purchase domains, update DNS records, change nameservers, or manage account settings. For a GoDaddy domain on Firebase Hosting, Gilbert should use Firebase MCP or terminal evidence for the Hosting deploy and custom-domain records, then clearly state the GoDaddy DNS changes that still need to be made in GoDaddy or through a separate GoDaddy Domains API integration.
 
 Tool discovery is treated as a read operation so the model can list configured servers and schemas before deciding what to call. `mcp_call_tool` uses the same app-owned permission path as other external actions. The model should list servers and tools before calling a tool unless the exact server id, tool name, and input schema are already known.
 
@@ -55,7 +57,7 @@ Apps > MCP includes a registry-backed discovery surface. It searches the officia
 
 Gilbert supports up to 50 configured MCP servers. This keeps the UI and cached tool inventory manageable while allowing a serious local workspace to keep the major daily services installed.
 
-Featured presets are provided for Firebase, Figma Remote/Desktop, Supabase, AWS, Azure, GitLab, GitHub MCP, Linear, Stripe, Atlassian, Vercel, Netlify, Heroku, Pulumi, Neon, Notion, Cloudflare API/Docs/Browser, Context7, Brave Search, Exa, Firecrawl, Tavily, Apify, Browserbase, Redis, MongoDB, Postgres, Slack, Filesystem, Memory, Sequential Thinking, Playwright, Puppeteer, JetBrains IDE, Sentry, and Kubernetes. These presets only prefill configuration; users still review, save, and test the server before chat can call its tools.
+Featured presets are provided for Firebase, GoDaddy Domains, Figma Remote/Desktop, Supabase, AWS, Azure, GitLab, GitHub MCP, Linear, LinkedIn, Stripe, Atlassian, Vercel, Netlify, Heroku, Pulumi, Neon, Notion, Cloudflare API/Docs/Browser, Context7, Brave Search, Exa, Firecrawl, Tavily, Apify, Browserbase, Redis, MongoDB, Postgres, Slack, Filesystem, Memory, Sequential Thinking, Playwright, Puppeteer, JetBrains IDE, Sentry, and Kubernetes. These presets only prefill configuration; users still review, save, and test the server before chat can call its tools.
 
 The Apps page presents MCPs as individual cards: configured server cards, a custom add-server card, featured preset cards, and registry result cards. The page also includes a Test all action that iterates through enabled servers and runs `tools/list` against each one, updating cached tool schemas and surfacing failures per server.
 

@@ -543,6 +543,11 @@
   background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
 }
 
+.skill-mention-list button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .skill-mention-icon {
   display: grid;
   place-items: center;
@@ -1369,12 +1374,8 @@
   width: min(760px, calc(100% - 44px));
 }
 
-.conversation-body[data-right-rail-open="true"] .mode-chip:not(.mode-chip-thinking) {
+.conversation-body[data-right-rail-open="true"] .mode-chip {
   max-width: 132px;
-}
-
-.conversation-body[data-right-rail-open="true"] .mode-chip-thinking {
-  max-width: 154px;
 }
 
 .conversation-body[data-right-rail-open="true"] .mode-chip-model {
@@ -1494,16 +1495,10 @@
   padding-inline: 8px;
 }
 
-.conversation-body[data-side-layout="preview"] .mode-chip:not(.mode-chip-thinking),
-.conversation-body[data-side-layout="coding-sidecar"] .mode-chip:not(.mode-chip-thinking),
-.conversation-body[data-side-layout="split"] .mode-chip:not(.mode-chip-thinking) {
+.conversation-body[data-side-layout="preview"] .mode-chip,
+.conversation-body[data-side-layout="coding-sidecar"] .mode-chip,
+.conversation-body[data-side-layout="split"] .mode-chip {
   max-width: 148px;
-}
-
-.conversation-body[data-side-layout="preview"] .mode-chip-thinking,
-.conversation-body[data-side-layout="coding-sidecar"] .mode-chip-thinking,
-.conversation-body[data-side-layout="split"] .mode-chip-thinking {
-  max-width: 170px;
 }
 
 .conversation-body[data-side-layout="preview"] .mode-chip-model,
@@ -1592,19 +1587,15 @@
 .conversation-body[data-side-layout="rail"] .composer-popover-local,
 .conversation-body[data-side-layout="rail"] .composer-popover-branch,
 .conversation-body[data-side-layout="rail"] .composer-popover-context,
-.conversation-body[data-side-layout="rail"] .thinking-popover,
 .conversation-body[data-side-layout="preview"] .composer-popover-local,
 .conversation-body[data-side-layout="preview"] .composer-popover-branch,
 .conversation-body[data-side-layout="preview"] .composer-popover-context,
-.conversation-body[data-side-layout="preview"] .thinking-popover,
 .conversation-body[data-side-layout="coding-sidecar"] .composer-popover-local,
 .conversation-body[data-side-layout="coding-sidecar"] .composer-popover-branch,
 .conversation-body[data-side-layout="coding-sidecar"] .composer-popover-context,
-.conversation-body[data-side-layout="coding-sidecar"] .thinking-popover,
 .conversation-body[data-side-layout="split"] .composer-popover-local,
 .conversation-body[data-side-layout="split"] .composer-popover-branch,
-.conversation-body[data-side-layout="split"] .composer-popover-context,
-.conversation-body[data-side-layout="split"] .thinking-popover {
+.conversation-body[data-side-layout="split"] .composer-popover-context {
   right: 12px;
   left: auto;
 }
@@ -2971,12 +2962,8 @@
     padding-inline: 8px;
   }
 
-  .desktop-root[data-runtime="web"] .mode-chip:not(.mode-chip-thinking) {
+  .desktop-root[data-runtime="web"] .mode-chip {
     max-width: 108px;
-  }
-
-  .desktop-root[data-runtime="web"] .mode-chip-thinking {
-    max-width: 120px;
   }
 
   .desktop-root[data-runtime="web"] .composer-actions-right {

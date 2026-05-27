@@ -1008,6 +1008,34 @@ export function handleDeleteChat(deps: WorkspaceRuntimeDeps, chatId: string) {
     setPendingDeleteChatId(chatId);
   }
 
+export function handleClearChatMessages(deps: WorkspaceRuntimeDeps, chatId: string) {
+  const { chats, isChatSending, setNoticeDialog, setPendingClearChatId } = deps;
+
+    const chatToClear = chats.find((chat) => chat.id === chatId);
+
+    if (!chatToClear) {
+      return;
+    }
+
+    if (isChatSending(chatId)) {
+      setNoticeDialog({
+        description: "Wait for the current response to finish, then delete all messages in this chat.",
+        title: "Chat is still responding",
+      });
+      return;
+    }
+
+    if (chatToClear.messages.length === 0) {
+      setNoticeDialog({
+        description: "This chat does not have messages to delete.",
+        title: "No messages",
+      });
+      return;
+    }
+
+    setPendingClearChatId(chatId);
+  }
+
 export function handleDeleteProject(deps: WorkspaceRuntimeDeps, projectName: string) {
   const { chats, isAnyChatSending, isNoProjectName, projects, setNoticeDialog, setPendingDeleteProjectName } = deps;
 
@@ -1094,6 +1122,46 @@ export function confirmDeleteChat(deps: WorkspaceRuntimeDeps) {
     setChats(nextChats);
     updateQueuedChatSends((currentQueue) => currentQueue.filter((queuedSend) => queuedSend.chatId !== chatToDelete.id));
     setPendingDeleteChatId(null);
+  }
+
+export function confirmClearChatMessages(deps: WorkspaceRuntimeDeps) {
+  const { chats, isChatSending, pendingChatsRef, pendingClearChatId, setChats, setNoticeDialog, setPendingClearChatId, sortChatsByUpdatedAt, updateQueuedChatSends } = deps;
+
+    const chatToClear = chats.find((chat) => chat.id === pendingClearChatId);
+
+    if (!chatToClear) {
+      setPendingClearChatId(null);
+      return;
+    }
+
+    if (isChatSending(chatToClear.id)) {
+      setPendingClearChatId(null);
+      setNoticeDialog({
+        description: "Wait for the current response to finish, then delete all messages in this chat.",
+        title: "Chat is still responding",
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const nextChats = sortChatsByUpdatedAt(
+      chats.map((chat) =>
+        chat.id === chatToClear.id
+          ? {
+              ...chat,
+              isDraft: true,
+              messages: [],
+              messagesClearedAt: now,
+              updatedAt: now,
+            }
+          : chat,
+      ),
+    );
+
+    pendingChatsRef.current = nextChats;
+    setChats(nextChats);
+    updateQueuedChatSends((currentQueue) => currentQueue.filter((queuedSend) => queuedSend.chatId !== chatToClear.id));
+    setPendingClearChatId(null);
   }
 
 export function confirmDeleteProject(deps: WorkspaceRuntimeDeps) {

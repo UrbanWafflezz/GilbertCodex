@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { looksLikeVisibleToolProtocol, stripVisibleToolProtocol } from "./visibleToolProtocol";
 
 describe("visible tool protocol guard", () => {
+  it("keeps ordinary text on the fast path", () => {
+    expect(stripVisibleToolProtocol("Plain markdown with **bold** text.")).toBe("Plain markdown with **bold** text.");
+  });
+
   it("strips a one-line unclosed DSML edit call before rendering", () => {
     const content = [
       `< | DSML | tool_calls> < | DSML | invoke name="files_edit"> < | DSML | parameter name="path" string="true">src/App.css</ | DSML | parameter>`,

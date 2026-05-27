@@ -35,6 +35,7 @@ interface AppShellProps {
   activeChatId: string;
   onCreateProject: (options?: CreateProjectOptions) => void | string | null | Promise<string | null | void>;
   onAppearanceModeChange: (mode: AppearanceMode) => void;
+  onClearChatMessages: (chatId: string) => void;
   onCloseSearch: () => void;
   onDeleteChat: (chatId: string) => void;
   onDeleteProject: (projectName: string) => void;
@@ -77,6 +78,7 @@ export function AppShell({
   desktopRuntime,
   locationServicesEnabled,
   onAppearanceModeChange,
+  onClearChatMessages,
   onCreateProject,
   onCloseSearch,
   onDeleteChat,
@@ -154,6 +156,13 @@ export function AppShell({
       closeSidebarOnSmallScreens();
     },
     [closeSidebarOnSmallScreens, onDeleteChat],
+  );
+  const handleSidebarClearChatMessages = useCallback(
+    (chatId: string) => {
+      onClearChatMessages(chatId);
+      closeSidebarOnSmallScreens();
+    },
+    [closeSidebarOnSmallScreens, onClearChatMessages],
   );
   const handleSidebarDeleteProject = useCallback(
     (projectName: string) => {
@@ -256,6 +265,7 @@ export function AppShell({
               locationServicesEnabled={locationServicesEnabled}
               open={sidebarOpen && !sidebarPresence.exiting}
               projects={projects}
+              onClearChatMessages={handleSidebarClearChatMessages}
               onCreateProject={handleSidebarCreateProject}
               onDeleteChat={handleSidebarDeleteChat}
               onDeleteProject={handleSidebarDeleteProject}

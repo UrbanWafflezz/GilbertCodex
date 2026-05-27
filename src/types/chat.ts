@@ -1,4 +1,4 @@
-import type { AppFollowUpBehavior, ModelProviderId, ReasoningEffort } from "./settings";
+import type { AppFollowUpBehavior, ModelProviderId } from "./settings";
 import type { LocalWorkspaceSettings } from "./localWorkspace";
 import type { TerminalShellId } from "./terminal";
 import type { WebSearchProvider } from "./settings";
@@ -33,12 +33,6 @@ export interface ChatVideoAttachment extends ChatAttachmentBase {
 }
 
 export type ChatAttachment = ChatFileAttachment | ChatImageAttachment | ChatVideoAttachment;
-
-export interface ChatThinking {
-  completedAt?: string;
-  effort: ReasoningEffort;
-  startedAt: string;
-}
 
 export type ChatMessageMode = "chat" | "plan";
 
@@ -200,15 +194,6 @@ export interface ChatToolCall {
   toolId?: string;
 }
 
-export type ChatWorkTraceStatus = "active" | "complete";
-
-export interface ChatWorkTraceThinkingItem {
-  content: string;
-  id: string;
-  kind: "thinking";
-  status?: ChatWorkTraceStatus;
-}
-
 export interface ChatWorkTraceToolItem {
   id: string;
   kind: "tool";
@@ -221,7 +206,7 @@ export interface ChatWorkTraceProgressItem {
   progress: ChatProgressItem;
 }
 
-export type ChatWorkTraceItem = ChatWorkTraceThinkingItem | ChatWorkTraceToolItem | ChatWorkTraceProgressItem;
+export type ChatWorkTraceItem = ChatWorkTraceToolItem | ChatWorkTraceProgressItem;
 
 export type ChatWebSearchStatus = "active" | "complete" | "error";
 
@@ -299,14 +284,12 @@ export interface ChatMessage {
   planning?: ChatPlanning;
   progress?: ChatProgressItem[];
   reasoning?: string;
-  responseThinking?: string;
   researchReferences?: ChatResearchReference[];
   role: ChatRole;
   source?: ChatMessageSource;
   sources?: ChatSource[];
   status?: "error" | "queued";
   streamTiming?: ChatStreamTiming;
-  thinking?: ChatThinking;
   toolCalls?: ChatToolCall[];
   webSearch?: ChatWebSearch;
   workTrace?: ChatWorkTraceItem[];
@@ -338,6 +321,7 @@ export interface ChatSummary {
   id: string;
   isDraft?: boolean;
   messages: ChatMessage[];
+  messagesClearedAt?: string;
   messagesLoaded?: boolean;
   model?: string;
   pinned?: boolean;

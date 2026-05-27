@@ -32,6 +32,7 @@ const fallbackAppInfo: AppInfo = {
 const DISCORD_INTERACTION_EVENT = "discord-interaction";
 const DISCORD_BRIDGE_STATUS_EVENT = "discord-bridge-status";
 const DESKTOP_NOTIFICATION_ACTIVATED_EVENT = "desktop-notification-activated";
+const MOBILE_BRIDGE_UPDATED_EVENT = "mobile-bridge-updated";
 
 export type DesktopNotificationKind = "completion" | "permission" | "question";
 
@@ -351,6 +352,33 @@ export interface NineRouterOAuthCallbackResponse {
   state?: string | null;
 }
 
+export interface MobileBridgeStartRequest {
+  port?: number;
+}
+
+export interface MobileBridgeStatus {
+  baseUrl?: string | null;
+  desktopName: string;
+  desktopSyncVersion: number;
+  emulatorUrl?: string | null;
+  lanUrls: string[];
+  lastMobileSyncAt?: number | null;
+  pairingPayload?: string | null;
+  port?: number | null;
+  queuedMobilePayloads: number;
+  queuedMobileRequests: number;
+  running: boolean;
+  startedAt?: number | null;
+  token?: string | null;
+}
+
+export interface MobileBridgeUpdateEvent {
+  kind?: "payload" | "request";
+  lastMobileSyncAt?: number | null;
+  queuedMobilePayloads?: number;
+  queuedMobileRequests?: number;
+}
+
 /** Detects the desktop runtime before invoking Tauri-only commands. */
 export function isTauriDesktopRuntime() {
   return Boolean(isTauri()) || (typeof window !== "undefined" && (Boolean(window.__TAURI_INTERNALS__) || Boolean(window.__TAURI__)));
@@ -546,6 +574,72 @@ export async function finishNineRouterOAuthCallback(id: string, timeoutMs = 300_
 
   return invoke<NineRouterOAuthCallbackResponse>("nine_router_oauth_callback_finish", {
     request: { id, timeoutMs },
+  });
+}
+
+export async function startMobileBridge(request?: MobileBridgeStartRequest): Promise<MobileBridgeStatus> {
+  if (!isTauriDesktopRuntime()) {
+    return createBrowserMobileBridgeStatus(false);
+  }
+
+  return invoke<MobileBridgeStatus>("mobile_bridge_start", { request: request ?? null });
+}
+
+export async function getMobileBridgeStatus(): Promise<MobileBridgeStatus> {
+  if (!isTauriDesktopRuntime()) {
+    return createBrowserMobileBridgeStatus(false);
+  }
+
+  return invoke<MobileBridgeStatus>("mobile_bridge_status");
+}
+
+export async function stopMobileBridge(): Promise<MobileBridgeStatus> {
+  if (!isTauriDesktopRuntime()) {
+    return createBrowserMobileBridgeStatus(false);
+  }
+
+  return invoke<MobileBridgeStatus>("mobile_bridge_stop");
+}
+
+export async function resetMobileBridgePairing(): Promise<MobileBridgeStatus> {
+  if (!isTauriDesktopRuntime()) {
+    return createBrowserMobileBridgeStatus(false);
+  }
+
+  return invoke<MobileBridgeStatus>("mobile_bridge_reset_pairing");
+}
+
+export async function updateMobileBridgeDesktopPayload(payload: unknown): Promise<MobileBridgeStatus> {
+  if (!isTauriDesktopRuntime()) {
+    return createBrowserMobileBridgeStatus(false);
+  }
+
+  return invoke<MobileBridgeStatus>("mobile_bridge_update_desktop_payload", { payload });
+}
+
+export async function takeMobileBridgePayloads(): Promise<unknown[]> {
+  if (!isTauriDesktopRuntime()) {
+    return [];
+  }
+
+  return invoke<unknown[]>("mobile_bridge_take_mobile_payloads");
+}
+
+export async function takeMobileBridgeRequests(): Promise<unknown[]> {
+  if (!isTauriDesktopRuntime()) {
+    return [];
+  }
+
+  return invoke<unknown[]>("mobile_bridge_take_mobile_requests");
+}
+
+export async function listenForMobileBridgeUpdates(onUpdate: (update: MobileBridgeUpdateEvent) => void): Promise<UnlistenFn> {
+  if (!isTauriDesktopRuntime()) {
+    return () => undefined;
+  }
+
+  return await listen<MobileBridgeUpdateEvent>(MOBILE_BRIDGE_UPDATED_EVENT, (event) => {
+    onUpdate(event.payload);
   });
 }
 
@@ -877,6 +971,24 @@ function createWorkspaceDependencyPreviewDiagnostic(message: string): WorkspaceD
     pythonVersion: null,
     status: "error",
     version: "desktop-only",
+  };
+}
+
+function createBrowserMobileBridgeStatus(running: boolean): MobileBridgeStatus {
+  return {
+    baseUrl: null,
+    desktopName: "Browser preview",
+    desktopSyncVersion: 0,
+    emulatorUrl: null,
+    lanUrls: [],
+    lastMobileSyncAt: null,
+    pairingPayload: null,
+    port: null,
+    queuedMobilePayloads: 0,
+    queuedMobileRequests: 0,
+    running,
+    startedAt: null,
+    token: null,
   };
 }
 

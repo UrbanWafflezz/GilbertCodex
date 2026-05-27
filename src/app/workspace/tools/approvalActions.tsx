@@ -289,13 +289,8 @@ export async function handleResolveToolApproval(deps: WorkspaceRuntimeDeps, mess
                               }
                             : message.planning,
                           progress: withLocalComputerProgress(assistantResponse.progress, message.progress),
+                          reasoning: assistantResponse.reasoning ?? message.reasoning,
                           toolCalls: assistantResponse.toolCalls ?? message.toolCalls,
-                          thinking: message.thinking
-                            ? {
-                                ...message.thinking,
-                                completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-                              }
-                            : undefined,
                         })
                       : message,
                   ),

@@ -20,6 +20,7 @@ describe("OpenAI Codex marketplace MCP routing", () => {
       heroku: "heroku",
       jetbrains: "jetbrains",
       kubernetes: "kubernetes",
+      linkedin: "linkedin",
       mongodb: "mongodb",
       "neon-postgres": "neon",
       netlify: "netlify",

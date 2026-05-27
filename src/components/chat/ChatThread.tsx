@@ -7,9 +7,10 @@ import { MessageActions } from "./MessageActions";
 import { MessageBlock } from "./MessageBlock";
 import { PlanReviewCard } from "./PlanReviewCard";
 import { isInterruptedAssistantMessage } from "../../app/chatRuntime";
-import { extractInlineThinking } from "../../lib/inlineThinkingExtractor";
+import { extractInternalReasoningTags } from "../../lib/internalReasoningTags";
 import { scheduleIdleTask } from "../../lib/idleTask";
 import { getSavedPlanContent, isPlanExecutionContent } from "../../lib/planReview";
+import { mergeVisibleReasoningSummaries } from "../../lib/reasoningSummary";
 import { stripVisibleToolProtocol } from "../../lib/visibleToolProtocol";
 import type { AppInfo } from "../../types/app";
 import type { AgentApprovalDecision } from "../../types/agentRun";
@@ -84,7 +85,7 @@ function ChatThreadComponent({
   );
   const regenerableMessageIds = useMemo(() => getRegenerableMessageIds(chat.messages), [chat.messages]);
   const streamMarker = scrollAnchorMessage
-    ? `${chat.messages.length}:${scrollAnchorMessage.id}:${scrollAnchorMessage.content.length}:${scrollAnchorMessage.responseThinking?.length ?? 0}:${createMessageActivityMarker(scrollAnchorMessage)}:${scrollAnchorMessage.isStreaming ? "1" : "0"}`
+    ? `${chat.messages.length}:${scrollAnchorMessage.id}:${scrollAnchorMessage.content.length}:${createMessageActivityMarker(scrollAnchorMessage)}:${scrollAnchorMessage.isStreaming ? "1" : "0"}`
     : `empty:${chat.messages.length}`;
 
   useEffect(() => {
@@ -271,7 +272,7 @@ function ChatThreadComponent({
     if (scrollingUp && !historyHydrated && currentScrollTop < 260) {
       increaseRenderedHistory(chat.id, THREAD_HISTORY_RENDER_INCREMENT * 2);
     }
-    const atBottom = !scrollingUp && isThreadNearBottom(thread);
+    const atBottom = isThreadNearBottom(thread);
     lastThreadScrollTopRef.current = currentScrollTop;
     shouldStickToBottomRef.current = atBottom;
 
@@ -490,7 +491,7 @@ const ChatMessageRow = memo(function ChatMessageRow({
   onStartEditMessage,
   onSubmitEditMessage,
 }: ChatMessageRowProps) {
-  const displayMessage = message.role === "assistant" ? separateDisplayThinking(message.content, Boolean(message.isStreaming)) : { content: message.content };
+  const displayMessage = message.role === "assistant" ? separateDisplayThinking(message.content, Boolean(message.isStreaming)) : { content: message.content, reasoning: "" };
   const hasVisibleContent = displayMessage.content.trim().length > 0;
   const messageSources = message.role === "assistant" ? getMessageSources(message, displayMessage.content) : [];
   const showMessageSources = message.role === "assistant" && !message.isStreaming && hasVisibleContent && messageSources.length > 0;
@@ -501,12 +502,30 @@ const ChatMessageRow = memo(function ChatMessageRow({
   const showPlanExecutionContent = message.role === "assistant" && showPlanReview && isPlanExecutionContent(message, displayMessage.content);
   const showResponseRecoveryActions = message.role === "assistant" && !message.isStreaming && isInterruptedAssistantMessage(message) && canRegenerate;
   const isEditingUserMessage = message.role === "user" && editingMessageId === message.id;
-  const activitySnapshot = message.role === "assistant"
-    ? createAssistantActivitySnapshot(message, { responseStarted: hasVisibleContent })
-    : null;
-  const hasWorkTrace = message.role === "assistant" && (Boolean(message.workTrace?.length) || Boolean(message.responseThinking?.trim()));
+  const activitySnapshot = useMemo(
+    () => message.role === "assistant"
+      ? createAssistantActivitySnapshot(message, { responseStarted: hasVisibleContent })
+      : null,
+    [
+      hasVisibleContent,
+      message.artifacts,
+      message.isStreaming,
+      message.planning,
+      message.progress,
+      message.reasoning,
+      message.role,
+      message.status,
+      message.toolCalls,
+      message.webSearch,
+    ],
+  );
   const hasRunActivity = message.role === "assistant" && hasAssistantRunActivity(message);
-  const showAssistantWorkTrace = message.role === "assistant" && (activitySnapshot || hasWorkTrace || hasRunActivity || Boolean(message.isStreaming && !hasVisibleContent));
+  const displayReasoning = message.role === "assistant" ? mergeDisplayReasoning(message.reasoning, displayMessage.reasoning) : "";
+  const activityMessage = displayReasoning && message.role === "assistant" && displayReasoning !== message.reasoning
+    ? { ...message, reasoning: displayReasoning }
+    : message;
+  const hasVisibleReasoning = message.role === "assistant" && Boolean(displayReasoning);
+  const showAssistantWorkTrace = message.role === "assistant" && (activitySnapshot || hasRunActivity || hasVisibleReasoning || Boolean(message.isStreaming && !hasVisibleContent));
   const visibleContextCompactions = message.role === "assistant" ? getVisibleContextCompactions(message.contextCompactions) : [];
   const showMessageBlock = message.role !== "assistant" || hasVisibleContent || hasVisibleAttachment || hasVisibleArtifact || showPlanReview || showAssistantWorkTrace;
 
@@ -531,13 +550,9 @@ const ChatMessageRow = memo(function ChatMessageRow({
             <AssistantWorkTrace
               activitySnapshot={activitySnapshot}
               createdAt={message.createdAt}
-              message={message}
+              message={activityMessage}
               onResolveToolApproval={onResolveToolApproval}
               responseStarted={hasVisibleContent}
-              thinking={message.role === "assistant" ? message.thinking : undefined}
-              thinkingContent={message.role === "assistant" ? message.responseThinking ?? "" : ""}
-              thinkingStreaming={Boolean(message.isStreaming && !hasVisibleContent)}
-              workTrace={message.role === "assistant" ? message.workTrace : undefined}
             />
           ) : null}
           {isEditingUserMessage ? (
@@ -1004,21 +1019,26 @@ function formatCompactTokenCount(tokens: number) {
   return String(tokens);
 }
 
-function separateDisplayThinking(content: string, isStreaming = false) {
+export function separateDisplayThinking(content: string, isStreaming = false) {
   // Streaming messages still get the tail-prefix guard so a half-typed `<thi`
   // never flashes into the public area. Hidden content is intentionally not
   // returned to the UI.
-  const { content: visibleContent } = extractInlineThinking(content, {
+  const { content: visibleContent, reasoning } = extractInternalReasoningTags(content, {
     final: !isStreaming,
   });
 
   return {
     content: removeInternalAssistantStatusMessage(stripVisibleToolProtocol(visibleContent).trimStart()),
+    reasoning,
   };
 }
 
 function removeInternalAssistantStatusMessage(content: string) {
   return INTERNAL_ASSISTANT_STATUS_MESSAGES.has(content.trim()) ? "" : content;
+}
+
+function mergeDisplayReasoning(storedReasoning: string | undefined, extractedReasoning: string | undefined) {
+  return mergeVisibleReasoningSummaries(storedReasoning, extractedReasoning);
 }
 
 function getScrollAnchorMessage(chat: ChatSummary) {
@@ -1057,10 +1077,6 @@ function getInitialHistoryRenderCount(messageCount: number) {
 function createMessageActivityMarker(message: ChatMessage) {
   const workTraceMarker = (message.workTrace ?? [])
     .map((item) => {
-      if (item.kind === "thinking") {
-        return `${item.id}:${item.kind}:${item.status ?? ""}:${item.content.length}`;
-      }
-
       if (item.kind === "tool") {
         return `${item.id}:${item.kind}:${item.toolCall.status}:${item.toolCall.output?.length ?? 0}`;
       }
@@ -1080,7 +1096,7 @@ function createMessageActivityMarker(message: ChatMessage) {
       return `${toolCall.id}:${toolCall.status}:${toolCall.input?.length ?? 0}:${toolCall.output?.length ?? 0}:${fileMarker}`;
     })
     .join("|");
-  return `${workTraceMarker}:${progressMarker}:${toolMarker}:${message.webSearch?.status ?? ""}:${message.thinking?.completedAt ?? ""}`;
+  return `${workTraceMarker}:${progressMarker}:${toolMarker}:${message.webSearch?.status ?? ""}:${message.streamTiming?.completedAt ?? ""}`;
 }
 
 function getRegenerableMessageIds(messages: ChatMessage[]) {

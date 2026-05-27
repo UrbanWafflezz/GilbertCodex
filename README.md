@@ -18,8 +18,6 @@
   <a href="docs/ROADMAP.md">Roadmap</a>
   |
   <a href="CONTRIBUTING.md">Contributing</a>
-  |
-  <a href="docs/SUPPORT.md">Support</a>
 </p>
 
 <p align="center">
@@ -101,10 +99,6 @@ macOS and Linux packages are built on GitHub-hosted native runners and are now p
       <strong>Subscription setup</strong><br>
       <img src="docs/assets/readme/gilbert-codex-subscriptions.png" alt="Gilbert Codex subscription settings setup page">
     </td>
-    <td width="50%">
-      <strong>Project support</strong><br>
-      <img src="docs/assets/readme/gilbert-codex-support.png" alt="Gilbert Codex voluntary project funding page">
-    </td>
   </tr>
 </table>
 
@@ -160,11 +154,7 @@ The plugin marketplace is still being polished, but the v0.8.x line moves it out
 - Voice input: offline Whisper dictation for desktop builds, bundled model resources, configurable dictation hotkeys, and dictionary entries.
 - Source context: DuckDuckGo/Brave-backed source cards, thinking/planning support, browser preview capture, citation-aware web context, and clearer fallback messaging.
 - Review posture: destructive chat deletion confirmation, explicit local workspace permission modes, source-write guardrails, connected-tool evidence checks, desktop notification permission checks, Tauri CSP, least-privilege notification capabilities, and visible activity/progress cards.
-- Settings: provider key/base URL entry, non-model Keys vault presets for MCP, skills, apps, and services, subscription account setup, subscription model catalogs without a required local API key, GitHub browser login, Google OAuth setup, Discord bridge setup/runtime controls, optional support links, connection validation, appearance mode, UI/chat/composer sizing, motion, voice dictation, model, generation, thinking, workspace, app, plugin, and MCP controls.
-
-## Support
-
-Gilbert Codex stays open source and usable without payment. Optional project funding is available through the app's Fund project page, GitHub's Sponsor button, and [Cash App $kobeelijahh](https://cash.app/$kobeelijahh). See [Funding Gilbert Codex](docs/SUPPORT.md) for the safety rules and hosted-link setup notes.
+- Settings: provider key/base URL entry, non-model Keys vault presets for MCP, skills, apps, and services, subscription account setup, subscription model catalogs without a required local API key, GitHub browser login, Google OAuth setup, Discord bridge setup/runtime controls, connection validation, appearance mode, UI/chat/composer sizing, motion, voice dictation, model, generation, thinking, workspace, app, plugin, and MCP controls.
 
 ## Coming Next
 
@@ -294,7 +284,7 @@ Gmail and Google Calendar sign-in use Google OAuth for desktop apps. Each user a
 
 MCP bearer tokens and stdio environment values are stored through the app's OS-backed secure storage. The React UI and chat tools only see whether a secret exists; they do not receive the secret values back.
 
-Release-only app configuration stays out of the public source tree. The GitHub `Release` workflow restores private app-only runtime files from a private release overlay before building desktop artifacts, including the private tool bridge and optional plugin bundles. App-user OAuth values, provider keys, local accounts, and support links are not required as release secrets; users configure those inside the installed app.
+Release-only app configuration stays out of the public source tree. The GitHub `Release` workflow restores private app-only runtime files from a private release overlay before building desktop artifacts, including the private tool bridge and optional plugin bundles. App-user OAuth values, provider keys, and local accounts are not required as release secrets; users configure those inside the installed app.
 
 Discord bridge settings are local setup data for the desktop Discord runtime. Slash-command chat uses a signed local Interactions receiver and can start ngrok in the background to produce a public HTTPS endpoint. `/gilbert` continues the latest Discord-linked chat, while `/gilbertnewchat` intentionally starts a fresh chat. Incoming Discord webhooks are one-way posting URLs for app updates and chat follow-ups. Bot gateway chat is still future runtime work.
 

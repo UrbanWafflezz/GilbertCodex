@@ -179,7 +179,7 @@ describe("CodingSidecarPanel", () => {
           { id: "tool-search", label: "Search workspace files", status: "complete", toolId: "files_search" },
           { id: "tool-read", label: "Read workspace file", status: "complete", toolId: "files_read" },
           {
-            batchFileResults: [{ additions: 2, deletions: 1, kind: "update", path: "src/lib/thinkingTrace.ts", status: "ok" }],
+            batchFileResults: [{ additions: 2, deletions: 1, kind: "update", path: "src/lib/workTimer.ts", status: "ok" }],
             id: "tool-edit",
             label: "Edit many workspace files",
             status: "complete",

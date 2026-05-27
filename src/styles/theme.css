@@ -331,36 +331,20 @@ body::after {
   color: var(--text-muted);
 }
 
-.thinking-popover-header,
-.thinking-effort-grid button {
+.reasoning-effort-header,
+.reasoning-effort-grid button {
   color: var(--text);
   border-color: var(--popover-border);
   background: var(--composer-control-bg);
 }
 
-.thinking-popover-header small,
-.thinking-effort-grid small,
-.thinking-field-row small,
-.thinking-summary-action {
+.reasoning-effort-header small,
+.reasoning-effort-grid small {
   color: var(--text-dim);
 }
 
-.thinking-effort-grid button:hover {
+.reasoning-effort-grid button:hover {
   background: var(--hover);
-}
-
-:root[data-theme="light"] .mode-chip-thinking {
-  color: #2f3a48;
-  background:
-    linear-gradient(#e8ebf0, #e8ebf0) padding-box,
-    linear-gradient(135deg, rgba(20, 120, 200, 0.35), rgba(146, 113, 51, 0.28), rgba(97, 83, 190, 0.3)) border-box;
-}
-
-:root[data-theme="light"] .mode-chip-thinking[data-active="true"] {
-  color: #17202b;
-  background:
-    linear-gradient(180deg, #eef1f5, #e2e7ed) padding-box,
-    linear-gradient(135deg, rgba(20, 120, 200, 0.5), rgba(146, 113, 51, 0.36), rgba(97, 83, 190, 0.42)) border-box;
 }
 
 :root[data-theme="light"] .search-backdrop {
@@ -817,37 +801,32 @@ body::after {
     var(--hover);
 }
 
-.thinking-popover-header,
-.thinking-effort-grid button {
+.reasoning-effort-header,
+.reasoning-effort-grid button {
   color: var(--text);
   border-color: color-mix(in srgb, var(--popover-border) 84%, transparent);
   background: color-mix(in srgb, var(--surface-raised) 62%, transparent);
 }
 
-.thinking-effort-grid button[data-selected="true"],
-.mode-chip-thinking[data-active="true"] {
+.reasoning-effort-grid button[data-selected="true"] {
   border-color: color-mix(in srgb, var(--blue) 48%, var(--violet) 16%);
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--blue-soft) 72%, transparent), color-mix(in srgb, var(--violet-soft) 44%, transparent), color-mix(in srgb, var(--gold) 10%, transparent)),
     color-mix(in srgb, var(--surface-raised) 70%, transparent);
 }
 
-:root:not([data-theme="light"]) .mode-chip-thinking,
-:root:not([data-theme="light"]) .thinking-popover-header,
-:root:not([data-theme="light"]) .thinking-popover-header strong,
-:root:not([data-theme="light"]) .thinking-popover-header small,
-:root:not([data-theme="light"]) .thinking-field-row,
-:root:not([data-theme="light"]) .thinking-field-row small,
-:root:not([data-theme="light"]) .thinking-effort-grid button,
-:root:not([data-theme="light"]) .thinking-effort-grid strong,
-:root:not([data-theme="light"]) .thinking-effort-grid small {
+:root:not([data-theme="light"]) .reasoning-effort-header,
+:root:not([data-theme="light"]) .reasoning-effort-header strong,
+:root:not([data-theme="light"]) .reasoning-effort-header small,
+:root:not([data-theme="light"]) .reasoning-effort-grid button,
+:root:not([data-theme="light"]) .reasoning-effort-grid strong,
+:root:not([data-theme="light"]) .reasoning-effort-grid small {
   color: #ffffff;
   font-weight: 800;
 }
 
-:root:not([data-theme="light"]) .thinking-popover-header small,
-:root:not([data-theme="light"]) .thinking-field-row small,
-:root:not([data-theme="light"]) .thinking-effort-grid small {
+:root:not([data-theme="light"]) .reasoning-effort-header small,
+:root:not([data-theme="light"]) .reasoning-effort-grid small {
   opacity: 0.92;
 }
 
@@ -1023,9 +1002,8 @@ body::after {
     linear-gradient(135deg, #a8e1ff 0%, #9de9dd 58%, #e0d8ff 100%);
 }
 
-:root:not([data-theme="light"]) .mode-chip-thinking,
-:root:not([data-theme="light"]) .thinking-popover-header,
-:root:not([data-theme="light"]) .thinking-effort-grid button {
+:root:not([data-theme="light"]) .reasoning-effort-header,
+:root:not([data-theme="light"]) .reasoning-effort-grid button {
   border-color: color-mix(in srgb, var(--violet) 30%, transparent);
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--violet-soft) 70%, transparent), color-mix(in srgb, var(--gold) 8%, transparent)),

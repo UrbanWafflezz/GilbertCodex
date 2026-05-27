@@ -15,7 +15,7 @@ import type { AgentApprovalDecision, AgentRun } from "../types/agentRun";
 import type { ChatComposerDraft, ChatMessage, ChatPlanningInputAnswer, ChatSendInput, ChatSummary } from "../types/chat";
 import type { LocalWorkspaceSettings } from "../types/localWorkspace";
 import { WEB_SEARCH_PROVIDER_LABELS, type AppCodeReviewBehavior, type AppFollowUpBehavior, type ProviderSettings, type ThinkingSettings, type WebSearchSettings } from "../types/settings";
-import type { CreateProjectOptions, ProjectSummary } from "../types/project";
+import type { CreateProjectOptions, ProjectGoal, ProjectSummary } from "../types/project";
 import { getProjectOpenTarget, getRecommendedProjectOpenTarget, type ProjectOpenTargetId } from "../types/projectOpen";
 
 const loadBrowserPreviewPanel = () => import("../components/browser/BrowserPreviewPanel");
@@ -73,6 +73,12 @@ interface ChatPageProps {
   onOpenProjectTool: (target: ProjectOpenTargetId) => void | Promise<void>;
   onOpenProjectRun: () => void;
   onOpenSideChat: () => void;
+  onProjectGoalClear: () => void;
+  onProjectGoalComplete: () => void;
+  onProjectGoalCreate: (objective: string, options?: { input?: ChatSendInput; start?: boolean }) => void | Promise<void>;
+  onProjectGoalPause: () => void;
+  onProjectGoalResume: () => void;
+  onProjectGoalUpdate: (objective: string) => void;
   onRenameChat: () => void;
   onSelectProject: (project: string) => void;
   onSelectChat: (chatId: string) => void;
@@ -85,6 +91,7 @@ interface ChatPageProps {
   onSubmitPlanningInput: (messageId: string, answers: ChatPlanningInputAnswer[]) => void | Promise<void>;
   onResolveToolApproval?: (messageId: string, approvalId: string, decision: AgentApprovalDecision) => void | Promise<void>;
   providerSettings: ProviderSettings;
+  projectGoal?: ProjectGoal;
   projects: ProjectSummary[];
   queuedMessageCount?: number;
   queuedMessageDetails?: ChatMessage[];
@@ -150,6 +157,12 @@ function ChatPageComponent({
   onOpenProjectTool,
   onOpenProjectRun,
   onOpenSideChat,
+  onProjectGoalClear,
+  onProjectGoalComplete,
+  onProjectGoalCreate,
+  onProjectGoalPause,
+  onProjectGoalResume,
+  onProjectGoalUpdate,
   onRenameChat,
   onSelectChat,
   onSelectProject,
@@ -162,6 +175,7 @@ function ChatPageComponent({
   onSubmitPlanningInput,
   onResolveToolApproval,
   providerSettings,
+  projectGoal,
   projects,
   queuedMessageCount = 0,
   queuedMessageDetails = [],
@@ -738,6 +752,13 @@ function ChatPageComponent({
       onStopGeneration={onStopGeneration}
       onSteerQueuedMessage={onSteerQueuedMessage}
       onSubmit={onSendMessage}
+      onProjectGoalClear={onProjectGoalClear}
+      onProjectGoalComplete={onProjectGoalComplete}
+      onProjectGoalCreate={onProjectGoalCreate}
+      onProjectGoalPause={onProjectGoalPause}
+      onProjectGoalResume={onProjectGoalResume}
+      onProjectGoalUpdate={onProjectGoalUpdate}
+      projectGoal={projectGoal}
       projects={projects}
       providerSettings={providerSettings}
       queuedMessageCount={Math.max(queuedMessageCount, queuedMessages.length)}
@@ -936,6 +957,7 @@ function areChatPagePropsEqual(previous: ChatPageProps, next: ChatPageProps) {
     previous.model === next.model &&
     previous.modelContextWindows === next.modelContextWindows &&
     previous.providerSettings === next.providerSettings &&
+    previous.projectGoal === next.projectGoal &&
     previous.projects === next.projects &&
     previous.queuedMessageCount === next.queuedMessageCount &&
     previous.queuedMessageDetails === next.queuedMessageDetails &&

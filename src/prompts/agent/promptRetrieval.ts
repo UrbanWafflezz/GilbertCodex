@@ -48,7 +48,6 @@ export function createAgentPromptRetrievalContext(settings: ProviderSettings, me
   const query = [
     latestUserPrompt,
     mode === "planning" ? "planning architecture tradeoffs requirements" : "chat implementation answer",
-    tools.thinking ? "thinking enabled" : "",
     enabledToolNames.length > 0 ? `host capabilities ${enabledToolNames.join(" ")}` : "no runtime tools",
     hasLocalComputerContext ? "host workspace context filesystem code workspace" : "",
     hasWebContext ? "web search results source citations current facts" : "",

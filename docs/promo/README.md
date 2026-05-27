@@ -12,7 +12,6 @@ Last reviewed for the v0.8.2 release prep on May 25, 2026. Recapture the screens
 - `../assets/readme/gilbert-codex-settings.png`: General settings screenshot.
 - `../assets/readme/gilbert-codex-provider-settings.png`: AI and Providers screenshot with subscription model routing.
 - `../assets/readme/gilbert-codex-subscriptions.png`: Subscriptions setup screenshot.
-- `../assets/readme/gilbert-codex-support.png`: voluntary project funding page screenshot.
 - `../assets/github/gilbert-codex-github-logo.png`: square GitHub-ready Source Compass logo.
 - `../assets/brand/gilbert-codex-source-compass-icon.png`: source PNG used to regenerate desktop app icon sizes.
 - `promo.html`: optional source scene for generating a longer standalone promo video outside release assets.

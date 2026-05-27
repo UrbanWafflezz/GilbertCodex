@@ -173,6 +173,15 @@ export const API_KEY_PRESETS: ApiKeyPreset[] = [
     service: "github",
   },
   {
+    description: "LinkedIn member OAuth access token for the Gilbert LinkedIn MCP self-profile tools. Use only member-consented official API access.",
+    group: "MCP",
+    id: "mcp-linkedin-access-token",
+    keyName: "LINKEDIN_ACCESS_TOKEN",
+    kind: "mcp",
+    label: "LinkedIn access token",
+    service: "linkedin",
+  },
+  {
     description: "Bearer token for the Cloudflare API MCP endpoint.",
     group: "MCP",
     id: "mcp-cloudflare-token",

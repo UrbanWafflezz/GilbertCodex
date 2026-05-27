@@ -1,5 +1,4 @@
 import { createId, DEFAULT_PROJECT, isNoProjectName, normalizeProjectName } from "../../lib/chatUtils";
-import { cleanVisibleWorkTraceContent } from "../../lib/workTraceContent";
 import type { AgentApproval, AgentRun } from "../../types/agentRun";
 import type { ChatArtifact, ChatMessage, ChatProgressItem, ChatSource, ChatSummary, ChatToolCall, ChatWorkTraceItem } from "../../types/chat";
 import type { ProjectSummary } from "../../types/project";
@@ -390,7 +389,7 @@ export function hasSuccessfulFileMutationToolCall(toolCalls: ChatToolCall[]) {
 
     const toolId = toolCall.toolId ?? "";
     return (
-      /^files_(?:append|apply_patch|create_directory|edit_many|exact_replace|insert_at_line|move|replace_range|replace_span|write|write_many)\b/i.test(toolId) ||
+      /^files_(?:append|apply_patch|copy|create_directory|edit_many|exact_replace|insert_at_line|move|replace_range|replace_span|write|write_many)\b/i.test(toolId) ||
       (toolCall.fileChanges?.length ?? 0) > 0 ||
       toolCall.batchSummary?.operation === "edit" ||
       toolCall.batchSummary?.operation === "write" ||
@@ -413,65 +412,6 @@ export function upsertToolCall(toolCalls: ChatToolCall[], nextToolCall: ChatTool
   return toolCalls.map((toolCall, index) => (index === existingIndex ? nextToolCall : toolCall));
 }
 
-export function withStreamingWorkThinking(message: ChatMessage, content: string, status: "active" | "complete" = "active"): ChatMessage {
-  const cleanContent = cleanWorkThinkingContent(content);
-
-  if (!cleanContent) {
-    return completeStreamingWorkThinking(message);
-  }
-
-  const workTrace = message.workTrace ?? [];
-  const activeThinkingIndex = workTrace.findIndex((item) => item.kind === "thinking" && item.status === "active");
-  const activeThinking = activeThinkingIndex >= 0 ? workTrace[activeThinkingIndex] : undefined;
-
-  if (activeThinking?.kind === "thinking") {
-    const currentContent = cleanWorkThinkingContent(activeThinking.content);
-    const isSameThought = cleanContent === currentContent || cleanContent.startsWith(currentContent) || currentContent.startsWith(cleanContent);
-
-    if (isSameThought) {
-      return {
-        ...message,
-        responseThinking: cleanContent,
-        workTrace: workTrace.map((item, index) =>
-          index === activeThinkingIndex && item.kind === "thinking"
-            ? {
-                ...item,
-                content: cleanContent.length >= currentContent.length ? cleanContent : currentContent,
-                status,
-              }
-            : item,
-        ),
-      };
-    }
-  }
-
-  const completedTrace: ChatWorkTraceItem[] = workTrace.map((item) => item.kind === "thinking" && item.status === "active" ? { ...item, status: "complete" as const } : item);
-  const thinkingCount = completedTrace.filter((item) => item.kind === "thinking").length;
-  const thinkingItem: ChatWorkTraceItem = {
-    content: cleanContent,
-    id: `streaming-thinking-${thinkingCount + 1}`,
-    kind: "thinking",
-    status,
-  };
-
-  return {
-    ...message,
-    responseThinking: cleanContent,
-    workTrace: [...completedTrace, thinkingItem],
-  };
-}
-
-export function completeStreamingWorkThinking(message: ChatMessage): ChatMessage {
-  if (!message.responseThinking && !message.workTrace?.some((item) => item.kind === "thinking" && item.status === "active")) {
-    return message;
-  }
-
-  return {
-    ...message,
-    workTrace: message.workTrace?.map((item) => item.kind === "thinking" && item.status === "active" ? { ...item, status: "complete" as const } : item),
-  };
-}
-
 export function mergeMessageWorkTrace(previousMessage: ChatMessage, nextMessage: ChatMessage): ChatWorkTraceItem[] | undefined {
   const merged: ChatWorkTraceItem[] = [];
 
@@ -491,15 +431,6 @@ export function mergeMessageWorkTrace(previousMessage: ChatMessage, nextMessage:
 
     if (!existingItem) {
       merged.push(nextItem);
-      return;
-    }
-
-    if (existingItem.kind === "thinking" && nextItem.kind === "thinking") {
-      merged[existingIndex] = {
-        ...existingItem,
-        content: nextItem.content.length >= existingItem.content.length ? nextItem.content : existingItem.content,
-        status: nextItem.status ?? existingItem.status,
-      };
       return;
     }
 
@@ -534,11 +465,7 @@ export function mergeMessageWorkTrace(previousMessage: ChatMessage, nextMessage:
     });
   }
 
-  const finalizedTrace = nextMessage.isStreaming === false
-    ? merged.map((item) => item.kind === "thinking" && item.status === "active" ? { ...item, status: "complete" as const } : item)
-    : merged;
-
-  return finalizedTrace.length > 0 ? finalizedTrace : undefined;
+  return merged.length > 0 ? merged : undefined;
 }
 
 export function toolCallsMatchForWorkTrace(left: ChatToolCall, right: ChatToolCall) {
@@ -561,10 +488,6 @@ export function getToolCallInputIdentity(toolCall: ChatToolCall) {
 
   const toolKey = `${toolCall.toolId ?? ""}|${toolCall.label}`.toLowerCase();
   return `${toolKey}|${input}`;
-}
-
-export function cleanWorkThinkingContent(content: string) {
-  return cleanVisibleWorkTraceContent(content);
 }
 
 export function mergeAgentApprovals(currentApprovals: AgentApproval[], nextApprovals: AgentApproval[]) {

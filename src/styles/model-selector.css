@@ -135,7 +135,7 @@ body > .composer-popover-model.model-selector-popover {
   white-space: nowrap;
 }
 
-.model-selector-thinking-panel {
+.model-selector-reasoning-panel {
   min-width: 0;
   padding: 6px;
   border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
@@ -143,12 +143,164 @@ body > .composer-popover-model.model-selector-popover {
   background: color-mix(in srgb, var(--surface-raised) 28%, transparent);
 }
 
-.model-selector-thinking-panel .thinking-panel,
-.model-selector-thinking-panel .thinking-options {
+.reasoning-effort-panel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.reasoning-effort-header {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.reasoning-effort-orb {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--line) 68%, transparent);
+  border-radius: 8px;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--surface-raised) 68%, transparent);
+}
+
+.reasoning-effort-orb[data-on="true"] {
+  color: color-mix(in srgb, var(--blue) 72%, var(--text));
+  border-color: color-mix(in srgb, var(--blue) 34%, var(--line));
+  background: color-mix(in srgb, var(--blue-soft) 34%, var(--surface-raised));
+}
+
+.reasoning-effort-header > span:not(.reasoning-effort-orb) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reasoning-effort-header strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-size-13, 13px);
+  font-weight: 690;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reasoning-effort-header small {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-size-11-5, 11.5px);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reasoning-effort-power {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  min-height: 26px;
+  padding: 0 9px;
+  color: var(--text-dim);
+  border: 1px solid color-mix(in srgb, var(--line) 68%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  font-size: var(--font-size-11-5, 11.5px);
+  font-weight: 700;
+}
+
+.reasoning-effort-power:hover,
+.reasoning-effort-power:focus-visible,
+.reasoning-effort-power[data-on="true"] {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--blue) 38%, var(--line));
+  background: color-mix(in srgb, var(--blue-soft) 28%, transparent);
+}
+
+.reasoning-effort-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.reasoning-effort-grid button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 6px;
+  min-height: 52px;
+  min-width: 0;
+  padding: 8px;
+  color: var(--text-muted);
+  border: 1px solid color-mix(in srgb, var(--line) 66%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-raised) 38%, transparent);
+  text-align: left;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.reasoning-effort-grid button:hover,
+.reasoning-effort-grid button:focus-visible {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--blue) 32%, var(--line));
+  background: color-mix(in srgb, var(--surface-raised) 62%, transparent);
+}
+
+.reasoning-effort-grid button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--blue) 40%, transparent);
+  outline-offset: 2px;
+}
+
+.reasoning-effort-grid button[data-selected="true"] {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--blue) 52%, var(--line));
+  background: color-mix(in srgb, var(--blue-soft) 34%, var(--surface-raised));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 16%, transparent);
+}
+
+.reasoning-effort-grid button > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reasoning-effort-grid strong,
+.reasoning-effort-grid small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reasoning-effort-grid strong {
+  font-size: var(--font-size-12-5, 12.5px);
+  font-weight: 700;
+}
+
+.reasoning-effort-grid small {
+  color: var(--text-dim);
+  font-size: var(--font-size-10-5, 10.5px);
+  font-weight: 500;
+}
+
+.reasoning-effort-grid svg {
+  justify-self: end;
+  color: color-mix(in srgb, var(--blue) 72%, var(--text));
+}
+
+.model-selector-reasoning-panel .reasoning-effort-panel {
   gap: 7px;
 }
 
-.model-selector-thinking-panel .thinking-popover-header {
+.model-selector-reasoning-panel .reasoning-effort-header {
   grid-template-columns: 28px minmax(0, 1fr) auto;
   min-height: 38px;
   gap: 8px;
@@ -156,39 +308,39 @@ body > .composer-popover-model.model-selector-popover {
   border-radius: 8px;
 }
 
-.model-selector-thinking-panel .thinking-popover-orb {
+.model-selector-reasoning-panel .reasoning-effort-orb {
   width: 27px;
   height: 27px;
 }
 
-.model-selector-thinking-panel .thinking-popover-header strong {
+.model-selector-reasoning-panel .reasoning-effort-header strong {
   font-size: var(--font-size-12-5, 12.5px);
 }
 
-.model-selector-thinking-panel .thinking-popover-header small {
+.model-selector-reasoning-panel .reasoning-effort-header small {
   font-size: var(--font-size-10-5, 10.5px);
 }
 
-.model-selector-thinking-panel .thinking-power {
+.model-selector-reasoning-panel .reasoning-effort-power {
   min-width: 40px;
   min-height: 25px;
 }
 
-.model-selector-thinking-panel .thinking-effort-grid {
+.model-selector-reasoning-panel .reasoning-effort-grid {
   gap: 5px;
 }
 
-.model-selector-thinking-panel .thinking-effort-grid button {
+.model-selector-reasoning-panel .reasoning-effort-grid button {
   min-height: 45px;
   padding: 6px;
   border-radius: 8px;
 }
 
-.model-selector-thinking-panel .thinking-effort-grid strong {
+.model-selector-reasoning-panel .reasoning-effort-grid strong {
   font-size: var(--font-size-11-5, 11.5px);
 }
 
-.model-selector-thinking-panel .thinking-effort-grid small {
+.model-selector-reasoning-panel .reasoning-effort-grid small {
   font-size: var(--font-size-10, 10px);
 }
 

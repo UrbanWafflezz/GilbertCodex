@@ -2079,12 +2079,15 @@
 .nine-router-account-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
   gap: 12px;
   min-width: 0;
 }
 
 .nine-router-account-row {
   display: grid;
+  grid-template-rows: auto auto minmax(32px, auto) auto auto;
+  align-content: start;
   gap: 12px;
   min-width: 0;
   padding: 14px;
@@ -2130,22 +2133,24 @@
 
 .nine-router-account-meta .settings-row {
   grid-template-columns: minmax(94px, 0.65fr) minmax(0, 1fr) auto;
-  min-height: 46px;
-  padding: 8px 10px;
+  min-height: 40px;
+  padding: 7px 10px;
 }
 
 .nine-router-quota-list {
   display: grid;
-  gap: 8px;
+  align-content: start;
+  gap: 6px;
   min-width: 0;
 }
 
 .nine-router-quota-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(72px, 0.32fr);
-  gap: 7px 10px;
+  gap: 6px 10px;
   min-width: 0;
-  padding: 9px 10px;
+  min-height: 58px;
+  padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 68%, transparent);
@@ -2203,6 +2208,14 @@
 
 .nine-router-usage-empty {
   display: block;
+  min-height: 32px;
+}
+
+.nine-router-account-row > .settings-full-width-button {
+  align-self: end;
+  justify-content: center;
+  min-height: 38px;
+  white-space: normal;
 }
 
 @media (max-width: 980px) {
@@ -2238,6 +2251,35 @@
   color: #ffd27a;
   border-color: color-mix(in srgb, #ffd27a 30%, transparent);
   background: color-mix(in srgb, #ffd27a 10%, transparent);
+}
+
+.settings-mobile-pairing {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.settings-mobile-qr {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+  color: #111827;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.settings-mobile-qr img {
+  display: block;
+  width: min(100%, 220px);
+  height: auto;
+}
+
+@media (max-width: 760px) {
+  .settings-mobile-pairing {
+    grid-template-columns: 1fr;
+  }
 }
 
 .settings-diagnostic {

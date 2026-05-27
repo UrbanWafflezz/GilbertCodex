@@ -363,11 +363,6 @@ try {
   await waitForStableUi(page);
   await capture(page, "gilbert-codex-overview.png");
 
-  await page.getByText("Fund project", { exact: true }).click();
-  await page.waitForSelector(".support-page");
-  await waitForStableUi(page);
-  await capture(page, "gilbert-codex-support.png");
-
   await page.getByText("Settings", { exact: true }).click();
   await page.waitForSelector(".settings-page");
   await waitForStableUi(page);

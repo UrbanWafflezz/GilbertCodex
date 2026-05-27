@@ -28,6 +28,7 @@ const MCP_PRESET_BY_PLUGIN_ID: Record<string, string> = {
   jetbrains: "jetbrains",
   kubernetes: "kubernetes",
   linear: "linear",
+  linkedin: "linkedin",
   memory: "memory",
   mongodb: "mongodb",
   "neon-postgres": "neon",
@@ -134,6 +135,7 @@ const MARKETPLACE_FALLBACKS = [
   ["heroku", "Coding"],
   ["jetbrains", "Coding"],
   ["kubernetes", "Coding"],
+  ["linkedin", "Productivity"],
   ["memory", "Productivity"],
   ["pulumi", "Coding"],
   ["sequential-thinking", "Productivity"],
@@ -189,20 +191,32 @@ interface GitHubTreeItem {
   type?: string;
 }
 
+const GILBERT_LOCAL_MARKETPLACE_PLUGINS: MarketplacePluginEntry[] = [
+  {
+    category: "Productivity",
+    name: "linkedin",
+    policy: { authentication: "ON_INSTALL" },
+    source: { path: "./plugins/linkedin" },
+  },
+];
+
 let cachedOpenAiTree: GitHubTreeItem[] | null = null;
 
 export async function loadOpenAiCodexMarketplace(): Promise<OpenAiCodexPluginListing[]> {
   try {
     const marketplace = await fetchJson<MarketplaceFile>(OPENAI_MARKETPLACE_URL);
-    return normalizeMarketplacePlugins(marketplace.plugins ?? [], GILBERT_MARKETPLACE_LABEL);
+    return normalizeMarketplacePlugins([...GILBERT_LOCAL_MARKETPLACE_PLUGINS, ...(marketplace.plugins ?? [])], GILBERT_MARKETPLACE_LABEL);
   } catch {
     return normalizeMarketplacePlugins(
-      MARKETPLACE_FALLBACKS.map(([name, category]) => ({
-        category,
-        name,
-        policy: { authentication: "ON_INSTALL" },
-        source: { path: `./plugins/${name}` },
-      })),
+      [
+        ...GILBERT_LOCAL_MARKETPLACE_PLUGINS,
+        ...MARKETPLACE_FALLBACKS.map(([name, category]) => ({
+          category,
+          name,
+          policy: { authentication: "ON_INSTALL" },
+          source: { path: `./plugins/${name}` },
+        })),
+      ],
       `${GILBERT_MARKETPLACE_LABEL} fallback`,
     );
   }
@@ -310,7 +324,7 @@ export function getOpenAiCodexMcpPresetMappings() {
 }
 
 function normalizeMarketplacePlugins(entries: MarketplacePluginEntry[], marketplaceName: string): OpenAiCodexPluginListing[] {
-  return entries
+  const plugins = entries
     .flatMap((entry): OpenAiCodexPluginListing[] => {
       const id = normalizePluginId(entry.name);
 
@@ -334,11 +348,21 @@ function normalizeMarketplacePlugins(entries: MarketplacePluginEntry[], marketpl
         sourcePath,
         sourceUrl: `${OPENAI_PLUGINS_REPOSITORY}/tree/main/${sourcePath.replace(/^\.\//, "")}`,
       }];
-    })
-    .sort((left, right) => {
-      const routeRank = routeSortRank(left.installRoute) - routeSortRank(right.installRoute);
-      return routeRank || left.category.localeCompare(right.category) || left.displayName.localeCompare(right.displayName);
     });
+  const seen = new Set<string>();
+  const uniquePlugins = plugins.filter((plugin) => {
+    if (seen.has(plugin.id)) {
+      return false;
+    }
+
+    seen.add(plugin.id);
+    return true;
+  });
+
+  return uniquePlugins.sort((left, right) => {
+    const routeRank = routeSortRank(left.installRoute) - routeSortRank(right.installRoute);
+    return routeRank || left.category.localeCompare(right.category) || left.displayName.localeCompare(right.displayName);
+  });
 }
 
 function routeForPlugin(id: string, hasMcpPreset: boolean, hasBundledSkills: boolean): OpenAiPluginInstallRoute {
@@ -447,6 +471,7 @@ function formatPluginDisplayName(id: string) {
     "hugging-face": "Hugging Face",
     jetbrains: "JetBrains IDE",
     "life-science-research": "Life Science Research",
+    linkedin: "LinkedIn",
     "monday-com": "Monday.com",
     "mt-newswires": "MT Newswires",
     mongodb: "MongoDB",

@@ -1,4 +1,4 @@
-use crate::core::process::open_external_target;
+use crate::{app::request_app_exit, core::process::open_external_target};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -21,6 +21,11 @@ pub fn get_app_info() -> AppInfo {
         platform: host_platform().to_string(),
         arch: std::env::consts::ARCH.to_string(),
     }
+}
+
+#[tauri::command]
+pub fn app_quit(app: tauri::AppHandle) {
+    request_app_exit(&app);
 }
 
 fn host_platform() -> &'static str {

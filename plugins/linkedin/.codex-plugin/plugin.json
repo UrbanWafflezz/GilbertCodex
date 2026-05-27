@@ -1,0 +1,45 @@
+{
+  "name": "linkedin",
+  "version": "0.1.0",
+  "description": "LinkedIn profile setup, authenticated self-profile reads, user-supplied profile research briefs, and post draft review through a compliant local MCP server.",
+  "author": {
+    "name": "Gilbert Codex",
+    "email": "support@gilbertcodex.local",
+    "url": "https://github.com/UrbanWafflezz/GilbertCodex"
+  },
+  "homepage": "https://github.com/UrbanWafflezz/GilbertCodex",
+  "repository": "https://github.com/UrbanWafflezz/GilbertCodex",
+  "license": "MIT",
+  "keywords": [
+    "linkedin",
+    "profile",
+    "research",
+    "mcp",
+    "professional"
+  ],
+  "mcpServers": "./.mcp.json",
+  "apps": "./.app.json",
+  "interface": {
+    "displayName": "LinkedIn",
+    "shortDescription": "Set up profile copy, read the signed-in member profile, and research user-supplied profile text.",
+    "longDescription": "LinkedIn gives Gilbert Codex a compliant MCP surface for setup guidance, authenticated member self-profile reads through official APIs, profile optimization plans, user-supplied profile research briefs, and LinkedIn post draft review. It does not scrape LinkedIn, automate browsing, update profile fields, or publish posts.",
+    "developerName": "Gilbert Codex",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
+    "websiteURL": "https://www.linkedin.com/",
+    "privacyPolicyURL": "https://www.linkedin.com/legal/privacy-policy",
+    "termsOfServiceURL": "https://www.linkedin.com/legal/user-agreement",
+    "defaultPrompt": [
+      "Help me set up my LinkedIn profile for this target role.",
+      "Read my authenticated LinkedIn profile and suggest improvements.",
+      "Create a research brief from this LinkedIn profile text I pasted."
+    ],
+    "brandColor": "#0A66C2",
+    "composerIcon": "./assets/linkedin.svg",
+    "logo": "./assets/linkedin.svg",
+    "screenshots": []
+  }
+}

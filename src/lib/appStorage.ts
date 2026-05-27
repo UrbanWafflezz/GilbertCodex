@@ -29,6 +29,7 @@ import { DEFAULT_TOOL_REGISTRY_SETTINGS, normalizeToolRegistrySettings } from ".
 import { autoFinalizeDeviceDatabaseMigration, isDeviceDatabaseAvailable, loadDeviceDatabaseChat, loadDeviceDatabaseNamespace, saveDeviceDatabaseValues, type DeviceDatabaseSeed } from "./deviceDatabase";
 import { scheduleDelayedIdleTask, scheduleIdleTask } from "./idleTask";
 import { normalizeProjectRunConfig } from "./projectRunConfig";
+import { normalizeProjectGoal } from "./projectGoals";
 import type {
   ChatAttachment,
   ChatArtifact,
@@ -42,7 +43,6 @@ import type {
   ChatResearchReference,
   ChatSource,
   ChatStreamTiming,
-  ChatThinking,
   ChatSummary,
   ChatToolCall,
   ChatVideoAttachment,
@@ -95,6 +95,7 @@ const CHATS_KEY = "gilbert-codex.chats.v1";
 const PROJECTS_KEY = "gilbert-codex.projects.v1";
 const SETTINGS_KEY = "gilbert-codex.provider-settings.v1";
 const THINKING_KEY = "gilbert-codex.thinking-settings.v1";
+const THINKING_REBUILD_MIGRATION_KEY = "gilbert-codex.thinking-rebuild-enabled.v1";
 const APPEARANCE_KEY = "gilbert-codex.appearance.v1";
 const APPEARANCE_SETTINGS_KEY = "gilbert-codex.appearance-settings.v1";
 const GENERAL_SETTINGS_KEY = "gilbert-codex.general-settings.v1";
@@ -122,6 +123,7 @@ const PERSISTED_STORAGE_KEYS = [
   PROJECTS_KEY,
   SETTINGS_KEY,
   THINKING_KEY,
+  THINKING_REBUILD_MIGRATION_KEY,
   APPEARANCE_KEY,
   APPEARANCE_SETTINGS_KEY,
   GENERAL_SETTINGS_KEY,
@@ -368,6 +370,7 @@ function normalizeStoredChat(chat: ChatSummary): ChatSummary {
     composerDraft,
     isDraft: isEmptyChat({ messages, messagesLoaded }) ? true : undefined,
     messages,
+    messagesClearedAt: normalizeOptionalIso(chat.messagesClearedAt),
     messagesLoaded,
     model,
     project: isLegacyDiscordChat ? DEFAULT_PROJECT : project,
@@ -376,6 +379,15 @@ function normalizeStoredChat(chat: ChatSummary): ChatSummary {
     toolRuntimeVersion: 0,
     updatedAt: chat.updatedAt || new Date().toISOString(),
   };
+}
+
+function normalizeOptionalIso(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) {
+    return undefined;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined;
 }
 
 export function loadProjects(): ProjectSummary[] {
@@ -399,6 +411,7 @@ export function loadProjects(): ProjectSummary[] {
         id: project.id || `project-${name}`,
         localWorkspace: project.localWorkspace ? normalizeLocalWorkspaceSettings(project.localWorkspace) : undefined,
         name,
+        projectGoal: normalizeProjectGoal(project.projectGoal),
         runConfig: normalizeProjectRunConfig(project.runConfig),
         updatedAt: project.updatedAt || project.createdAt || new Date().toISOString(),
       },
@@ -409,6 +422,7 @@ export function loadProjects(): ProjectSummary[] {
 export function saveProjects(projects: ProjectSummary[]) {
   writeJson(PROJECTS_KEY, projects.map((project) => ({
     ...project,
+    projectGoal: normalizeProjectGoal(project.projectGoal),
     runConfig: normalizeProjectRunConfig(project.runConfig),
   })));
 }
@@ -416,6 +430,7 @@ export function saveProjects(projects: ProjectSummary[]) {
 export function loadProviderSettings(): ProviderSettings {
   const storedSettings = readJson<Partial<ProviderSettings>>(SETTINGS_KEY);
   const storedThinking = readJson<Partial<ThinkingSettings>>(THINKING_KEY);
+  const thinkingRebuildMigrated = readString(THINKING_REBUILD_MIGRATION_KEY) === "1";
   const storedTools = readJson(TOOL_REGISTRY_KEY);
   const provider = normalizeModelProvider(storedSettings?.provider);
   const apiKeys = normalizeProviderSecretMap(storedSettings?.apiKeys);
@@ -435,6 +450,14 @@ export function loadProviderSettings(): ProviderSettings {
   removeDisabledProviderModelValue(disabledModels, provider, model);
   providerModels[provider] = model;
 
+  const thinking = normalizeThinkingSettings(storedThinking ?? storedSettings?.thinking, {
+    forceEnabled: !thinkingRebuildMigrated,
+  });
+
+  if (!thinkingRebuildMigrated) {
+    writeString(THINKING_REBUILD_MIGRATION_KEY, "1");
+  }
+
   return {
     ...defaultProviderSettings,
     ...storedSettings,
@@ -449,7 +472,7 @@ export function loadProviderSettings(): ProviderSettings {
     provider,
     providerModels,
     subscriptionOptimization: normalizeSubscriptionOptimizationSettings(storedSettings?.subscriptionOptimization),
-    thinking: normalizeThinkingSettings(storedThinking ?? storedSettings?.thinking),
+    thinking,
     temperature: normalizeTemperature(storedSettings?.temperature, defaultProviderSettings.temperature),
     topK: normalizeTopK(storedSettings?.topK, defaultProviderSettings.topK),
     topP: normalizeTopP(storedSettings?.topP, defaultProviderSettings.topP),
@@ -1505,15 +1528,13 @@ function normalizeChatMessage(message: ChatMessage): ChatMessage {
     mode: normalizeChatMessageMode(message.mode),
     planning: normalizeChatPlanning(message.planning),
     progress: normalizeProgressItems(message.progress),
-    reasoning: undefined,
+    reasoning: normalizeVisibleReasoning(message.reasoning),
     role: message.role === "assistant" ? "assistant" : "user",
     researchReferences: normalizeResearchReferences(message.researchReferences),
-    responseThinking: normalizeOptionalText(message.responseThinking),
     source: normalizeChatMessageSource(message.source) ?? legacyDiscordMessage?.source,
     sources: normalizeChatSources(message.sources),
     status: message.status === "error" ? "error" : undefined,
     streamTiming: normalizeChatStreamTiming(message.streamTiming),
-    thinking: normalizeChatThinking(message.thinking),
     toolCalls: normalizeToolCalls(message.toolCalls),
     webSearch: normalizeChatWebSearch(message.webSearch),
     workTrace: normalizeWorkTraceItems(message.workTrace),
@@ -1574,25 +1595,6 @@ function normalizeResearchReferences(value: unknown): ChatResearchReference[] | 
 
 function normalizeChatMessageMode(value: unknown): ChatMessage["mode"] | undefined {
   return value === "chat" || value === "plan" ? value : undefined;
-}
-
-function normalizeChatThinking(value: unknown): ChatThinking | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const startedAt = normalizeOptionalText(value.startedAt);
-  const completedAt = normalizeOptionalText(value.completedAt);
-
-  if (!startedAt && !completedAt) {
-    return undefined;
-  }
-
-  return {
-    completedAt,
-    effort: normalizeReasoningEffort(value.effort),
-    startedAt: startedAt ?? completedAt ?? new Date().toISOString(),
-  };
 }
 
 function normalizeChatStreamTiming(value: unknown): ChatStreamTiming | undefined {
@@ -1894,6 +1896,15 @@ function normalizeOptionalText(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function normalizeVisibleReasoning(value: unknown) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.replace(/\r\n/g, "\n").trim();
+  return normalized ? normalized.slice(0, 12_000) : undefined;
+}
+
 function normalizeArtifacts(value: unknown): ChatArtifact[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
@@ -2140,20 +2151,6 @@ function normalizeWorkTraceItems(value: unknown): ChatWorkTraceItem[] | undefine
 
     const traceItem = item as Record<string, unknown>;
     const id = typeof traceItem.id === "string" && traceItem.id.trim() ? traceItem.id.trim() : `work-trace-${Date.now()}`;
-
-    if (traceItem.kind === "thinking") {
-      const content = typeof traceItem.content === "string" ? traceItem.content.trim() : "";
-
-      if (content) {
-        items.push({
-          content,
-          id,
-          kind: "thinking",
-          status: "complete",
-        });
-      }
-      continue;
-    }
 
     if (traceItem.kind === "tool") {
       const [toolCall] = normalizeToolCalls([traceItem.toolCall]) ?? [];
@@ -2708,14 +2705,14 @@ function hashStableText(value: string) {
   return hash.toString(36);
 }
 
-function normalizeThinkingSettings(value: unknown): ThinkingSettings {
+function normalizeThinkingSettings(value: unknown, options: { forceEnabled?: boolean } = {}): ThinkingSettings {
   const storedThinking = typeof value === "object" && value ? (value as Partial<ThinkingSettings>) : {};
 
   return {
     ...defaultProviderSettings.thinking,
     ...storedThinking,
     effort: normalizeReasoningEffort(storedThinking.effort),
-    enabled: typeof storedThinking.enabled === "boolean" ? storedThinking.enabled : defaultProviderSettings.thinking.enabled,
+    enabled: options.forceEnabled ? true : typeof storedThinking.enabled === "boolean" ? storedThinking.enabled : defaultProviderSettings.thinking.enabled,
   };
 }
 

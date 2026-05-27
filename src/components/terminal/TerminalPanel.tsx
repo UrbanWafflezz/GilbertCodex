@@ -136,6 +136,8 @@ export function TerminalPanel({ attachedSession, defaultShell, desktopRuntime, h
   });
   const terminalHostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const pendingTerminalWritesRef = useRef<Record<string, string>>({});
+  const terminalWriteFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     tabsRef.current = workspace.tabs;
@@ -255,6 +257,30 @@ export function TerminalPanel({ attachedSession, defaultShell, desktopRuntime, h
     }
   }, []);
 
+  const flushPendingTerminalWrites = useCallback(() => {
+    terminalWriteFrameRef.current = null;
+    const activeTabId = activeTabIdRef.current;
+    const text = pendingTerminalWritesRef.current[activeTabId];
+    pendingTerminalWritesRef.current = {};
+
+    if (text) {
+      terminalRef.current?.write(text);
+    }
+  }, []);
+
+  const scheduleTerminalWrite = useCallback(
+    (tabId: string, text: string) => {
+      pendingTerminalWritesRef.current[tabId] = `${pendingTerminalWritesRef.current[tabId] ?? ""}${text}`;
+
+      if (terminalWriteFrameRef.current !== null) {
+        return;
+      }
+
+      terminalWriteFrameRef.current = window.requestAnimationFrame(flushPendingTerminalWrites);
+    },
+    [flushPendingTerminalWrites],
+  );
+
   const replayTabOutput = useCallback(
     (tabId: string) => {
       const terminal = terminalRef.current;
@@ -263,6 +289,7 @@ export function TerminalPanel({ attachedSession, defaultShell, desktopRuntime, h
         return;
       }
 
+      delete pendingTerminalWritesRef.current[tabId];
       terminal.reset();
       terminal.clear();
 
@@ -300,10 +327,10 @@ export function TerminalPanel({ attachedSession, defaultShell, desktopRuntime, h
       }
 
       if (tabId === activeTabIdRef.current) {
-        terminalRef.current?.write(text);
+        scheduleTerminalWrite(tabId, text);
       }
     },
-    [findCachedTab, updateTab],
+    [findCachedTab, scheduleTerminalWrite, updateTab],
   );
 
   const appendTabChunks = useCallback(
@@ -473,6 +500,11 @@ export function TerminalPanel({ attachedSession, defaultShell, desktopRuntime, h
 
     return () => {
       window.cancelAnimationFrame(animationFrame);
+      if (terminalWriteFrameRef.current !== null) {
+        window.cancelAnimationFrame(terminalWriteFrameRef.current);
+        terminalWriteFrameRef.current = null;
+      }
+      pendingTerminalWritesRef.current = {};
       dataDisposable.dispose();
       resizeDisposable.dispose();
       fitAddonRef.current = null;

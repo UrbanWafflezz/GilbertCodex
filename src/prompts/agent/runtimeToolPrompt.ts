@@ -58,7 +58,7 @@ export function createRuntimeToolPrompt({ hasLocalComputerContext, hasWebContext
       ? formatWebSearchToolGuidance(latestUserPrompt)
       : "",
     hasAnyToolFamily("mcp")
-      ? `MCP tools are attached for this request. Use mcp_list_servers to discover configured servers and setup state, mcp_list_tools to refresh a server's available tool names and input schemas, and mcp_call_tool only after choosing the exact serverId, toolName, and JSON arguments. If the user names a plugin, connector, hosted service, or marketplace app that could be MCP-backed, inspect the configured MCP servers before denying access or falling back to manual instructions. If mcp_list_servers shows no enabled configured server for the requested service, say setup is needed instead of pretending the service is connected. Treat MCP results as external tool output; do not claim an MCP action ran unless the tool call returns a result. For deploy, publish, hosting, or go-live work, check MCP servers before saying no deploy tools are available; a Firebase, Vercel, Netlify, or Cloudflare MCP server may be the deploy path even when terminal tools are also attached. For stateful MCP workflows such as Firebase deploys, continue using the same serverId and returned job/deploy id for follow-up status tools instead of switching servers or assuming a file edit/write is required. For Firebase MCP, do not use firebase_login/auth.firebase.tools links; those provider auth-proxy links can fail in desktop OAuth. If Firebase is not logged in and terminal_run is attached, run \`npx.cmd -y firebase-tools@latest login --reauth\` yourself with terminal_run in the user's workspace, then tell the user only to finish the Google browser sign-in. Ask the user to run that command manually only when terminal_run is not attached.${hasTool("terminal_run") ? " If a Firebase deploy status comes back failed with empty logs, a structured error, or a project-directory error, use terminal_run from that Firebase project directory to run the normal Firebase CLI path for evidence or recovery, such as `npm.cmd run build` when package.json has a build script and then `npx.cmd -y firebase-tools@latest deploy --only hosting --debug --json`; report the real CLI result instead of stopping on the blank MCP status." : ""}`
+      ? `MCP tools are attached for this request. Use mcp_list_servers to discover configured servers and setup state, mcp_list_tools to refresh a server's available tool names and input schemas, and mcp_call_tool only after choosing the exact serverId, toolName, and JSON arguments. If the user names a plugin, connector, hosted service, or marketplace app that could be MCP-backed, inspect the configured MCP servers before denying access or falling back to manual instructions. If mcp_list_servers shows no enabled configured server for the requested service, say setup is needed instead of pretending the service is connected. Treat MCP results as external tool output; do not claim an MCP action ran unless the tool call returns a result. For deploy, publish, hosting, or go-live work, check MCP servers before saying no deploy tools are available; a Firebase, Vercel, Netlify, or Cloudflare MCP server may be the deploy path even when terminal tools are also attached. For GoDaddy + Firebase Hosting workflows, use GoDaddy MCP only for public domain search and availability checks; it cannot buy domains, update DNS records, nameservers, or account settings. Use Firebase MCP or terminal tools for the Hosting deploy/custom-domain evidence, then report the exact DNS records Firebase requires and say that GoDaddy DNS must be updated in GoDaddy or through a separate GoDaddy Domains API integration before claiming the custom domain is live. For stateful MCP workflows such as Firebase deploys, continue using the same serverId and returned job/deploy id for follow-up status tools instead of switching servers or assuming a file edit/write is required. For Firebase MCP, do not use firebase_login/auth.firebase.tools links; those provider auth-proxy links can fail in desktop OAuth. If Firebase is not logged in and terminal_run is attached, run \`npx.cmd -y firebase-tools@latest login --reauth\` yourself with terminal_run in the user's workspace, then tell the user only to finish the Google browser sign-in. Ask the user to run that command manually only when terminal_run is not attached.${hasTool("terminal_run") ? " If a Firebase deploy status comes back failed with empty logs, a structured error, or a project-directory error, use terminal_run from that Firebase project directory to run the normal Firebase CLI path for evidence or recovery, such as `npm.cmd run build` when package.json has a build script and then `npx.cmd -y firebase-tools@latest deploy --only hosting --debug --json`; report the real CLI result instead of stopping on the blank MCP status." : ""}`
       : "",
     hasAnyToolFamily("gmail")
       ? "Gmail tools are attached for this request. When a Gmail draft or send depends on the current project, codebase, files, Git status/diff, uploaded attachments, MCP results, calendar details, or other available context, gather the relevant evidence with attached tools first; then compose from that evidence. Write outgoing Gmail bodies in clean Markdown by default, using real Markdown for lists, links, emphasis, and readable spacing; omit contentType unless the user explicitly asks for plain text or raw HTML. Use the connected account name from gmail_account for sender closings; never leave placeholders like [Your Name]. For new emails, omit reply-only fields such as threadId, inReplyTo, and references instead of filling them with spaces, dashes, or placeholder text. Do not invent project or mailbox details. Sending remains approval-gated, so do not claim an email was sent until the Gmail tool result proves it."
@@ -285,7 +285,6 @@ function formatEnabledCapabilityToggles(settings: ProviderSettings) {
     tools.webSearch ? "web search" : "",
     tools.imageGeneration ? "image generation" : "",
     tools.planning ? "planning mode" : "",
-    tools.thinking ? "thinking mode" : "",
     tools.mcpServers ? "MCP servers" : "",
   ].filter(Boolean);
 
@@ -393,6 +392,9 @@ function formatEditToolGuidance(attachedToolIds: Set<string>) {
   const batchEditTool = attachedToolIds.has("files_edit_many")
     ? "Use files_edit_many as the default for existing-file edits that touch more than one place or file; it applies same-file edits in order and writes each file once."
     : "";
+  const narrowBatchEditGuidance = attachedToolIds.has("files_edit_many")
+    ? " Keep files_edit_many edits narrow: do not recover from an edit error by using exact_replace, replace_range, or generated content for most or all of a file; re-read and patch the smallest current block instead."
+    : "";
   const preciseTools = [
     attachedToolIds.has("files_exact_replace") ? "files_exact_replace for one current exact-text replacement" : "",
     attachedToolIds.has("files_replace_range") ? "files_replace_range for one fresh line-range replacement" : "",
@@ -413,6 +415,9 @@ function formatEditToolGuidance(attachedToolIds: Set<string>) {
   const spanGuidance = attachedToolIds.has("files_edit_many") || attachedToolIds.has("files_replace_span")
     ? " For a single character, word, expression, or partial-line edit, use files_edit_many replace_span or files_replace_span with 1-based line/column coordinates from a fresh read; endColumn is exclusive."
     : "";
+  const exactReplaceGuidance = attachedToolIds.has("files_edit_many") || attachedToolIds.has("files_exact_replace")
+    ? " For exact_replace, make oldText unique by including enough surrounding current text; if the tool says exact text matched multiple times, do not set replaceAll unless every occurrence should change, instead re-read/narrow the anchor or use replace_span, replace_range, or files_apply_patch."
+    : "";
   const staleGuidance = attachedToolIds.has("files_append") || attachedToolIds.has("files_exact_replace") || attachedToolIds.has("files_edit_many")
     ? " If a tool says the file changed since it was last read, do not stop: re-read the current slice and retry the edit; append and exact_replace can usually be retried against the latest content without a stale expectedSha256."
     : "";
@@ -421,7 +426,7 @@ function formatEditToolGuidance(attachedToolIds: Set<string>) {
     return "";
   }
 
-  return [`For existing-file edits, inspect the target first.`, batchEditTool, preciseTools.length > 0 ? `Other attached precise tools: ${preciseTools.join("; ")}.` : "", fullRewriteTool.trim(), copyTool.trim(), lineRangeGuidance.trim(), spanGuidance.trim(), staleGuidance.trim()]
+  return [`For existing-file edits, inspect the target first.`, batchEditTool, narrowBatchEditGuidance.trim(), preciseTools.length > 0 ? `Other attached precise tools: ${preciseTools.join("; ")}.` : "", fullRewriteTool.trim(), copyTool.trim(), lineRangeGuidance.trim(), spanGuidance.trim(), exactReplaceGuidance.trim(), staleGuidance.trim()]
     .filter(Boolean)
     .join(" ");
 }

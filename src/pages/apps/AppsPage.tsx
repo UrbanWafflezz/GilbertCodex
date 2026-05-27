@@ -62,7 +62,6 @@ interface AppsPageProps {
   onOpenGoogleSettings: () => void;
   onOpenKeysSettings: () => void;
   onOpenRadar: () => void;
-  onOpenSupport: () => void;
 }
 
 type GmailActionState = "connect" | "disconnect" | "idle" | "install" | "refresh";
@@ -354,6 +353,14 @@ const BROWSERBASE_HOSTED_API_KEY_REQUIREMENT: McpSetupRequirement = {
   placeholder: "Browserbase API key",
 };
 
+const LINKEDIN_ACCESS_TOKEN_REQUIREMENT: McpSetupRequirement = {
+  helper: "Optional for setup and user-supplied research tools, required for authenticated LinkedIn self-profile reads. Store the member OAuth access token in Keys.",
+  label: "LinkedIn access token",
+  location: "environment",
+  name: "LINKEDIN_ACCESS_TOKEN",
+  placeholder: "LinkedIn member OAuth access token",
+};
+
 const SLACK_BOT_TOKEN_REQUIREMENT: McpSetupRequirement = {
   helper: "Required Slack Bot User OAuth token for @modelcontextprotocol/server-slack.",
   label: "Slack bot token",
@@ -387,6 +394,22 @@ const MCP_FEATURED_PRESETS: McpProviderPreset[] = [
     ],
     tags: ["Auth", "Firestore", "Hosting"],
     transport: "stdio",
+  },
+  {
+    description: "Official GoDaddy Domains MCP for GoDaddy domain availability, public domain search, suggestions, and availability checks.",
+    docsUrl: "https://developer.godaddy.com/mcp",
+    endpoint: "https://api.godaddy.com/v1/domains/mcp",
+    id: "godaddy",
+    name: "GoDaddy Domains",
+    note: "Uses GoDaddy's public read-only Domains MCP endpoint. It can search and check domain availability, but it cannot buy domains, update DNS records, or change GoDaddy account settings.",
+    publisher: "GoDaddy",
+    setupSteps: [
+      "Public Streamable HTTP MCP endpoint; no GoDaddy token is required for domain search.",
+      "Use it for domain brainstorming and availability checks before configuring Firebase Hosting custom domains.",
+      "DNS changes still require GoDaddy's dashboard or a separate GoDaddy Domains API integration; do not treat this MCP as write-capable.",
+    ],
+    tags: ["Domains", "Availability", "Public"],
+    transport: "http",
   },
   {
     args: mcpRemoteArgs("https://mcp.figma.com/mcp"),
@@ -516,6 +539,26 @@ const MCP_FEATURED_PRESETS: McpProviderPreset[] = [
     ],
     tags: ["Repos", "PRs", "Bearer"],
     transport: "http",
+  },
+  {
+    args: ["./plugins/linkedin/scripts/linkedin-mcp-server.mjs"],
+    command: "node",
+    description: "Gilbert LinkedIn MCP for compliant profile setup, authenticated self-profile reads, pasted-profile research briefs, and post draft review.",
+    docsUrl: "https://learn.microsoft.com/en-us/linkedin/shared/authentication/getting-access",
+    environmentText: "LINKEDIN_ACCESS_TOKEN=",
+    id: "linkedin",
+    name: "LinkedIn",
+    note: "Runs Gilbert's local LinkedIn MCP server. It can guide setup and analyze user-supplied profile text without a token; authenticated self-profile reads require LINKEDIN_ACCESS_TOKEN from a LinkedIn OAuth flow. It does not scrape LinkedIn, update profiles, message people, or publish posts.",
+    optionalSetup: [LINKEDIN_ACCESS_TOKEN_REQUIREMENT],
+    publisher: "Gilbert Codex",
+    setupSteps: [
+      "Uses a local MCP server bundled in plugins/linkedin.",
+      "Setup and user-supplied profile research tools work without LinkedIn credentials.",
+      "For authenticated self-profile reads, create a LinkedIn developer app, complete OAuth with openid/profile/email, save LINKEDIN_ACCESS_TOKEN in Keys, and apply it as secure environment.",
+      "The server intentionally avoids scraping, browser automation, profile writes, connection requests, messages, and post publishing.",
+    ],
+    tags: ["Profiles", "Research", "OAuth"],
+    transport: "stdio",
   },
   {
     args: mcpRemoteArgs("https://mcp.linear.app/mcp"),

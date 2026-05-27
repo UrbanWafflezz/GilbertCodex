@@ -227,6 +227,10 @@ export function looksLikeUnappliedFileEditAnswer(content: string, toolCalls: Cha
   const hasUpdatedFileHeader =
     /(?:^|\n)\s*(?:#{1,4}\s*)?(?:updated|new|final|complete)\s+(?:version\s+of\s+)?`?[\w./\\ -]+\.(?:css|jsx?|tsx?|html|json|md)`?\b/i.test(trimmed) ||
     /(?:^|\n)\s*(?:#{1,4}\s*)?(?:\u66f4\u65b0\u540e\u7684|\u4fee\u6539\u540e\u7684|\u65b0\u7684|\u6700\u7ec8\u7684)\s*`?[\w./\\ -]+\.(?:css|jsx?|tsx?|html|json|md)`?\b/iu.test(trimmed);
+  const hasChangedFilesImplementationSummary =
+    /(?:^|\n)\s*(?:#{1,4}\s*)?(?:changed files?|files changed|modified files?)\s*:?\s*(?:\n|$)/i.test(trimmed) &&
+    /\b(?:implemented|improved|expanded|hardened|wired|added|updated|changed|fixed|created|refactored|removed|replaced)\b/i.test(trimmed) &&
+    !/\b(?:no|not|without)\s+(?:file\s+)?(?:changes?|edits?|writes?|modifications?)\s+(?:were\s+)?(?:made|applied|recorded)\b/i.test(trimmed);
   const hasReplacementInstructionHeader =
     /(?:^|\n)\s*(?:#{1,4}\s*)?(?:replace|overwrite|put\s+this\s+in|use\s+this\s+for|change)\s+`?[\w./\\ -]+\.(?:css|jsx?|tsx?|html|json|md)`?\s+(?:with|to|as)\s+(?:this|the\s+following)\b/i.test(trimmed) ||
     /(?:^|\n)\s*(?:#{1,4}\s*)?(?:what\s+to\s+change|exact\s+replacement|ready[-\s]?to[-\s]?paste|copy\s+this|paste\s+this)\b/i.test(trimmed);
@@ -236,6 +240,7 @@ export function looksLikeUnappliedFileEditAnswer(content: string, toolCalls: Cha
     /(?:^|\n)\s*[.#][\w-]+\s*\{[\s\S]{80,}?\}/.test(trimmed);
 
   return namesEditableFile && (
+    hasChangedFilesImplementationSummary ||
     claimsFileChange && (hasUpdatedFileHeader || hasCodeDump) ||
     hasReplacementInstructionHeader && hasCodeDump
   );
@@ -279,14 +284,20 @@ const CAPABILITY_INVENTORY_QUESTION_PATTERN =
   /\b(?:what|which|list|show|tell(?:\s+me)?|explain|describe)\b[\s\S]{0,180}\b(?:tools?|plugins?|apps?|skills?|capabilities?|connectors?)\b|\b(?:tools?|plugins?|apps?|skills?|capabilities?|connectors?)\b[\s\S]{0,180}\b(?:available|enabled|installed|connected|do\s+you\s+have|can\s+you\s+(?:access|call|use|do))\b/i;
 const LOCAL_TOOLING_IMPLEMENTATION_QUESTION_PATTERN =
   /\b(?:our|this|the)\s+(?:app|code|codebase|project|repo|repository|workspace)\b[\s\S]{0,220}\b(?:tools?|plugins?|apps?|skills?|capabilities?|connectors?|prompt|prompts?)\b|\b(?:tools?|plugins?|apps?|skills?|capabilities?|connectors?|prompt|prompts?)\b[\s\S]{0,220}\b(?:code|codebase|implementation|registry|runtime|selector|source|workspace|actual\s+files?|how\s+(?:it|they)\s+work)\b/i;
+const LOCAL_DEPLOYMENT_TOOL_ERROR_REPORT_PATTERN =
+  /\b(?:fix|debug|issue|bug|error|not\s+working|instead\s+of|response\s+summary|summary|ai\s+is\s+done|tool\s+calls?|edits?|writes?|finishing\s+correctly)\b[\s\S]{0,1400}\b(?:I could not complete the requested deployment cleanly|No successful MCP or terminal deploy\/publish tool result was recorded|requested deployment cleanly)\b|\b(?:I could not complete the requested deployment cleanly|No successful MCP or terminal deploy\/publish tool result was recorded|requested deployment cleanly)\b[\s\S]{0,1400}\b(?:fix|debug|issue|bug|error|not\s+working|instead\s+of|response\s+summary|summary|ai\s+is\s+done|tool\s+calls?|edits?|writes?|finishing\s+correctly)\b/i;
+const LOCAL_CONNECTED_TOOL_ERROR_REPORT_PATTERN =
+  /\b(?:fix|debug|issue|bug|error|not\s+working|instead\s+of|response\s+summary|summary|ai\s+is\s+done|thinking\s+mode|system\s+prompt)\b[\s\S]{0,1400}\b(?:I could not complete the requested connected-tool action cleanly|No MCP, native app, or connector tool result was recorded|connected-tool action cleanly)\b|\b(?:I could not complete the requested connected-tool action cleanly|No MCP, native app, or connector tool result was recorded|connected-tool action cleanly)\b[\s\S]{0,1400}\b(?:fix|debug|issue|bug|error|not\s+working|instead\s+of|response\s+summary|summary|ai\s+is\s+done|thinking\s+mode|system\s+prompt)\b/i;
 const CONVERSATION_ONLY_PROMPT_PATTERN =
   /^\s*(?:thanks?|thank you|ok(?:ay)?|cool|nice|got it|sounds good|perfect|great|continue|go on|tell me more|explain that|summarize(?: this)?(?: conversation| chat| thread)?)\s*[.!?]*\s*$/i;
 const LOCAL_FACT_QUESTION_PATTERN =
   /\b(?:what|which|where|who|when|why|how|does|do|is|are|can|could|list|show|tell|explain|summari[sz]e|works?\s+with|supports?|available|configured|enabled)\b/i;
 const LOCAL_WORKSPACE_REFERENCE_PATTERN =
-  /\b(?:our|this|the)\s+(?:app|code|codebase|project|repo|repository|workspace)\b|\b(?:codebase|project|repo|repository|workspace|source\s+code)\b/i;
+  /\b(?:our|this|the)\s+(?:app|code|codebase|game|project|repo|repository|workspace)\b|\b(?:codebase|project|repo|repository|workspace|source\s+code)\b/i;
 const LOCAL_CODE_ENTITY_PATTERN =
-  /\b(?:adapter|api|backend|bridge|component|config(?:uration)?|database|frontend|integration|model|plugins?|prompt|prompts?|providers?|registry|route|runtime|selector|service|settings?|tools?|tauri|vite|react|typescript|openrouter|anthropic|openai|gemini|ollama|mapbox|weather)\b/i;
+  /\b(?:adapter|api|avatar|backend|bridge|camera|canvas|component|config(?:uration)?|controls?|crafting|database|frontend|gameplay|garden|hud|input|integration|inventory|levels?|map|model|physics|player|plugins?|prompt|prompts?|providers?|registry|render(?:er|ing)?|resources?|route|runtime|scene|selector|service|settings?|simulation|tools?|tauri|three(?:\.js|js)?|typescript|vite|voxel|weather|webgl|world|openrouter|anthropic|openai|gemini|ollama|mapbox)\b/i;
+const LOCAL_INTERACTIVE_PROJECT_TARGET_PATTERN =
+  /\b(?:this|that|our|the|selected|local)\s+(?:game|gameplay|hud|canvas|scene|world|player|avatar|inventory|crafting|level|map|renderer|simulation|webgl|three(?:\.js|js)?|voxel)\b/i;
 const LOCAL_EVIDENCE_VERIFICATION_PATTERN =
   /\b(?:check|confirm|inspect|look(?:\s+at)?|read|search|verify)\b[\s\S]{0,180}\b(?:code|codebase|files?|project|repo|repository|source|workspace|config(?:uration)?|provider|settings?|tool|runtime)\b/i;
 const LOCAL_GIT_CHANGE_REVIEW_PATTERN =
@@ -298,6 +309,13 @@ const DEPLOYMENT_SUCCESS_CLAIM_PATTERN =
   /\b(?:deploy(?:ed|ment)\s+(?:completed|succeeded|successful|finished)|deployed\s+(?:successfully|to|on)|hosting\s+(?:updated|deployed)|published\s+(?:successfully|to|on)|site\s+(?:is\s+)?live|went\s+live)\b/i;
 const DEPLOYMENT_NO_TOOL_BLOCKER_PATTERN =
   /\b(?:can(?:not|'t)|could\s+not|don't\s+have|do\s+not\s+have|no)\b[\s\S]{0,180}\b(?:deploy(?:ment)?\s+tools?|firebase\s+mcp|mcp\s+tools?|terminal(?:\s+tools?)?|tools?\s+(?:available|exposed|attached))\b|\b(?:from\s+your\s+terminal|run\s+(?:this|the)\s+command\s+(?:yourself|manually)|you\s+can\s+(?:deploy|run)|to\s+deploy\s+it\s+manually)\b/i;
+
+function looksLikeInteractiveProjectChangePrompt(prompt: string) {
+  return (
+    /\b(?:add|build|change|create|develop|edit|enhance|expand|fix|implement|improve|make|patch|polish|redesign|refactor|remove|replace|revamp|style|tweak|update|upgrade|write)\b[\s\S]{0,180}\b(?:game|gameplay|hud|canvas|scene|world|player|avatar|inventory|crafting|level|map|renderer|simulation|webgl|three(?:\.js|js)?|voxel)\b/i.test(prompt) ||
+    /\b(?:game|gameplay|hud|canvas|scene|world|player|avatar|inventory|crafting|level|map|renderer|simulation|webgl|three(?:\.js|js)?|voxel)\b[\s\S]{0,180}\b(?:better|cleaner|clearer|fixed|fun|improved?|more|playable|polished|reliable|smooth(?:er)?|updated?|work(?:ing)?)\b/i.test(prompt)
+  );
+}
 const CONNECTED_TOOL_ACTION_PROMPT_PATTERN =
   /\b(?:archive|book|call|cancel|check|close|comment|configure|connect|create|deploy|draft|fetch|find|get|inspect|install|label|list|manage|merge|modify|open|post|publish|read|refresh|reply|reschedule|run|schedule|search|send|sync|test|triage|update|use|verify)\b/i;
 const CONNECTED_TOOL_READ_TARGET_PATTERN_SOURCE = `mcp|server|tool|plugin|connector|app|${CONNECTED_TOOL_SERVICE_PATTERN_SOURCE}`;
@@ -332,13 +350,22 @@ export function looksLikeCapabilityInventoryQuestion(prompt: string) {
 export function promptRequestsDeploymentAction(prompt: string) {
   const trimmed = prompt.trim();
 
-  return Boolean(trimmed && DEPLOYMENT_ACTION_PROMPT_PATTERN.test(trimmed) && !DEPLOYMENT_ACTION_NEGATION_PATTERN.test(trimmed));
+  return Boolean(
+    trimmed &&
+    DEPLOYMENT_ACTION_PROMPT_PATTERN.test(trimmed) &&
+    !DEPLOYMENT_ACTION_NEGATION_PATTERN.test(trimmed) &&
+    !looksLikeLocalDeploymentToolErrorReport(trimmed)
+  );
 }
 
 export function promptRequestsConnectedToolAction(prompt: string) {
   const trimmed = prompt.trim();
 
   if (!trimmed || trimmed.length > 4_000 || CONVERSATION_ONLY_PROMPT_PATTERN.test(trimmed)) {
+    return false;
+  }
+
+  if (looksLikeLocalConnectedToolErrorReport(trimmed)) {
     return false;
   }
 
@@ -471,17 +498,39 @@ function deploymentToolCallText(toolCall: ChatToolCall) {
 
 function isConnectedToolCall(toolCall: ChatToolCall) {
   const toolId = toolCall.toolId ?? "";
+  const label = toolCall.label ?? "";
 
-  return /^(?:mcp|github|gmail|calendar)_/i.test(toolId);
+  if (/^(?:mcp|github|gmail|calendar)_/i.test(toolId)) {
+    return true;
+  }
+
+  if (/(?:^|[._:-])(?:mcp|github|gmail|calendar)(?:$|[._:-])/i.test(toolId)) {
+    return true;
+  }
+
+  if (/^(?:files|git|terminal|browser|web|bridge)_/i.test(toolId)) {
+    return false;
+  }
+
+  return /\b(?:mcp|github|gmail|google\s+calendar|calendar)\b/i.test(label);
 }
 
 function isConnectedToolMutationCall(toolCall: ChatToolCall) {
   const toolId = toolCall.toolId ?? "";
+  const label = toolCall.label ?? "";
 
-  return (
+  if (
     toolId === "mcp_call_tool" ||
     /^(?:gmail_(?:api_write|api_delete|batch_modify_messages|create_draft|create_label|delete_draft|modify_message_labels|send_|trash_message|untrash_message)|calendar_(?:api_write|api_delete|clear_completed_tasks|create_|delete_|move_task|update_)|github_(?:api_write|api_delete|add_issue_labels|approve_workflow_run|assign_issue|cancel_workflow_run|clear_issue_labels|close_issue|comment_issue|commit_files|create_|delete_|dispatch_workflow|force_cancel_workflow_run|lock_issue|mark_|merge_pull_request|pin_issue|remove_|reopen_issue|request_pull_request_reviewers|rerun_workflow_run|review_pending_deployments|set_issue_labels|star_repository|transfer_issue|unassign_issue|unlock_issue|unpin_issue|unstar_repository|unwatch_repository|update_|watch_repository))/i.test(toolId)
-  );
+  ) {
+    return true;
+  }
+
+  if (!isConnectedToolCall(toolCall) || /^(?:files|git|terminal|browser|web|bridge)_/i.test(toolId)) {
+    return false;
+  }
+
+  return /\b(?:archive|book|cancel|close|comment|configure|connect|create|delete|draft|install|label|manage|merge|modify|post|publish|reply|reschedule|schedule|send|sync|triage|update)\b[\s\S]{0,160}\b(?:mcp|github|gmail|google\s+calendar|calendar|email|event|issue|pull\s+request|pr|message)\b/i.test(`${toolId}\n${label}`);
 }
 
 function connectedToolCallText(toolCall: ChatToolCall) {
@@ -498,7 +547,15 @@ function looksLikeLocalToolingImplementationQuestion(prompt: string) {
   return LOCAL_TOOLING_IMPLEMENTATION_QUESTION_PATTERN.test(prompt.trim());
 }
 
-function hasSuccessfulMutatingFileToolCall(toolCalls: ChatToolCall[]) {
+function looksLikeLocalDeploymentToolErrorReport(prompt: string) {
+  return LOCAL_DEPLOYMENT_TOOL_ERROR_REPORT_PATTERN.test(prompt.trim());
+}
+
+function looksLikeLocalConnectedToolErrorReport(prompt: string) {
+  return LOCAL_CONNECTED_TOOL_ERROR_REPORT_PATTERN.test(prompt.trim());
+}
+
+export function hasSuccessfulMutatingFileToolCall(toolCalls: ChatToolCall[]) {
   return toolCalls.some((toolCall) => {
     if (toolCall.status !== "complete") {
       return false;
@@ -506,10 +563,11 @@ function hasSuccessfulMutatingFileToolCall(toolCalls: ChatToolCall[]) {
 
     const toolId = toolCall.toolId ?? "";
     return (
-      /^files_(?:append|apply_patch|create_directory|edit_many|exact_replace|insert_at_line|move|replace_range|replace_span|write|write_many)\b/i.test(toolId) ||
+      /^files_(?:append|apply_patch|copy|create_directory|edit_many|exact_replace|insert_at_line|move|replace_range|replace_span|write|write_many)\b/i.test(toolId) ||
       (toolCall.fileChanges?.length ?? 0) > 0 ||
       toolCall.batchSummary?.operation === "edit" ||
-      toolCall.batchSummary?.operation === "write"
+      toolCall.batchSummary?.operation === "write" ||
+      toolCall.batchFileResults?.some((result) => result.status === "ok")
     );
   });
 }
@@ -907,7 +965,7 @@ export function needsFreshLocalToolEvidence(prompt: string, hasWorkspaceRoots: b
 
   const asksForFacts = LOCAL_FACT_QUESTION_PATTERN.test(trimmed);
   const referencesWorkspace = LOCAL_WORKSPACE_REFERENCE_PATTERN.test(trimmed);
-  const referencesCodeEntity = LOCAL_CODE_ENTITY_PATTERN.test(trimmed);
+  const referencesCodeEntity = LOCAL_CODE_ENTITY_PATTERN.test(trimmed) || LOCAL_INTERACTIVE_PROJECT_TARGET_PATTERN.test(trimmed);
   const requestsVerification = LOCAL_EVIDENCE_VERIFICATION_PATTERN.test(trimmed);
   const requestsGitChangeReview = LOCAL_GIT_CHANGE_REVIEW_PATTERN.test(trimmed);
 
@@ -931,11 +989,15 @@ export function requiresWorkspaceToolCallForPrompt(prompt: string, hasWorkspaceR
   }
 
   const asksToContinueWork = /\b(?:do\s+(?:it|the\s+job)|continue|finish(?:\s+it)?|go\s+ahead|make\s+it\s+happen|apply\s+(?:it|that|the\s+change))\b/i.test(trimmed);
+  const asksForInteractiveProjectChange = looksLikeInteractiveProjectChangePrompt(trimmed);
   const asksForEdit =
     /\b(?:add|append|change|create|delete|edit|fix|implement|improve|insert|make\s+(?:it|this|that)?\s*(?:look\s+|feel\s+|more\s+)?(?:better|cleaner|clearer|polished|readable)|modi(?:fy|fy|y)|patch|polish|refactor|remove|replace|restyle|revamp|style|tweak|update|upgrade|write)\b/i.test(trimmed);
   const asksForAppBehaviorChange =
     /\b(?:when|if|after|on)\b[\s\S]{0,220}\b(?:should|shouldn['’]?t|should\s+not|needs?\s+to|must|has\s+to|have\s+to)\b[\s\S]{0,220}\b(?:go\s+to|navigate|route|open|show|display|render|switch|send|land|take|work|create|start)\b|\b(?:should|shouldn['’]?t|should\s+not|needs?\s+to|must|has\s+to|have\s+to)\b[\s\S]{0,220}\b(?:go\s+to|navigate|route|open|show|display|render|switch|send|land|take|work|create|start)\b/i.test(trimmed) &&
-    /\b(?:app|chat|component|flow|ghome|home|ide|layout|navigation|page|route|screen|ui|user|workspace|workplace)\b/i.test(trimmed);
+    (/\b(?:app|chat|component|flow|game|gameplay|ghome|home|hud|ide|layout|level|navigation|page|player|route|screen|scene|ui|user|world|workspace|workplace)\b/i.test(trimmed) || LOCAL_INTERACTIVE_PROJECT_TARGET_PATTERN.test(trimmed));
+  const asksForInteractiveProjectBehaviorChange =
+    /\b(?:when|if|after|on)\b[\s\S]{0,220}\b(?:should|should\s+not|needs?\s+to|must|has\s+to|have\s+to)\b[\s\S]{0,220}\b(?:pause|resume|lock|unlock|play|stop|open|show|display|render|switch|work|start)\b/i.test(trimmed) &&
+    /\b(?:canvas|game|gameplay|hud|inventory|player|scene|world)\b/i.test(trimmed);
   const asksForInspection =
     /\b(?:check|inspect|look(?:\s+at)?|read|review|search|verify)\b[\s\S]{0,180}\b(?:app|code|codebase|files?|project|repo|repository|source|workspace)\b/i.test(trimmed);
   const asksForTerminalExecution =
@@ -949,10 +1011,13 @@ export function requiresWorkspaceToolCallForPrompt(prompt: string, hasWorkspaceR
   const referencesLocalTarget =
     LOCAL_WORKSPACE_REFERENCE_PATTERN.test(trimmed) ||
     LOCAL_CODE_ENTITY_PATTERN.test(trimmed) ||
+    LOCAL_INTERACTIVE_PROJECT_TARGET_PATTERN.test(trimmed) ||
+    asksForInteractiveProjectChange ||
+    asksForInteractiveProjectBehaviorChange ||
     /(?:^|\n|`|\s)[\w./\\ -]+\.(?:astro|c|cpp|cs|css|dart|go|html|java|js|jsx|json|kt|kts|md|mdx|php|py|rb|rs|scss|sh|sql|svelte|swift|toml|ts|tsx|txt|vue|xml|ya?ml)\b/i.test(trimmed) ||
     /\b(?:component|css|design|layout|page|screen|theme|ui|visual|website|src[\\/]|hello\s*world|helloworld)\b/i.test(trimmed);
 
-  return asksForGitChangeReview || asksForTerminalExecution || asksForBrowserEvidence || ((asksForEdit || asksForAppBehaviorChange || asksForInspection || asksToContinueWork) && referencesLocalTarget);
+  return asksForGitChangeReview || asksForTerminalExecution || asksForBrowserEvidence || ((asksForEdit || asksForAppBehaviorChange || asksForInteractiveProjectBehaviorChange || asksForInspection || asksToContinueWork || asksForInteractiveProjectChange) && referencesLocalTarget);
 }
 
 /** Detects local requests where a read-only answer or pasted replacement code is not enough. */
@@ -976,18 +1041,25 @@ export function requiresWorkspaceMutationForPrompt(prompt: string, hasWorkspaceR
   }
 
   const asksToContinueWork = /\b(?:do\s+(?:it|the\s+job|this)|continue|finish(?:\s+it)?|go\s+ahead|make\s+it\s+happen|apply\s+(?:it|that|the\s+change)|fix\s+(?:it|this|that)|implement\s+(?:it|this|that))\b/i.test(trimmed);
+  const asksForInteractiveProjectChange = looksLikeInteractiveProjectChangePrompt(trimmed);
   const asksForMutation =
     /\b(?:add|append|apply|change|create|delete|edit|fix|implement|improve|insert|make\s+(?:it|this|that)?\s*(?:look\s+|feel\s+|more\s+)?(?:better|cleaner|clearer|polished|readable)|modi(?:fy|fy|y)|patch|polish|re\s*design|redesign|refactor|remove|replace|restyle|revamp|style|tweak|update|upgrade|write)\b/i.test(trimmed);
   const asksForAppBehaviorChange =
     /\b(?:when|if|after|on)\b[\s\S]{0,220}\b(?:should|shouldn['â€™]?t|should\s+not|needs?\s+to|must|has\s+to|have\s+to)\b[\s\S]{0,220}\b(?:go\s+to|navigate|route|open|show|display|render|switch|send|land|take|work|create|start)\b|\b(?:should|shouldn['â€™]?t|should\s+not|needs?\s+to|must|has\s+to|have\s+to)\b[\s\S]{0,220}\b(?:go\s+to|navigate|route|open|show|display|render|switch|send|land|take|work|create|start)\b/i.test(trimmed) &&
-    /\b(?:app|chat|component|flow|home|ide|layout|navigation|page|route|screen|ui|user|website|workspace|workplace)\b/i.test(trimmed);
+    (/\b(?:app|chat|component|flow|game|gameplay|home|hud|ide|layout|level|navigation|page|player|route|screen|scene|ui|user|website|world|workspace|workplace)\b/i.test(trimmed) || LOCAL_INTERACTIVE_PROJECT_TARGET_PATTERN.test(trimmed));
+  const asksForInteractiveProjectBehaviorChange =
+    /\b(?:when|if|after|on)\b[\s\S]{0,220}\b(?:should|should\s+not|needs?\s+to|must|has\s+to|have\s+to)\b[\s\S]{0,220}\b(?:pause|resume|lock|unlock|play|stop|open|show|display|render|switch|work|start)\b/i.test(trimmed) &&
+    /\b(?:canvas|game|gameplay|hud|inventory|player|scene|world)\b/i.test(trimmed);
   const referencesLocalTarget =
     LOCAL_WORKSPACE_REFERENCE_PATTERN.test(trimmed) ||
     LOCAL_CODE_ENTITY_PATTERN.test(trimmed) ||
+    LOCAL_INTERACTIVE_PROJECT_TARGET_PATTERN.test(trimmed) ||
+    asksForInteractiveProjectChange ||
+    asksForInteractiveProjectBehaviorChange ||
     /(?:^|\n|`|\s)[\w./\\ -]+\.(?:astro|c|cpp|cs|css|dart|go|html|java|js|jsx|json|kt|kts|md|mdx|php|py|rb|rs|scss|sh|sql|svelte|swift|toml|ts|tsx|txt|vue|xml|ya?ml)\b/i.test(trimmed) ||
     /\b(?:app|component|css|design|layout|page|screen|theme|ui|visual|website|src[\\/]|local-code conversation context|selected workspace)\b/i.test(trimmed);
 
-  return referencesLocalTarget && (asksForMutation || asksForAppBehaviorChange || asksToContinueWork);
+  return referencesLocalTarget && (asksForMutation || asksForAppBehaviorChange || asksForInteractiveProjectBehaviorChange || asksToContinueWork || asksForInteractiveProjectChange);
 }
 
 export function createFreshLocalToolEvidenceInstruction(prompt: string, unsupportedAnswer: string, options: { blockedReasons?: string[]; canUseProviderTools?: boolean } = {}) {

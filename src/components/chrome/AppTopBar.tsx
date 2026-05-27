@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelLeft } from "lucide-react";
-import { closeWindow, maximizeWindow, minimizeWindow } from "../../app/windowClient";
+import { closeWindow, maximizeWindow, minimizeWindow, quitApp } from "../../app/windowClient";
 import { IconButton } from "../common/IconButton";
 import { AppUpdateIndicator, useAppUpdateController } from "./AppUpdateIndicator";
 import { runTopBarEditCommand } from "./topBarEditCommands";
@@ -74,7 +74,7 @@ export function AppTopBar({
         { label: "New chat", shortcut: shortcut("Ctrl+N"), onSelect: onNewChat },
         { label: "Search chats", shortcut: shortcut("Ctrl+K"), onSelect: onOpenSearch },
         { label: "Settings", shortcut: shortcut("Ctrl+,"), separatorBefore: true, onPreload: preloadRoute("settings"), onSelect: () => onRouteChange("settings") },
-        { label: isMac ? `Quit ${appInfo.name}` : "Exit", shortcut: isMac ? "Command+Q" : "Alt+F4", danger: true, separatorBefore: true, onSelect: closeWindow },
+        { label: isMac ? `Quit ${appInfo.name}` : "Exit", shortcut: isMac ? "Command+Q" : undefined, danger: true, separatorBefore: true, onSelect: quitApp },
       ],
       edit: [
         { label: "Undo", shortcut: shortcut("Ctrl+Z"), onSelect: () => runTopBarEditCommand("undo") },
@@ -170,7 +170,7 @@ export function AppTopBar({
         onRouteChange("settings");
       } else if (isMac && key === "q") {
         event.preventDefault();
-        void closeWindow();
+        void quitApp();
       } else if (isMac && key === "w") {
         event.preventDefault();
         void closeWindow();

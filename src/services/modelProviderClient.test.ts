@@ -356,7 +356,7 @@ describe("provider structured output request bodies", () => {
       },
     });
     expect(body.response_format).toBeUndefined();
-    expect(body.max_output_tokens).toBe(withThinking(createSettings()).maxTokens);
+    expect(body.max_output_tokens).toBe(20_480);
   });
 
   it("applies output_config.format for Anthropic Messages requests", () => {
@@ -894,7 +894,7 @@ describe("streamProviderMessage tool call parsing", () => {
     expect(response.reasoningState?.entries[0]?.value).toEqual([{ data: "opaque", type: "reasoning.encrypted" }]);
   });
 
-  it("keeps DeepSeek reasoning_content as opaque state and out of response text", async () => {
+  it("keeps DeepSeek reasoning_content out of answer text and exposes it as visible reasoning", async () => {
     vi.stubGlobal("window", {
       clearTimeout: globalThis.clearTimeout,
       setTimeout: globalThis.setTimeout,
@@ -922,11 +922,30 @@ describe("streamProviderMessage tool call parsing", () => {
     }), [createMessage()], vi.fn());
 
     expect(response.content).toBe("patched");
+    expect(response.reasoningSummary).toBe("private chain");
     expect((response as { reasoning?: unknown }).reasoning).toBeUndefined();
     expect(response.reasoningState).toMatchObject({
       format: "deepseek-reasoning",
       provider: "deepseek",
     });
+  });
+
+  it("extracts visible reasoning from structured chat reasoning payloads", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: "done",
+          reasoning: {
+            summary: [{ text: "safe structured summary" }],
+          },
+        },
+      }],
+    }), { status: 200 })));
+
+    const response = await sendProviderMessage(withThinking(createOpenRouterSettings()), [createMessage()]);
+
+    expect(response.content).toBe("done");
+    expect(response.reasoningSummary).toBe("safe structured summary");
   });
 
   it("keeps OpenAI Responses reasoning items as opaque state", async () => {
@@ -957,6 +976,7 @@ describe("streamProviderMessage tool call parsing", () => {
     const response = await sendProviderMessage(withThinking(createSettings()), [createMessage()]);
 
     expect(response.content).toBe("visible answer");
+    expect(response.reasoningSummary).toBe("safe summary");
     expect((response as { reasoning?: unknown }).reasoning).toBeUndefined();
     expect(response.reasoningState).toMatchObject({
       entries: [{ id: "rs_1", type: "reasoning" }],
@@ -968,6 +988,153 @@ describe("streamProviderMessage tool call parsing", () => {
       prompt_tokens: 1,
       total_tokens: 3,
     });
+  });
+
+  it("streams OpenAI Responses reasoning summaries into the public summary channel", async () => {
+    vi.stubGlobal("window", {
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => streamResponse([
+      `data: ${JSON.stringify({
+        delta: "Compared the tool evidence before choosing the next edit.",
+        type: "response.reasoning_summary_text.delta",
+      })}`,
+      `data: ${JSON.stringify({
+        delta: "done",
+        type: "response.output_text.delta",
+      })}`,
+      "data: [DONE]",
+    ])));
+    const updates: Array<Parameters<Parameters<typeof streamProviderMessage>[2]>[0]> = [];
+
+    const response = await streamProviderMessage(withThinking({
+      ...createSettings(),
+      model: "gpt-5.5",
+    }), [createMessage()], (snapshot) => {
+      updates.push(snapshot);
+    });
+
+    expect(response.content).toBe("done");
+    expect(response.reasoningSummary).toBe("Compared the tool evidence before choosing the next edit.");
+    expect(updates.some((snapshot) => snapshot.reasoningSummary?.includes("Compared the tool evidence"))).toBe(true);
+  });
+
+  it("captures tagged visible reasoning from the answer stream when providers do not emit native reasoning", async () => {
+    vi.stubGlobal("window", {
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => streamResponse([
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "<reasoning>I am identifying the simplest explanation first.</reasoning>" } }] })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "A GPU runs many parallel calculations." } }] })}`,
+      "data: [DONE]",
+    ])));
+    const updates: Array<Parameters<Parameters<typeof streamProviderMessage>[2]>[0]> = [];
+
+    const response = await streamProviderMessage(withThinking(createOpenRouterSettings()), [createMessage()], (snapshot) => {
+      updates.push(snapshot);
+    });
+
+    expect(response.content).toBe("A GPU runs many parallel calculations.");
+    expect(response.reasoningSummary).toBe("I am identifying the simplest explanation first.");
+    expect(updates.some((snapshot) => snapshot.reasoningSummary?.includes("simplest explanation"))).toBe(true);
+  });
+
+  it("streams Responses-style reasoning summaries from subscription routes", async () => {
+    vi.stubGlobal("window", {
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => streamResponse([
+      `data: ${JSON.stringify({
+        delta: "Checked the selected route before answering.",
+        type: "response.reasoning_summary_text.delta",
+      })}`,
+      `data: ${JSON.stringify({
+        delta: "subscription answer",
+        type: "response.output_text.delta",
+      })}`,
+      "data: [DONE]",
+    ])));
+    const settings = withThinking({
+      ...createSettings(),
+      model: "cx/gpt-5.5",
+      provider: "9router",
+    });
+
+    const response = await streamProviderMessage(settings, [createMessage()], vi.fn());
+
+    expect(response.content).toBe("subscription answer");
+    expect(response.reasoningSummary).toBe("Checked the selected route before answering.");
+  });
+
+  it("streams OpenRouter reasoning details into the reasoning surface", async () => {
+    vi.stubGlobal("window", {
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => streamResponse([
+      `data: ${JSON.stringify({
+        choices: [{
+          delta: {
+            reasoning_details: [{
+              format: "anthropic-claude-v1",
+              id: "reasoning-summary-1",
+              index: 0,
+              summary: "Read the workspace files first, then compare the runtime path before answering.",
+              type: "reasoning.summary",
+            }],
+          },
+        }],
+      })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "The tool path is active." } }] })}`,
+      "data: [DONE]",
+    ])));
+    const updates: Array<Parameters<Parameters<typeof streamProviderMessage>[2]>[0]> = [];
+
+    const response = await streamProviderMessage(withThinking(createOpenRouterSettings()), [createMessage()], (snapshot) => {
+      updates.push(snapshot);
+    });
+
+    expect(response.content).toBe("The tool path is active.");
+    expect(response.reasoningSummary).toBe("Read the workspace files first, then compare the runtime path before answering.");
+    expect(updates.some((snapshot) => snapshot.reasoningSummary?.includes("workspace files"))).toBe(true);
+  });
+
+  it("requests visible reasoning summaries for Codex subscription routes", () => {
+    const body = createProviderRequestBody(
+      withThinking({
+        ...createSettings(),
+        model: "cx/gpt-5.5",
+        provider: "9router",
+      }),
+      [createMessage()],
+      "cx/gpt-5.5",
+      true,
+    ) as Record<string, unknown>;
+
+    expect(body.reasoning).toMatchObject({
+      exclude: false,
+      max_tokens: 16_384,
+      summary: "auto",
+    });
+  });
+
+  it("adds a model-authored reasoning protocol without canned reasoning content", () => {
+    const body = createProviderRequestBody(
+      withThinking(createOpenRouterSettings()),
+      [createMessage()],
+      "openai/gpt-oss-120b:free",
+      true,
+    ) as Record<string, unknown>;
+    const messages = body.messages as Array<{ content?: string; role?: string }>;
+
+    expect(messages[0]?.role).toBe("system");
+    expect(messages[0]?.content).not.toContain("<reasoning>...</reasoning>");
+    expect(messages[0]?.content).not.toContain("Visible Reasoning Surface");
+    expect(messages[0]?.content).toContain("begin each assistant turn with one concise model-authored reasoning summary");
+    expect(messages[0]?.content).toContain("never use a fixed placeholder");
   });
 
   it("keeps OpenRouter free routing permissive for explicit DeepSeek free requests", () => {
@@ -1214,9 +1381,9 @@ describe("Anthropic thinking budget mapping", () => {
     const opusBody = createProviderRequestBody(anthropicSettings("high", true, "claude-opus-4-7"), [userMessage()]) as Record<string, unknown>;
     const sonnetBody = createProviderRequestBody(anthropicSettings("medium", true, "claude-sonnet-4-6"), [userMessage()]) as Record<string, unknown>;
 
-    expect(opusBody.thinking).toEqual({ type: "adaptive" });
+    expect(opusBody.thinking).toEqual({ type: "adaptive", display: "summarized" });
     expect(opusBody.output_config).toEqual({ effort: "high" });
-    expect(sonnetBody.thinking).toEqual({ type: "adaptive" });
+    expect(sonnetBody.thinking).toEqual({ type: "adaptive", display: "summarized" });
     expect(sonnetBody.output_config).toEqual({ effort: "medium" });
   });
 
@@ -1231,7 +1398,7 @@ describe("Anthropic thinking budget mapping", () => {
       TITLE_STRUCTURED_OUTPUT,
     ) as Record<string, unknown>;
 
-    expect(body.thinking).toEqual({ type: "adaptive" });
+    expect(body.thinking).toEqual({ type: "adaptive", display: "summarized" });
     expect(body.output_config).toEqual({
       effort: "low",
       format: {
@@ -1251,9 +1418,9 @@ describe("Anthropic thinking budget mapping", () => {
     const high = (highBody.thinking as { budget_tokens: number }).budget_tokens;
 
     // Distinct, strictly increasing, Anthropic minimum honored.
-    expect(low).toBeGreaterThanOrEqual(1024);
-    expect(med).toBeGreaterThan(low);
-    expect(high).toBeGreaterThan(med);
+    expect(low).toBe(4_096);
+    expect(med).toBe(16_384);
+    expect(high).toBe(35_000);
   });
 
   it("omits the thinking parameter entirely when thinking is disabled", () => {
@@ -1262,15 +1429,15 @@ describe("Anthropic thinking budget mapping", () => {
     expect(body.thinking).toBeUndefined();
   });
 
-  it("guarantees max_tokens is at least budget_tokens + 1024 so Anthropic accepts the request", () => {
+  it("guarantees max_tokens leaves answer room above the thinking budget", () => {
     const body = createProviderRequestBody(anthropicSettings("high", true, "claude-haiku-4-5-20251001"), [userMessage()]) as Record<string, unknown>;
     const budget = (body.thinking as { budget_tokens: number }).budget_tokens;
     const maxTokens = body.max_tokens as number;
 
-    expect(maxTokens).toBeGreaterThanOrEqual(budget + 1024);
+    expect(maxTokens).toBeGreaterThanOrEqual(budget + 4_096);
   });
 
-  it("keeps Anthropic thinking blocks as opaque reasoning state", async () => {
+  it("keeps Anthropic thinking blocks as opaque reasoning state without exposing private placeholders", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(JSON.stringify({
         content: [
@@ -1295,6 +1462,7 @@ describe("Anthropic thinking budget mapping", () => {
     const response = await sendProviderMessage(anthropicSettings("medium"), [userMessage()]);
 
     expect(response.content).toBe("visible");
+    expect(response.reasoningSummary).toBeUndefined();
     expect((response as { reasoning?: unknown }).reasoning).toBeUndefined();
     expect(response.reasoningState).toMatchObject({
       format: "anthropic-thinking",
@@ -1307,11 +1475,37 @@ describe("Anthropic thinking budget mapping", () => {
       total_tokens: 153,
     });
   });
+
+  it("carries Anthropic visible thinking blocks as provider reasoning summaries", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({
+        content: [
+          {
+            signature: "sig",
+            thinking: "I compared the tool evidence and narrowed the edit surface before answering.",
+            type: "thinking",
+          },
+          {
+            text: "visible",
+            type: "text",
+          },
+        ],
+      }), { status: 200 })));
+
+    const response = await sendProviderMessage(anthropicSettings("medium"), [userMessage()]);
+
+    expect(response.content).toBe("visible");
+    expect(response.reasoningSummary).toBe("I compared the tool evidence and narrowed the edit surface before answering.");
+  });
 });
 
 describe("provider reasoning request parameters", () => {
   it("preserves selected Low, Medium, and High thinking effort in provider request bodies", () => {
     const efforts: ReasoningEffort[] = ["low", "medium", "high"];
+    const openAiBody = createProviderRequestBody(withThinking({
+      ...createSettings(),
+      model: "gpt-5.5",
+    }), [createMessage()], undefined, false) as Record<string, unknown>;
     const openAiEfforts = efforts.map((effort) => {
       const body = createProviderRequestBody(withThinking({
         ...createSettings(),
@@ -1320,10 +1514,10 @@ describe("provider reasoning request parameters", () => {
 
       return (body.reasoning as { effort?: string } | undefined)?.effort;
     });
-    const openRouterEfforts = efforts.map((effort) => {
+    const openRouterBudgets = efforts.map((effort) => {
       const body = createProviderRequestBody(withThinking(createOpenRouterSettings(), effort), [createMessage()], undefined, false) as Record<string, unknown>;
 
-      return (body.reasoning as { effort?: string } | undefined)?.effort;
+      return (body.reasoning as { max_tokens?: number } | undefined)?.max_tokens;
     });
     const googleBudgets = efforts.map((effort) => {
       const body = createProviderRequestBody(withThinking({
@@ -1336,12 +1530,72 @@ describe("provider reasoning request parameters", () => {
 
       return extraBody?.google?.thinking_config?.thinking_budget ?? 0;
     });
+    const groqEfforts = efforts.map((effort) => {
+      const body = createProviderRequestBody(withThinking({
+        ...createSettings(),
+        apiKeys: { ...defaultProviderSettings.apiKeys, groq: "groq-key" },
+        model: "openai/gpt-oss-120b",
+        provider: "groq",
+      }, effort), [createMessage()], undefined, false) as Record<string, unknown>;
 
+      return body.reasoning_effort;
+    });
+    const mistralEfforts = efforts.map((effort) => {
+      const body = createProviderRequestBody(withThinking({
+        ...createSettings(),
+        apiKeys: { ...defaultProviderSettings.apiKeys, mistral: "mistral-key" },
+        model: "mistral-medium-3.5",
+        provider: "mistral",
+      }, effort), [createMessage()], undefined, false) as Record<string, unknown>;
+
+      return body.reasoning_effort;
+    });
+    const deepSeekEfforts = efforts.map((effort) => {
+      const body = createProviderRequestBody(withThinking({
+        ...createSettings(),
+        apiKeys: { ...defaultProviderSettings.apiKeys, deepseek: "deepseek-key" },
+        model: "deepseek-v4-pro",
+        provider: "deepseek",
+      }, effort), [createMessage()], undefined, false) as Record<string, unknown>;
+
+      return body.reasoning_effort;
+    });
+
+    expect(openAiBody.reasoning).toMatchObject({
+      effort: "medium",
+      summary: "auto",
+    });
+    expect((createProviderRequestBody(withThinking(createOpenRouterSettings()), [createMessage()], undefined, false) as Record<string, unknown>).reasoning).toMatchObject({
+      enabled: true,
+      exclude: false,
+      max_tokens: 16_384,
+    });
     expect(openAiEfforts).toEqual(efforts);
-    expect(openRouterEfforts).toEqual(efforts);
+    expect(openRouterBudgets).toEqual([4_096, 16_384, 35_000]);
+    expect(groqEfforts).toEqual(efforts);
+    expect(mistralEfforts).toEqual(efforts);
+    expect(deepSeekEfforts).toEqual(efforts);
     expect(googleBudgets[0]).toBeGreaterThan(0);
     expect(googleBudgets[1]).toBeGreaterThan(googleBudgets[0] ?? 0);
     expect(googleBudgets[2]).toBeGreaterThan(googleBudgets[1] ?? 0);
+  });
+
+  it("raises total output caps enough for high thinking plus a visible answer", () => {
+    const openAiBody = createProviderRequestBody(withThinking({
+      ...createSettings(),
+      model: "gpt-5.5",
+    }, "high"), [createMessage()], undefined, false) as Record<string, unknown>;
+    const openRouterBody = createProviderRequestBody(withThinking(createOpenRouterSettings(), "high"), [createMessage()], undefined, false) as Record<string, unknown>;
+    const googleBody = createProviderRequestBody(withThinking({
+      ...createSettings(),
+      apiKeys: { ...defaultProviderSettings.apiKeys, google: "google-key" },
+      model: "gemini-2.5-pro",
+      provider: "google",
+    }, "high"), [createMessage()], undefined, false) as Record<string, unknown>;
+
+    expect(openAiBody.max_output_tokens).toBe(39_096);
+    expect(openRouterBody.max_completion_tokens).toBe(39_096);
+    expect(googleBody.max_tokens).toBe(36_864);
   });
 
   it("uses provider-specific documented thinking controls without exposing UI reasoning text", () => {
@@ -1398,7 +1652,7 @@ describe("provider reasoning request parameters", () => {
       reasoning_effort: "medium",
     });
     expect(mistralBody).toMatchObject({
-      reasoning_effort: "high",
+      reasoning_effort: "medium",
     });
     expect(xaiBody).toMatchObject({
       reasoning_effort: "medium",

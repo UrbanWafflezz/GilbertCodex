@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { Folder, FolderOpen, FolderPlus, Heart, ListPlus, LogOut, MessageSquarePlus, Pin, Puzzle, Search, Settings, Trash2, UserRound, Workflow } from "lucide-react";
+import { Eraser, Folder, FolderOpen, FolderPlus, ListPlus, LogOut, MessageSquarePlus, Pin, Puzzle, Search, Settings, Trash2, UserRound, Workflow } from "lucide-react";
 import { DEFAULT_PROJECT, formatChatAge, hasComposerDraftContent, isDiscardableEmptyChat, isEmptyChat, isNoProjectName, normalizeProjectName, sortChatsByUpdatedAt } from "../../lib/chatUtils";
 import { SettingsSideMenu } from "../../pages/settings/SettingsSideMenu";
 import { SidebarSection } from "../sidebar/SidebarSection";
@@ -22,6 +22,7 @@ interface ShellSidebarProps {
   defaultOpenTarget?: ProjectOpenTargetId;
   locationServicesEnabled: boolean;
   onCreateProject: (options?: CreateProjectOptions) => void | string | null | Promise<string | null | void>;
+  onClearChatMessages: (chatId: string) => void;
   onDeleteChat: (chatId: string) => void;
   onDeleteProject: (projectName: string) => void;
   onNewChat: (project?: string) => void;
@@ -50,6 +51,7 @@ export const ShellSidebar = memo(function ShellSidebar({
   defaultOpenTarget,
   locationServicesEnabled,
   onCreateProject,
+  onClearChatMessages,
   onDeleteChat,
   onDeleteProject,
   onNewChat,
@@ -119,13 +121,23 @@ export const ShellSidebar = memo(function ShellSidebar({
       label: chat.pinned ? "Unpin chat" : "Pin chat",
       onSelect: () => onTogglePin(chat.id),
     },
+    ...(chat.messages.length > 0
+      ? [
+          {
+            danger: true,
+            icon: Eraser,
+            label: "Delete all messages",
+            onSelect: () => onClearChatMessages(chat.id),
+          },
+        ]
+      : []),
     {
       danger: true,
       icon: Trash2,
       label: "Delete chat",
       onSelect: () => onDeleteChat(chat.id),
     },
-  ], [onDeleteChat, onTogglePin]);
+  ], [onClearChatMessages, onDeleteChat, onTogglePin]);
 
   const projectOptions = useCallback((project: ProjectSummary) => {
     const projectRoot = project.localWorkspace?.roots[0];
@@ -413,18 +425,6 @@ export const ShellSidebar = memo(function ShellSidebar({
           >
             <Settings size={16} aria-hidden="true" />
             <span>Settings</span>
-          </button>
-          <button
-            className="sidebar-settings sidebar-account-settings"
-            data-active={activeRoute === "support"}
-            data-latency-label="sidebar:support"
-            type="button"
-            onFocus={() => onPreloadRoute?.("support")}
-            onMouseEnter={() => onPreloadRoute?.("support")}
-            onClick={() => onRouteChange("support")}
-          >
-            <Heart size={16} aria-hidden="true" />
-            <span>Fund project</span>
           </button>
         </section>
       </div>

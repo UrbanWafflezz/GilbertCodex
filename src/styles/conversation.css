@@ -724,8 +724,9 @@
 
 .assistant-run-inline {
   display: grid;
-  gap: 0;
+  gap: 1px;
   margin: 0;
+  min-width: 0;
   color: var(--text);
 }
 
@@ -735,7 +736,7 @@
   grid-template-columns: 22px minmax(0, 1fr);
   gap: 9px;
   min-width: 0;
-  padding: 2px 0 10px;
+  padding: 3px 0 11px;
   color: color-mix(in srgb, var(--text) 76%, var(--text-dim) 24%);
 }
 
@@ -763,7 +764,10 @@
   border: 1px solid color-mix(in srgb, var(--line) 66%, transparent);
   border-radius: 999px;
   color: var(--text-dim);
-  background: color-mix(in srgb, var(--surface-panel) 94%, transparent);
+  background:
+    radial-gradient(circle at 35% 30%, color-mix(in srgb, white 11%, transparent), transparent 58%),
+    color-mix(in srgb, var(--surface-panel) 94%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, white 6%, transparent);
 }
 
 .assistant-run-inline-icon svg {
@@ -773,6 +777,8 @@
 
 .assistant-run-inline-row[data-status="active"] .assistant-run-inline-icon {
   color: var(--blue);
+  border-color: color-mix(in srgb, var(--blue) 42%, var(--line));
+  background: color-mix(in srgb, var(--blue-soft) 42%, var(--surface-panel));
   animation: assistant-run-pulse 1.35s ease-in-out infinite;
 }
 
@@ -805,8 +811,9 @@
 .assistant-run-inline-summary:is(button) {
   width: fit-content;
   max-width: 100%;
-  padding: 0;
+  padding: 1px 0;
   border: 0;
+  border-radius: 6px;
   color: inherit;
   background: transparent;
   font: inherit;
@@ -820,7 +827,8 @@
 }
 
 .assistant-run-inline-summary:is(button):focus-visible {
-  outline: 0;
+  outline: 2px solid color-mix(in srgb, var(--blue) 34%, transparent);
+  outline-offset: 2px;
 }
 
 .assistant-run-inline-copy strong {
@@ -982,57 +990,6 @@
 .assistant-run-inline-approval-actions button:focus-visible {
   background: var(--hover);
   outline: 0;
-}
-
-.assistant-thinking-thoughts {
-  display: grid;
-  gap: 7px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.assistant-thinking-flow {
-  display: grid;
-  gap: 9px;
-  min-width: 0;
-}
-
-.assistant-thinking-section-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-}
-
-.assistant-thinking-section-heading strong {
-  color: var(--text);
-  font-size: var(--font-size-12-5, 12.5px);
-  font-weight: 760;
-}
-
-.assistant-thinking-section-heading small {
-  overflow: hidden;
-  color: var(--text-dim);
-  font-size: var(--font-size-11, 11px);
-  font-weight: 540;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.assistant-thinking-list[data-kind="thoughts"] {
-  gap: 8px;
-}
-
-.assistant-thinking-list[data-kind="process"] {
-  gap: 0;
-  padding: 2px 0 1px;
-}
-
-.assistant-thinking-list[data-kind="progress"] {
-  margin-top: 0;
 }
 
 .assistant-run-card-toggle {

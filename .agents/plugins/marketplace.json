@@ -41,6 +41,18 @@
       "category": "Development"
     },
     {
+      "name": "linkedin",
+      "source": {
+        "source": "local",
+        "path": "./plugins/linkedin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
       "name": "linear",
       "source": {
         "source": "git-subdir",

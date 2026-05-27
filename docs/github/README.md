@@ -277,7 +277,7 @@ GitHub says repository webhooks require repository owner or admin access. Use or
 
 ## Maintainer Checklist
 
-- Keep `.env.example` limited to optional public hosted links and non-secret setup values.
+- Keep `.env.example` limited to non-secret setup values.
 - Keep requested scopes in `src/app/githubClient.ts`, Settings UI copy, and this document aligned.
 - Keep GitHub token storage notes in `SECURITY.md` current.
 - Prefer draft PR creation until richer review cards and diffs are available in the UI.

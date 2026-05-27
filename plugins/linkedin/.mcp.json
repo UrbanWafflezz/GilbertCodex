@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "linkedin": {
+      "command": "node",
+      "args": [
+        "./plugins/linkedin/scripts/linkedin-mcp-server.mjs"
+      ],
+      "env": {
+        "LINKEDIN_ACCESS_TOKEN": "",
+        "LINKEDIN_API_VERSION": "202510"
+      }
+    }
+  }
+}

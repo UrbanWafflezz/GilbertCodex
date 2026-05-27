@@ -960,11 +960,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
       void refreshAccountUsage(connections);
       const connectedCodex = choosePreferredConnection(connections.filter((connection) => connection.provider === "codex"));
       const nextModel = chooseNineRouterModelForAccount("codex", savedNineRouterModel, models);
-      useNineRouterProvider(nextModel);
-      setStatusMessage({
-        kind: "success",
-        text: `${formatConnectionIdentity(connectedCodex) || "Codex"} is connected. Gilbert is using ${nextModel} through your subscriptions.`,
-      });
+      activateConnectedAccountModel("Codex subscription", nextModel, `${formatConnectionIdentity(connectedCodex) || "Codex"} is connected. Gilbert is using ${nextModel} through your subscriptions.`);
     } catch (error) {
       if (accountConnectRunRef.current === runId) {
         setStatusMessage({ kind: "error", text: error instanceof Error ? error.message : "Could not connect Codex." });
@@ -1063,9 +1059,14 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
       const nextProvider = chooseNineRouterConnectedAccountProvider(connections, target.provider.id);
       if (nextProvider) {
         const nextModel = chooseNineRouterModelForAccount(nextProvider.id, savedNineRouterModel, models);
-        useNineRouterProvider(nextModel, undefined, {
-          statusText: `${target.provider.name} signed out. Gilbert is using ${nextProvider.name}.`,
-        });
+        if (nextModel) {
+          useNineRouterProvider(nextModel, undefined, {
+            statusText: `${target.provider.name} signed out. Gilbert is using ${nextProvider.name}.`,
+          });
+        } else {
+          const openRouterModel = settings.providerModels.openrouter?.trim() || getDefaultModelForProvider("openrouter");
+          useOpenRouterProvider(openRouterModel, `${target.provider.name} signed out. ${nextProvider.name} is connected, but subscriptions have not reported a usable ${nextProvider.name} model yet. Gilbert is using OpenRouter.`);
+        }
       } else {
         const openRouterModel = settings.providerModels.openrouter?.trim() || getDefaultModelForProvider("openrouter");
         useOpenRouterProvider(openRouterModel, `${target.provider.name} signed out. Gilbert is using OpenRouter.`);
@@ -1109,8 +1110,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     ]);
     void refreshAccountUsage(connections);
     const nextModel = chooseNineRouterModelForAccount(provider.id, savedNineRouterModel, models);
-    useNineRouterProvider(nextModel);
-    setStatusMessage({ kind: "success", text: `${provider.name} is connected. Gilbert is using ${nextModel} through your subscriptions.` });
+    activateConnectedAccountModel(provider.name, nextModel, `${provider.name} is connected. Gilbert is using ${nextModel} through your subscriptions.`);
   }
 
   async function connectAuthorizationCodeProvider(provider: NineRouterAccountProvider, runId: number) {
@@ -1160,8 +1160,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     ]);
     void refreshAccountUsage(connections);
     const nextModel = chooseNineRouterModelForAccount(provider.id, savedNineRouterModel, models);
-    useNineRouterProvider(nextModel);
-    setStatusMessage({ kind: "success", text: `${provider.name} is connected. Gilbert is using ${nextModel} through your subscriptions.` });
+    activateConnectedAccountModel(provider.name, nextModel, `${provider.name} is connected. Gilbert is using ${nextModel} through your subscriptions.`);
   }
 
   async function waitForDeviceCodeConnection(provider: NineRouterAccountProvider, deviceData: NineRouterDeviceCodeResponse, runId: number) {
@@ -1312,6 +1311,20 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     onSettingsChange(nextSettings);
     onActivateProvider?.(NINE_ROUTER_PROVIDER_ID, modelOverride);
     setStatusMessage({ kind: "success", text: options.statusText ?? "Subscription routing is now active." });
+  }
+
+  function activateConnectedAccountModel(providerName: string, model: string, successText: string) {
+    if (!model) {
+      setStatusMessage({
+        kind: "warning",
+        text: `${providerName} is connected, but subscriptions have not reported a usable ${providerName} model yet. Refresh accounts after the model catalog syncs.`,
+      });
+      return false;
+    }
+
+    useNineRouterProvider(model);
+    setStatusMessage({ kind: "success", text: successText });
+    return true;
   }
 
   function useOpenRouterProvider(modelOverride: string, statusText: string) {
@@ -1477,6 +1490,8 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
                       <button
                         className={`${connected ? "settings-danger-button" : "settings-primary-button"} settings-full-width-button`}
                         type="button"
+                        aria-label={connected ? `Sign out from ${provider.name}` : `Sign in with ${provider.name}`}
+                        title={connected ? `Sign out from ${provider.name}` : `Sign in with ${provider.name}`}
                         disabled={busy !== null}
                         onClick={() => {
                           if (connected) {
@@ -1488,7 +1503,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
                         }}
                       >
                         {connected ? <LogOut size={16} aria-hidden="true" /> : provider.flow === "device_code" ? <ExternalLink size={16} aria-hidden="true" /> : <KeyRound size={16} aria-hidden="true" />}
-                        {providerDisconnecting ? "Signing out" : providerBusy ? "Waiting for sign-in" : connected ? `Sign out from ${provider.name}` : `Sign in with ${provider.name}`}
+                        {providerDisconnecting ? "Signing out" : providerBusy ? "Waiting for sign-in" : connected ? "Sign out" : `Sign in with ${provider.name}`}
                       </button>
                     </section>
                   );
@@ -2316,14 +2331,26 @@ function formatQuotaLabel(key: string, quota: NineRouterUsageQuota) {
     return titleCaseProviderText(displayName);
   }
 
+  const normalizedKey = key.trim().toLowerCase().replace(/[.\-\s/]+/g, "_");
   const labels: Record<string, string> = {
+    codex_spark_session: "GPT-5.3 Spark 5-hour window",
+    codex_spark_weekly: "GPT-5.3 Spark weekly window",
+    gpt_5_3_codex_spark: "GPT-5.3 Spark",
+    gpt_5_3_codex_spark_5h: "GPT-5.3 Spark 5-hour window",
+    gpt_5_3_codex_spark_session: "GPT-5.3 Spark 5-hour window",
+    gpt_5_3_codex_spark_week: "GPT-5.3 Spark weekly window",
+    gpt_5_3_codex_spark_weekly: "GPT-5.3 Spark weekly window",
     review_session: "Review 5-hour window",
     review_weekly: "Review weekly window",
     session: "5-hour window",
+    spark_5h: "GPT-5.3 Spark 5-hour window",
+    spark_session: "GPT-5.3 Spark 5-hour window",
+    spark_week: "GPT-5.3 Spark weekly window",
+    spark_weekly: "GPT-5.3 Spark weekly window",
     weekly: "Weekly window",
   };
 
-  return labels[key] ?? titleCaseProviderText(key);
+  return labels[normalizedKey] ?? titleCaseProviderText(key);
 }
 
 function formatQuotaValue(quota: NineRouterUsageQuota) {

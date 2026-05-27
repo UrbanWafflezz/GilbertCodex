@@ -160,6 +160,9 @@ export function createRecoverableBridgeToolRetryInstruction(deps: WorkspaceRunti
     const staleEditPath = /\bchanged since it was last read\b/i.test(rawOutput)
       ? extractToolInputPath(latestRecoverableToolCall.input)
       : "";
+    const emptyEditContent = looksLikeEmptyEditContentError(rawOutput);
+    const ambiguousExactReplace = looksLikeAmbiguousExactReplaceError(rawOutput);
+    const broadBatchEdit = looksLikeBroadBatchEditError(rawOutput);
 
     const missingPathRead =
       /\barguments\.paths?\s+is\s+required\b/i.test(rawOutput) &&
@@ -177,6 +180,24 @@ export function createRecoverableBridgeToolRetryInstruction(deps: WorkspaceRunti
             "The target file changed after the prior read, so the old expectedSha256 is stale.",
             `Re-read the current target now with files_read_range or files_read for ${staleEditPath}.`,
             "Then retry the same edit against the latest content. For append or exact_replace, omit expectedSha256 on retry; for line or column edits, use fresh coordinates from the new read.",
+          ].join("\n")
+        : emptyEditContent
+        ? [
+            "The edit call was malformed because one operation had empty insertion/append content.",
+            "Do not retry the same empty-content edit. Re-read the target section if needed, then retry with files_edit_many using non-empty content, exact_replace, replace_range, or files_apply_patch anchored to current text.",
+            "If the intended change is a CSS selector tweak, patch the existing selector block instead of inserting an empty line.",
+          ].join("\n")
+        : ambiguousExactReplace
+        ? [
+            "The exact replacement matched more than one location, so no file change was applied.",
+            "Do not set replaceAll unless the user truly wants every matching occurrence changed.",
+            "Re-read the relevant section if needed, then retry with a more specific oldText that includes surrounding unique context, replace_span/replace_range from fresh coordinates, or files_apply_patch anchored to the intended block.",
+          ].join("\n")
+        : broadBatchEdit
+        ? [
+            "The edit call was too broad and was refused before writing.",
+            "Do not retry by replacing most or all of the file through files_edit_many.",
+            "Re-read the intended section, then retry with a smaller unique oldText, replace_span, replace_range from fresh coordinates, or files_apply_patch anchored to the target block.",
           ].join("\n")
         : suggestedPaths.length > 0
         ? [
@@ -342,8 +363,24 @@ export function getLastPathSegment(deps: WorkspaceRuntimeDeps, path: string) {
 export function isRecoverableBridgeArgumentError(deps: WorkspaceRuntimeDeps, output: string) {
 
     return /\b(arguments?|maxBytes|offset|replaceAll)\b[\s\S]{0,120}\b(?:must be|is not allowed|invalid|required)\b/i.test(output) ||
+      looksLikeAmbiguousExactReplaceError(output) ||
+      looksLikeBroadBatchEditError(output) ||
+      looksLikeEmptyEditContentError(output) ||
       /\btool\s+[\w.-]+\s+received\s+(?:invalid json arguments|arguments that could not be parsed as json)\b/i.test(output);
   }
+
+function looksLikeAmbiguousExactReplaceError(output: string) {
+  return /\bExact text matched\s+\d+\s+times(?:\s+after\s+normalizing\s+line\s+endings)?\.\s+Set replaceAll true or make oldText more specific\b/i.test(output);
+}
+
+function looksLikeBroadBatchEditError(output: string) {
+  return /\bRefusing broad edit\b[\s\S]{0,240}\bfiles[_\s-]*edit[_\s-]*many\b/i.test(output);
+}
+
+function looksLikeEmptyEditContentError(output: string) {
+  return /\bfiles[_\s-]*edit[_\s-]*many\b[\s\S]{0,120}\b(?:insert[_\s-]*at[_\s-]*line|append)\b[\s\S]{0,120}\brequires\s+non-empty\s+content\b/i.test(output) ||
+    /\bfiles[_\s-]*insert[_\s-]*at[_\s-]*line\b[\s\S]{0,120}\brequires\s+non-empty\s+content\b/i.test(output);
+}
 
 export function summarizeCompletedToolFallback(deps: WorkspaceRuntimeDeps, toolCall: ChatToolCall, output: string) {
   const { createCompletedToolFallbackSummary, createNeutralToolSynthesisFailureMessage, isFileReadSynthesisToolCall, limitFallbackToolOutput, shouldKeepToolOutputOutOfChat } = deps;

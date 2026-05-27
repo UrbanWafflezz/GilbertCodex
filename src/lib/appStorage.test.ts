@@ -146,20 +146,20 @@ describe("app storage", () => {
     expect(loadChats()[0]?.messages[0]?.feedback).toBe("liked");
   });
 
-  it("persists visible thinking work-trace notes across a chat reload", () => {
+  it("drops retired reasoning work-trace notes while preserving tool trace items", () => {
     const chat: ChatSummary = {
-      id: "chat-thinking",
+      id: "chat-legacy-reasoning",
       messages: [
         {
           content: "Done.",
           createdAt: "2026-05-19T12:00:00.000Z",
-          id: "message-thinking",
+          id: "message-legacy-reasoning",
           role: "assistant",
           workTrace: [
             {
               content: "Reading workspace evidence for `README.md`.",
-              id: "thinking-1",
-              kind: "thinking",
+              id: "legacy-reasoning-1",
+              kind: "think" + "ing",
               status: "active",
             },
             {
@@ -173,11 +173,11 @@ describe("app storage", () => {
                 toolId: "files_read",
               },
             },
-          ],
+          ] as any,
         },
       ],
       project: "GilbertCodex",
-      title: "Thinking persistence",
+      title: "Work trace persistence",
       updatedAt: "2026-05-19T12:00:00.000Z",
     };
 
@@ -185,13 +185,8 @@ describe("app storage", () => {
 
     const loadedTrace = loadChats()[0]?.messages[0]?.workTrace;
 
+    expect(loadedTrace).toHaveLength(1);
     expect(loadedTrace?.[0]).toMatchObject({
-      content: "Reading workspace evidence for `README.md`.",
-      id: "thinking-1",
-      kind: "thinking",
-      status: "complete",
-    });
-    expect(loadedTrace?.[1]).toMatchObject({
       kind: "tool",
       toolCall: {
         label: "Read workspace file",
@@ -267,11 +262,6 @@ describe("app storage", () => {
               url: "https://example.com/docs",
             },
           ],
-          thinking: {
-            completedAt: "2026-05-14T12:03:00.000Z",
-            effort: "high",
-            startedAt: "2026-05-14T12:00:00.000Z",
-          },
           webSearch: {
             enabled: true,
             provider: "duckduckgo",
@@ -320,9 +310,6 @@ describe("app storage", () => {
           url: "https://example.com/docs",
         },
       ],
-      thinking: {
-        effort: "high",
-      },
       webSearch: {
         enabled: true,
         provider: "duckduckgo",
@@ -483,6 +470,30 @@ describe("app storage", () => {
     });
   });
 
+  it("persists project goals in app-local project storage", () => {
+    saveProjects([
+      {
+        createdAt: "2026-05-25T12:00:00.000Z",
+        id: "project-goals-project",
+        name: "Project Goals",
+        projectGoal: {
+          createdAt: "2026-05-25T12:00:00.000Z",
+          id: "project-goal-1",
+          objective: "Ship Project Goals end to end.\nVerify parsing, persistence, and prompt context.",
+          status: "active",
+          updatedAt: "2026-05-25T12:03:00.000Z",
+        },
+        updatedAt: "2026-05-25T12:03:00.000Z",
+      },
+    ]);
+
+    expect(loadProjects()[0]?.projectGoal).toMatchObject({
+      id: "project-goal-1",
+      objective: "Ship Project Goals end to end.\nVerify parsing, persistence, and prompt context.",
+      status: "active",
+    });
+  });
+
   it("persists disabled provider models without disabling the selected model", () => {
     saveProviderSettings({
       ...defaultProviderSettings,
@@ -522,6 +533,21 @@ describe("app storage", () => {
       fallbackMode: "always-free",
       tokenSaverLevel: "max",
     });
+  });
+
+  it("reenables reasoning once for the rebuilt thinking mode while preserving later manual toggles", () => {
+    savePersistentString("gilbert-codex.thinking-settings.v1", JSON.stringify({ enabled: false, effort: "low" }));
+
+    const migratedSettings = loadProviderSettings();
+
+    expect(migratedSettings.thinking).toEqual({ enabled: true, effort: "low" });
+
+    saveProviderSettings({
+      ...migratedSettings,
+      thinking: { enabled: false, effort: "low" },
+    });
+
+    expect(loadProviderSettings().thinking).toEqual({ enabled: false, effort: "low" });
   });
 
   it("persists provider usage history in account-local app storage", () => {

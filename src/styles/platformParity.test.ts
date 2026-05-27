@@ -5,7 +5,6 @@ type TestFileSystem = {
   readdirSync: (path: URL) => string[];
 };
 
-// @ts-expect-error Node built-ins are used only by Vitest; app type globals stay browser-focused.
 const fs = (await import("node:fs")) as TestFileSystem;
 
 const styleFiles = Object.fromEntries(

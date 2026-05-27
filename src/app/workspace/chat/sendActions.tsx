@@ -27,6 +27,7 @@ interface DiscordResponseStreamer {
 interface PlanningRunSnapshot {
   content?: string;
   progress: ChatProgressItem[];
+  reasoning?: string;
 }
 
 interface PlanningRunResult extends PlanningRunSnapshot {
@@ -227,10 +228,7 @@ function createAssistantStartupProgress(settings: ProviderSettings): ChatProgres
 
 function createAssistantStartupWorkTrace(params: {
   assistantMessageId: string;
-  isPlanningMode: boolean;
   progress?: ChatProgressItem;
-  thinkingEnabled: boolean;
-  workspaceSettings: LocalWorkspaceSettings;
 }): ChatWorkTraceItem[] | undefined {
   const items: ChatWorkTraceItem[] = [];
 
@@ -263,21 +261,6 @@ function completeStartupProgress(progress: ChatProgressItem[] | undefined) {
       ? {
           ...item,
           detail: "Subscription runtime checked.",
-          status: "complete" as const,
-        }
-      : item,
-  );
-}
-
-function completeStartupWorkTrace(workTrace: ChatWorkTraceItem[] | undefined) {
-  if (!workTrace?.length) {
-    return workTrace;
-  }
-
-  return workTrace.map((item) =>
-    item.kind === "thinking" && item.id.endsWith("-startup-thinking") && item.status === "active"
-      ? {
-          ...item,
           status: "complete" as const,
         }
       : item,
@@ -368,10 +351,8 @@ export async function startSendMessage(deps: SendActionsDeps, input: ChatSendInp
             researchReferences: researchReferences.length > 0 ? researchReferences : undefined,
             source: options.userMessageSource,
           };
-    const effectiveThinkingSettings = effectiveProviderSettings.thinking;
     const discordContextMessages = options.discordReply ? createDiscordRuntimeContextMessages(workspaceSettings, webSearchToolAvailable, runtimeWebSearchSettings.provider) : [];
     const assistantDraft = createMessage("assistant", "");
-    const assistantThinkingEnabled = Boolean(toolSettings.thinking && (isPlanningMode || effectiveThinkingSettings.enabled));
     const startupProgress = createAssistantStartupProgress(effectiveProviderSettings);
     assistantMessage = {
       ...assistantDraft,
@@ -385,18 +366,9 @@ export async function startSendMessage(deps: SendActionsDeps, input: ChatSendInp
           }
         : undefined,
       progress: withStartupProgress(isPlanningMode ? createPlanningProgress("input") : undefined, startupProgress),
-      thinking: assistantThinkingEnabled
-        ? {
-            effort: isPlanningMode ? "high" : effectiveThinkingSettings.effort,
-            startedAt: now,
-          }
-        : undefined,
       workTrace: createAssistantStartupWorkTrace({
         assistantMessageId: assistantDraft.id,
-        isPlanningMode,
         progress: startupProgress,
-        thinkingEnabled: assistantThinkingEnabled,
-        workspaceSettings,
       }),
     };
     agentRun = createAgentRunForMessage({
@@ -737,10 +709,11 @@ export async function startSendMessage(deps: SendActionsDeps, input: ChatSendInp
                       messages: chat.messages.map((message) =>
                         message.id === assistantMessage.id
                           ? preserveVisibleResponseThinking(message, {
-                              ...message,
-                              content: snapshot.content ?? message.content,
-                              progress: withWebSearchProgress(message.webSearch, snapshot.progress),
-                            })
+                          ...message,
+                          content: snapshot.content ?? message.content,
+                          progress: withWebSearchProgress(message.webSearch, snapshot.progress),
+                          reasoning: snapshot.reasoning ?? message.reasoning,
+                        })
                           : message,
                       ),
                     }
@@ -779,12 +752,7 @@ export async function startSendMessage(deps: SendActionsDeps, input: ChatSendInp
                                 }
                               : undefined,
                             progress: withWebSearchProgress(message.webSearch, assistantResponse.progress),
-                            thinking: message.thinking
-                              ? {
-                                  ...message.thinking,
-                                  completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-                                }
-                              : undefined,
+                            reasoning: assistantResponse.reasoning ?? message.reasoning,
                           })
                         : message,
                     ),
@@ -880,16 +848,10 @@ export async function startSendMessage(deps: SendActionsDeps, input: ChatSendInp
                             content: assistantResponse.content,
                             isStreaming: false,
                             progress: completeStartupProgress(withLocalComputerProgress(assistantResponse.progress, message.progress)),
+                            reasoning: assistantResponse.reasoning ?? message.reasoning,
                             sources: assistantResponse.sources && assistantResponse.sources.length > 0 ? mergeChatSources(message.sources, assistantResponse.sources) : message.sources,
                             streamTiming: assistantResponse.streamTiming ?? message.streamTiming,
                             toolCalls: assistantResponse.toolCalls ?? message.toolCalls,
-                            workTrace: completeStartupWorkTrace(message.workTrace),
-                            thinking: message.thinking
-                              ? {
-                                  ...message.thinking,
-                                  completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-                                }
-                              : undefined,
                           })
                         : message,
                     ),
@@ -1025,12 +987,6 @@ export async function startSendMessage(deps: SendActionsDeps, input: ChatSendInp
                           content: errorContent,
                           isStreaming: false,
                           status: "error",
-                          thinking: message.thinking
-                            ? {
-                                ...message.thinking,
-                                completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-                              }
-                            : undefined,
                         }
                       : message,
                   ),

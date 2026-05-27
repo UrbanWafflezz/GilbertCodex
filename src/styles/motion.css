@@ -614,7 +614,7 @@
   .attachment-chip,
   .composer-menu-item,
   .composer-submenu button,
-  .thinking-effort-grid button,
+  .reasoning-effort-grid button,
   .local-permission-menu button,
   .project-list button,
   .model-selector-row,
@@ -634,7 +634,7 @@
 
   .composer-menu-item:hover,
   .composer-submenu button:hover,
-  .thinking-effort-grid button:hover,
+  .reasoning-effort-grid button:hover,
   .local-permission-menu button:hover,
   .project-list button:hover,
   .model-selector-row:hover,
@@ -793,15 +793,13 @@
     animation: gil-fade-in 180ms var(--motion-ease) both;
   }
 
-  .thinking-popover-orb,
-  .thinking-glyph {
+  .reasoning-effort-orb {
     transition:
       filter var(--motion-medium) var(--motion-ease),
       transform 340ms var(--motion-spring);
   }
 
-  .thinking-popover-header:hover .thinking-popover-orb,
-  .thinking-mode-root:has([aria-expanded="true"]) .mode-chip-thinking svg {
+  .reasoning-effort-header:hover .reasoning-effort-orb {
     filter: brightness(1.08);
     transform: scale(1.025);
   }

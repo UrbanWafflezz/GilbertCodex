@@ -28,9 +28,10 @@ This folder is the canonical home for Gilbert Codex plugin bundles. Every plugin
 - `gmail`: Gmail workflow foundation for inbox reading, organization, draft creation, and review-before-send behavior.
 - `google-calendar`: Google Calendar workflow foundation for agenda review, availability checks, meeting prep, and review-gated scheduling behavior.
 - `github`: GitHub workflow foundation for local Git, repositories, completed-issue discovery, full issue lifecycle, pull request reviews, releases, Actions jobs/artifacts, security alerts, notifications, stats, tags, semantic discovery, and approval-gated writes.
+- `linkedin`: LinkedIn profile setup, authenticated self-profile reads, user-supplied profile research briefs, and post draft review through a compliant local MCP server.
 
 ## Marketplace Expansion
 
-`.agents/plugins/marketplace.json` keeps these three first-party plugins local and adds upstream public marketplace entries as `git-subdir` sources pointing at `https://github.com/openai/plugins.git`.
+`.agents/plugins/marketplace.json` keeps these first-party plugins local and adds upstream public marketplace entries as `git-subdir` sources pointing at `https://github.com/openai/plugins.git`.
 
 Those remote entries make the broader Codex-style catalog discoverable without vendoring all plugin folders into this repo. Gilbert still only treats a plugin as runnable after one of its real routes is configured: native app install, MCP save/test, registry-backed MCP setup, or local skill import.

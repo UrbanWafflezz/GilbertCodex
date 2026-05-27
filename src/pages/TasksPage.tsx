@@ -8,12 +8,14 @@ import {
   Clock3,
   Copy,
   Edit3,
+  Folder,
   History,
   Inbox,
   Mail,
   Pause,
   Play,
   Plus,
+  Plug,
   RotateCcw,
   Search,
   ShieldCheck,
@@ -39,6 +41,7 @@ import {
   type ChatModelOption,
   type ModelProviderCatalogItem,
 } from "../lib/models";
+import { DEFAULT_PROJECT } from "../lib/chatUtils";
 import { formatDeviceTaskDateTime } from "../lib/localDateTime";
 import type {
   AutomationCapabilityId,
@@ -49,15 +52,20 @@ import type {
   AutomationTrigger,
 } from "../types/automation";
 import type { DiscordBridgeSettings } from "../types/discord";
+import type { McpServerState } from "../types/mcp";
+import type { ProjectSummary } from "../types/project";
 import type { ModelProviderId, ProviderSettings } from "../types/settings";
+import type { AppSkill, SkillRegistryState } from "../types/skills";
 
 type TasksTab = "inbox" | "automations" | "runs";
 type BuilderStep = "prompt" | "schedule" | "tools" | "autonomy" | "notify" | "review";
 
 interface TasksPageProps {
+  activeProjectName?: string;
   draft?: AutomationTaskDraft | null;
   discordSettings: DiscordBridgeSettings;
   globalPaused: boolean;
+  mcpServers?: McpServerState[];
   onAcknowledgeRun: (runId: string) => void;
   onBackToChat: () => void;
   onClearDraft?: () => void;
@@ -72,11 +80,14 @@ interface TasksPageProps {
   onSnoozeRun: (runId: string, minutes: number) => void;
   onUpdateTask: (taskId: string, draft: AutomationTaskDraft) => void;
   providerSettings: ProviderSettings;
+  projects: ProjectSummary[];
   runs: AutomationRun[];
+  skillRegistry?: SkillRegistryState;
   tasks: AutomationTask[];
 }
 
 const BUILDER_STEPS: BuilderStep[] = ["prompt", "schedule", "tools", "autonomy", "notify", "review"];
+const EMPTY_SKILL_REGISTRY: SkillRegistryState = { skills: [], updatedAt: "", version: 1 };
 
 const TEMPLATE_DRAFTS: Array<{ icon: typeof Bot; label: string; draft: AutomationTaskDraft }> = [
   {
@@ -132,9 +143,11 @@ const TEMPLATE_DRAFTS: Array<{ icon: typeof Bot; label: string; draft: Automatio
 ];
 
 export function TasksPage({
+  activeProjectName = DEFAULT_PROJECT,
   draft,
   discordSettings,
   globalPaused,
+  mcpServers = [],
   onAcknowledgeRun,
   onBackToChat,
   onClearDraft,
@@ -149,7 +162,9 @@ export function TasksPage({
   onSnoozeRun,
   onUpdateTask,
   providerSettings,
+  projects = [],
   runs,
+  skillRegistry = EMPTY_SKILL_REGISTRY,
   tasks,
 }: TasksPageProps) {
   const [activeTab, setActiveTab] = useState<TasksTab>("inbox");
@@ -171,25 +186,27 @@ export function TasksPage({
       return;
     }
 
-    setBuilderDraft(applyTaskModelDefault({
+    setBuilderDraft(applyTaskModelDefault(withTaskProjectDefault({
       ...TEMPLATE_DRAFTS[0].draft,
       ...draft,
       capabilityScope: {
         ...TEMPLATE_DRAFTS[0].draft.capabilityScope,
         ...draft.capabilityScope,
+        mcpServers: draft.capabilityScope?.mcpServers ?? TEMPLATE_DRAFTS[0].draft.capabilityScope?.mcpServers ?? [],
+        skills: draft.capabilityScope?.skills ?? TEMPLATE_DRAFTS[0].draft.capabilityScope?.skills ?? [],
       },
       notificationPolicy: {
         ...draft.notificationPolicy,
       },
-    }, providerSettings));
+    }, activeProjectName), providerSettings));
     setBuilderStep("prompt");
     setEditingTaskId(null);
     setBuilderOpen(true);
     setActiveTab("automations");
-  }, [draft, providerSettings]);
+  }, [activeProjectName, draft, providerSettings]);
 
   function openCreateBuilder(nextDraft: AutomationTaskDraft = TEMPLATE_DRAFTS[0].draft) {
-    setBuilderDraft(applyTaskModelDefault(nextDraft, providerSettings));
+    setBuilderDraft(applyTaskModelDefault(withTaskProjectDefault(nextDraft, activeProjectName), providerSettings));
     setBuilderStep("prompt");
     setEditingTaskId(null);
     setBuilderOpen(true);
@@ -203,6 +220,7 @@ export function TasksPage({
       model: task.model,
       notificationPolicy: task.notificationPolicy,
       prompt: task.prompt,
+      projectName: task.projectName ?? DEFAULT_PROJECT,
       provider: task.provider,
       runLimits: task.runLimits,
       sourceChatId: task.sourceChatId,
@@ -225,6 +243,7 @@ export function TasksPage({
   function saveBuilder(status: "enabled" | "paused") {
     const nextDraft: AutomationTaskDraft = {
       ...applyTaskModelDefault(builderDraft, providerSettings),
+      projectName: builderDraft.projectName ?? activeProjectName,
       status,
     };
 
@@ -319,9 +338,13 @@ export function TasksPage({
 
             {builderOpen ? (
               <TaskBuilder
+                activeProjectName={activeProjectName}
                 draft={builderDraft}
                 discordSettings={discordSettings}
                 editing={Boolean(editingTaskId)}
+                mcpServers={mcpServers}
+                projects={projects}
+                skillRegistry={skillRegistry}
                 step={builderStep}
                 onCancel={closeBuilder}
                 onDraftChange={setBuilderDraft}
@@ -343,6 +366,7 @@ export function TasksPage({
                     lastRun={lastRun}
                     running={taskRuns.some((run) => run.status === "running")}
                     task={task}
+                    mcpServers={mcpServers}
                     onDeleteTask={onDeleteTask}
                     onDuplicateTask={onDuplicateTask}
                     onEditTask={openEditBuilder}
@@ -376,28 +400,53 @@ export function TasksPage({
 }
 
 function TaskBuilder({
+  activeProjectName,
   draft,
   discordSettings,
   editing,
+  mcpServers,
   onCancel,
   onDraftChange,
   providerSettings,
+  projects,
+  skillRegistry,
   onSave,
   onStepChange,
   step,
 }: {
+  activeProjectName: string;
   draft: AutomationTaskDraft;
   discordSettings: DiscordBridgeSettings;
   editing: boolean;
+  mcpServers: McpServerState[];
   onCancel: () => void;
   onDraftChange: (draft: AutomationTaskDraft) => void;
   providerSettings: ProviderSettings;
+  projects: ProjectSummary[];
+  skillRegistry: SkillRegistryState;
   onSave: (status: "enabled" | "paused") => void;
   onStepChange: (step: BuilderStep) => void;
   step: BuilderStep;
 }) {
   const previewTask = createAutomationTaskFromDraft(draft);
   const capabilities = draft.capabilityScope?.capabilities ?? [];
+  const selectedMcpServers = draft.capabilityScope?.mcpServers ?? [];
+  const selectedSkills = draft.capabilityScope?.skills ?? [];
+  const installedMcpServers = getInstalledMcpToolServers(mcpServers);
+  const installedSkills = getInstalledTaskSkills(skillRegistry);
+  const [toolSearch, setToolSearch] = useState("");
+  const normalizedToolSearch = normalizeToolSearch(toolSearch);
+  const visibleCapabilities = AUTOMATION_CAPABILITIES.filter((capability) => matchesCapabilitySearch(capability, normalizedToolSearch));
+  const visibleSkills = installedSkills.filter((skill) => matchesSkillSearch(skill, normalizedToolSearch));
+  const visibleMcpServers = installedMcpServers.filter((server) => matchesMcpServerSearch(server, normalizedToolSearch));
+  const visibleCapabilityIds = visibleCapabilities.map((capability) => capability.id);
+  const visibleMcpServerIds = new Set(visibleMcpServers.map((server) => server.id));
+  const selectedVisibleCapabilityCount = visibleCapabilityIds.filter((capabilityId) => capabilities.includes(capabilityId)).length;
+  const selectedVisibleSkillCount = visibleSkills.filter((skill) => isSkillSelected(selectedSkills, skill.id)).length;
+  const selectedVisibleMcpServerCount = visibleMcpServers.filter((server) => isMcpServerSelected(selectedMcpServers, server.id)).length;
+  const allCapabilitiesSelected = visibleCapabilityIds.length > 0 && visibleCapabilityIds.every((capabilityId) => capabilities.includes(capabilityId));
+  const allSkillsSelected = visibleSkills.length > 0 && visibleSkills.every((skill) => isSkillSelected(selectedSkills, skill.id));
+  const allMcpServersSelected = visibleMcpServers.length > 0 && visibleMcpServers.every((server) => isMcpServerSelected(selectedMcpServers, server.id));
   const selectedProvider = resolveTaskModelProvider(draft, providerSettings);
   const modelOptions = selectedProvider ? getTaskModelOptions(providerSettings, selectedProvider.id, draft.model) : [];
   const selectedModel = selectedProvider ? resolveTaskModelValue(draft, providerSettings, selectedProvider.id, modelOptions) : "";
@@ -410,15 +459,73 @@ function TaskBuilder({
     onDraftChange({ ...draft, ...next });
   }
 
+  function patchCapabilityScope(next: Partial<NonNullable<AutomationTaskDraft["capabilityScope"]>>) {
+    patch({
+      capabilityScope: {
+        autonomyLevel: draft.capabilityScope?.autonomyLevel ?? "review",
+        capabilities,
+        mcpServers: selectedMcpServers,
+        skills: selectedSkills,
+        ...next,
+      },
+    });
+  }
+
   function patchCapability(capabilityId: AutomationCapabilityId, enabled: boolean) {
     const nextCapabilities = enabled
       ? [...new Set([...capabilities, capabilityId])]
       : capabilities.filter((id) => id !== capabilityId);
-    patch({
-      capabilityScope: {
-        autonomyLevel: draft.capabilityScope?.autonomyLevel ?? "review",
-        capabilities: nextCapabilities,
-      },
+    patchCapabilityScope({ capabilities: nextCapabilities });
+  }
+
+  function setAllCapabilities(enabled: boolean) {
+    patchCapabilityScope({
+      capabilities: enabled
+        ? [...new Set([...capabilities, ...visibleCapabilityIds])]
+        : capabilities.filter((capabilityId) => !visibleCapabilityIds.includes(capabilityId)),
+    });
+  }
+
+  function patchMcpServer(server: McpServerState, enabled: boolean) {
+    const nextMcpServers = selectedMcpServers
+      .filter((scope) => scope.serverId !== server.id)
+      .concat(enabled ? [createMcpServerScope(server)] : [])
+      .sort((left, right) => left.serverName.localeCompare(right.serverName));
+
+    patchCapabilityScope({ mcpServers: nextMcpServers });
+  }
+
+  function patchSkill(skill: AppSkill, enabled: boolean) {
+    const nextSkills = enabled
+      ? [
+          ...selectedSkills.filter((scope) => scope.id !== skill.id),
+          createTaskSkillScope(skill),
+        ]
+      : selectedSkills.filter((scope) => scope.id !== skill.id);
+
+    patchCapabilityScope({ skills: nextSkills.sort((left, right) => left.name.localeCompare(right.name)) });
+  }
+
+  function setAllSkills(enabled: boolean) {
+    const visibleSkillIds = new Set(visibleSkills.map((skill) => skill.id));
+    patchCapabilityScope({
+      skills: enabled
+        ? [
+            ...selectedSkills.filter((scope) => !visibleSkillIds.has(scope.id)),
+            ...visibleSkills.map(createTaskSkillScope),
+          ].sort((left, right) => left.name.localeCompare(right.name))
+        : selectedSkills.filter((scope) => !visibleSkillIds.has(scope.id)),
+    });
+  }
+
+  function setAllMcpServers(enabled: boolean) {
+    patchCapabilityScope({
+      mcpServers: enabled
+        ? [
+            ...selectedMcpServers.filter((scope) => !visibleMcpServerIds.has(scope.serverId)),
+            ...visibleMcpServers.map(createMcpServerScope),
+          ].sort((left, right) => left.serverName.localeCompare(right.serverName))
+        : selectedMcpServers.filter((scope) => !visibleMcpServerIds.has(scope.serverId)),
     });
   }
 
@@ -459,6 +566,12 @@ function TaskBuilder({
                 onChange={(event) => patch({ prompt: event.target.value })}
               />
             </label>
+            <ProjectField
+              activeProjectName={activeProjectName}
+              draft={draft}
+              projects={projects}
+              onDraftChange={patch}
+            />
             <ModelFields
               modelOptions={modelOptions}
               providerSettings={providerSettings}
@@ -474,20 +587,146 @@ function TaskBuilder({
         ) : null}
 
         {step === "tools" ? (
-          <div className="tasks-capability-grid">
-            {AUTOMATION_CAPABILITIES.map((capability) => (
-              <label key={capability.id} className="tasks-capability-option" data-risk={capability.risk}>
-                <input
-                  type="checkbox"
-                  checked={capabilities.includes(capability.id)}
-                  onChange={(event) => patchCapability(capability.id, event.target.checked)}
+          <div className="tasks-tools-panel">
+            <label className="tasks-tool-search">
+              <Search size={16} aria-hidden="true" />
+              <input
+                autoComplete="off"
+                placeholder="Search tools, skills, plugins"
+                value={toolSearch}
+                onChange={(event) => setToolSearch(event.target.value)}
+              />
+            </label>
+
+            <section className="tasks-tool-section" aria-label="Built-in task tools">
+              <div className="tasks-tool-section-header">
+                <div className="tasks-tool-section-title">
+                  <ShieldCheck size={16} aria-hidden="true" />
+                  <span>
+                    <strong>Built-in tools</strong>
+                    <small>{capabilities.length} selected - {visibleCapabilities.length} shown</small>
+                  </span>
+                </div>
+                <ToolBulkActions
+                  canClear={selectedVisibleCapabilityCount > 0}
+                  canSelectAll={!allCapabilitiesSelected && visibleCapabilityIds.length > 0}
+                  onClear={() => setAllCapabilities(false)}
+                  onSelectAll={() => setAllCapabilities(true)}
                 />
-                <span>
-                  <strong>{capability.label}</strong>
-                  <small>{capability.description}</small>
-                </span>
-              </label>
-            ))}
+              </div>
+              {visibleCapabilities.length === 0 ? (
+                <p className="tasks-inline-warning">
+                  <Search size={14} aria-hidden="true" />
+                  <span>No matching built-in tools.</span>
+                </p>
+              ) : (
+                <div className="tasks-capability-grid">
+                {visibleCapabilities.map((capability) => (
+                  <label key={capability.id} className="tasks-capability-option" data-risk={capability.risk}>
+                    <input
+                      type="checkbox"
+                      checked={capabilities.includes(capability.id)}
+                      onChange={(event) => patchCapability(capability.id, event.target.checked)}
+                    />
+                    <span>
+                      <strong>{capability.label}</strong>
+                      <small>{capability.description}</small>
+                    </span>
+                  </label>
+                ))}
+                </div>
+              )}
+            </section>
+
+            <section className="tasks-tool-section" aria-label="Installed skills">
+              <div className="tasks-tool-section-header">
+                <div className="tasks-tool-section-title">
+                  <Workflow size={16} aria-hidden="true" />
+                  <span>
+                    <strong>Installed skills</strong>
+                    <small>{selectedSkills.length} selected - {visibleSkills.length} shown</small>
+                  </span>
+                </div>
+                <ToolBulkActions
+                  canClear={selectedVisibleSkillCount > 0}
+                  canSelectAll={!allSkillsSelected && visibleSkills.length > 0}
+                  onClear={() => setAllSkills(false)}
+                  onSelectAll={() => setAllSkills(true)}
+                />
+              </div>
+              {installedSkills.length === 0 ? (
+                <p className="tasks-inline-warning">
+                  <AlertTriangle size={14} aria-hidden="true" />
+                  <span>No enabled installed skills are available for task runs.</span>
+                </p>
+              ) : visibleSkills.length === 0 ? (
+                <p className="tasks-inline-warning">
+                  <Search size={14} aria-hidden="true" />
+                  <span>No matching installed skills.</span>
+                </p>
+              ) : (
+                <div className="tasks-skill-grid">
+                  {visibleSkills.map((skill) => (
+                    <label key={skill.id} className="tasks-skill-option">
+                      <input
+                        type="checkbox"
+                        checked={isSkillSelected(selectedSkills, skill.id)}
+                        onChange={(event) => patchSkill(skill, event.target.checked)}
+                      />
+                      <span>
+                        <strong>{skill.name}</strong>
+                        <small>{skill.trigger} - {skill.description}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="tasks-tool-section" aria-label="MCP server tools">
+              <div className="tasks-tool-section-header">
+                <div className="tasks-tool-section-title">
+                  <Plug size={16} aria-hidden="true" />
+                  <span>
+                    <strong>MCP plugins</strong>
+                    <small>{selectedMcpServers.length} selected - {visibleMcpServers.length} shown</small>
+                  </span>
+                </div>
+                <ToolBulkActions
+                  canClear={selectedVisibleMcpServerCount > 0}
+                  canSelectAll={!allMcpServersSelected && visibleMcpServers.length > 0}
+                  onClear={() => setAllMcpServers(false)}
+                  onSelectAll={() => setAllMcpServers(true)}
+                />
+              </div>
+              {installedMcpServers.length === 0 ? (
+                <p className="tasks-inline-warning">
+                  <AlertTriangle size={14} aria-hidden="true" />
+                  <span>No enabled MCP servers have tool schemas ready. Installed skills can still guide task runs.</span>
+                </p>
+              ) : visibleMcpServers.length === 0 ? (
+                <p className="tasks-inline-warning">
+                  <Search size={14} aria-hidden="true" />
+                  <span>No matching MCP plugins.</span>
+                </p>
+              ) : (
+                <div className="tasks-mcp-server-grid">
+                  {visibleMcpServers.map((server) => (
+                    <label key={server.id} className="tasks-mcp-server-option">
+                      <input
+                        type="checkbox"
+                        checked={isMcpServerSelected(selectedMcpServers, server.id)}
+                        onChange={(event) => patchMcpServer(server, event.target.checked)}
+                      />
+                      <span>
+                        <strong>{server.name}</strong>
+                        <small>{formatMcpServerToolSummary(server)}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
         ) : null}
 
@@ -498,7 +737,7 @@ function TaskBuilder({
                 type="radio"
                 name="task-autonomy"
                 checked={(draft.capabilityScope?.autonomyLevel ?? "review") === "review"}
-                onChange={() => patch({ capabilityScope: { capabilities, autonomyLevel: "review" } })}
+                onChange={() => patchCapabilityScope({ autonomyLevel: "review" })}
               />
               <span>
                 <strong>Review first</strong>
@@ -510,7 +749,7 @@ function TaskBuilder({
                 type="radio"
                 name="task-autonomy"
                 checked={draft.capabilityScope?.autonomyLevel === "scoped"}
-                onChange={() => patch({ capabilityScope: { capabilities, autonomyLevel: "scoped" } })}
+                onChange={() => patchCapabilityScope({ autonomyLevel: "scoped" })}
               />
               <span>
                 <strong>Scoped autonomy</strong>
@@ -532,12 +771,16 @@ function TaskBuilder({
                 <dd>{formatTrigger(previewTask.trigger)}</dd>
               </div>
               <div>
+                <dt>Project</dt>
+                <dd>{previewTask.projectName ?? DEFAULT_PROJECT}</dd>
+              </div>
+              <div>
                 <dt>Model</dt>
                 <dd>{formatTaskModel(previewTask)}</dd>
               </div>
               <div>
                 <dt>Tools</dt>
-                <dd>{formatCapabilityList(previewTask.capabilityScope.capabilities)}</dd>
+                <dd>{formatCapabilityList(previewTask.capabilityScope.capabilities, previewTask.capabilityScope.mcpServers, previewTask.capabilityScope.skills)}</dd>
               </div>
               <div>
                 <dt>Autonomy</dt>
@@ -566,6 +809,31 @@ function TaskBuilder({
         </div>
       </footer>
     </section>
+  );
+}
+
+function ToolBulkActions({
+  canClear,
+  canSelectAll,
+  onClear,
+  onSelectAll,
+}: {
+  canClear: boolean;
+  canSelectAll: boolean;
+  onClear: () => void;
+  onSelectAll: () => void;
+}) {
+  return (
+    <div className="tasks-tool-actions">
+      <button className="tasks-mini-button" type="button" disabled={!canSelectAll} onClick={onSelectAll}>
+        <Check size={14} aria-hidden="true" />
+        <span>Select all</span>
+      </button>
+      <button className="tasks-mini-button" type="button" disabled={!canClear} onClick={onClear}>
+        <X size={14} aria-hidden="true" />
+        <span>Clear</span>
+      </button>
+    </div>
   );
 }
 
@@ -638,6 +906,34 @@ function ModelFields({
         </select>
       </label>
     </div>
+  );
+}
+
+function ProjectField({
+  activeProjectName,
+  draft,
+  onDraftChange,
+  projects,
+}: {
+  activeProjectName: string;
+  draft: AutomationTaskDraft;
+  onDraftChange: (draft: AutomationTaskDraft) => void;
+  projects: ProjectSummary[];
+}) {
+  const selectedProject = draft.projectName?.trim() || activeProjectName || DEFAULT_PROJECT;
+  const projectOptions = getTaskProjectOptions(projects, activeProjectName, selectedProject);
+
+  return (
+    <label>
+      <span>Project</span>
+      <select value={selectedProject} onChange={(event) => onDraftChange({ projectName: event.target.value })}>
+        {projectOptions.map((projectName) => (
+          <option key={projectName} value={projectName}>
+            {projectName}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -747,6 +1043,7 @@ function NotifyFields({
 
 function TaskCard({
   lastRun,
+  mcpServers,
   onDeleteTask,
   onDuplicateTask,
   onEditTask,
@@ -757,6 +1054,7 @@ function TaskCard({
   task,
 }: {
   lastRun?: AutomationRun;
+  mcpServers: McpServerState[];
   onDeleteTask: (taskId: string) => void;
   onDuplicateTask: (taskId: string) => void;
   onEditTask: (task: AutomationTask) => void;
@@ -767,6 +1065,7 @@ function TaskCard({
   task: AutomationTask;
 }) {
   const paused = task.status !== "enabled";
+  const capabilityLabels = getTaskCapabilityLabels(task, mcpServers);
 
   return (
     <article className="tasks-task-card" data-status={task.status}>
@@ -780,13 +1079,14 @@ function TaskCard({
       <p>{task.lastResult || lastRun?.finalSummary || task.prompt}</p>
       <div className="tasks-card-meta">
         <span><Clock3 size={14} aria-hidden="true" />{task.nextRunAt ? formatDate(task.nextRunAt) : "Manual"}</span>
+        <span><Folder size={14} aria-hidden="true" />{task.projectName ?? DEFAULT_PROJECT}</span>
         <span><Bot size={14} aria-hidden="true" />{formatTaskModel(task)}</span>
         <span><ShieldCheck size={14} aria-hidden="true" />{task.capabilityScope.autonomyLevel === "scoped" ? "Scoped" : "Review"}</span>
         <span><Bell size={14} aria-hidden="true" />{formatNotify(task.notificationPolicy)}</span>
       </div>
       <div className="tasks-card-capabilities">
-        {task.capabilityScope.capabilities.length === 0 ? <span>Plain agent</span> : task.capabilityScope.capabilities.map((id) => (
-          <span key={id}>{getAutomationCapabilityDefinition(id)?.label ?? id}</span>
+        {capabilityLabels.length === 0 ? <span>Plain agent</span> : capabilityLabels.map((label) => (
+          <span key={label}>{label}</span>
         ))}
       </div>
       <footer>
@@ -899,6 +1199,13 @@ function applyTaskModelDefault(draft: AutomationTaskDraft, providerSettings: Pro
   };
 }
 
+function withTaskProjectDefault(draft: AutomationTaskDraft, activeProjectName: string): AutomationTaskDraft {
+  return {
+    ...draft,
+    projectName: draft.projectName?.trim() || activeProjectName || DEFAULT_PROJECT,
+  };
+}
+
 function isTaskDraftReady(draft: AutomationTaskDraft, providerSettings: ProviderSettings) {
   const provider = resolveTaskModelProvider(draft, providerSettings);
   const modelOptions = provider ? getTaskModelOptions(providerSettings, provider.id, draft.model) : [];
@@ -1003,10 +1310,151 @@ function formatStepLabel(step: BuilderStep) {
   return step[0].toUpperCase() + step.slice(1);
 }
 
-function formatCapabilityList(capabilities: AutomationCapabilityId[]) {
-  return capabilities.length > 0
-    ? capabilities.map((id) => getAutomationCapabilityDefinition(id)?.label ?? id).join(", ")
-    : "Plain agent";
+function getTaskProjectOptions(projects: ProjectSummary[], activeProjectName: string, selectedProjectName: string) {
+  const options: string[] = [];
+  const add = (value?: string | null) => {
+    const projectName = value?.trim() || DEFAULT_PROJECT;
+    if (!options.some((option) => option.toLowerCase() === projectName.toLowerCase())) {
+      options.push(projectName);
+    }
+  };
+
+  add(DEFAULT_PROJECT);
+  add(activeProjectName);
+  projects.forEach((project) => add(project.name));
+  add(selectedProjectName);
+  return options;
+}
+
+function getInstalledMcpToolServers(servers: McpServerState[]) {
+  return servers
+    .filter((server) => server.enabled && server.tools.length > 0)
+    .map((server) => ({
+      ...server,
+      tools: [...server.tools].sort((left, right) => left.name.localeCompare(right.name)),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function getInstalledTaskSkills(skillRegistry: SkillRegistryState) {
+  return skillRegistry.skills
+    .filter((skill) => skill.installed && skill.enabled)
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function createTaskSkillScope(skill: AppSkill) {
+  return {
+    id: skill.id,
+    name: skill.name,
+    trigger: skill.trigger,
+  };
+}
+
+function createMcpServerScope(server: McpServerState) {
+  return {
+    serverId: server.id,
+    serverName: server.name,
+    toolNames: server.tools.map((tool) => tool.name),
+  };
+}
+
+function isMcpServerSelected(scopes: NonNullable<AutomationTaskDraft["capabilityScope"]>["mcpServers"], serverId: string) {
+  return scopes?.some((scope) => scope.serverId === serverId && scope.toolNames.length > 0) === true;
+}
+
+function isSkillSelected(scopes: NonNullable<AutomationTaskDraft["capabilityScope"]>["skills"], skillId: string) {
+  return scopes?.some((scope) => scope.id === skillId) === true;
+}
+
+function normalizeToolSearch(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function matchesCapabilitySearch(capability: (typeof AUTOMATION_CAPABILITIES)[number], query: string) {
+  return matchesToolSearch(query, [
+    capability.id,
+    capability.label,
+    capability.description,
+    capability.promptHint,
+    capability.risk,
+  ]);
+}
+
+function matchesSkillSearch(skill: AppSkill, query: string) {
+  return matchesToolSearch(query, [
+    skill.id,
+    skill.name,
+    skill.trigger,
+    skill.description,
+    skill.category,
+    skill.source,
+    ...skill.tags,
+  ]);
+}
+
+function matchesMcpServerSearch(server: McpServerState, query: string) {
+  return matchesToolSearch(query, [
+    server.id,
+    server.name,
+    server.serverName,
+    server.serverVersion,
+    server.command,
+    server.endpoint,
+    server.transport,
+    ...server.tools.flatMap((tool) => [tool.name, formatMcpToolLabel(tool.name), tool.description]),
+  ]);
+}
+
+function matchesToolSearch(query: string, values: Array<string | undefined>) {
+  if (!query) {
+    return true;
+  }
+
+  return values.some((value) => value?.toLowerCase().includes(query));
+}
+
+function formatMcpToolLabel(toolName: string) {
+  return toolName
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim() || toolName;
+}
+
+function formatMcpServerToolSummary(server: McpServerState) {
+  const previewTools = server.tools.slice(0, 3).map((tool) => formatMcpToolLabel(tool.name)).join(", ");
+  const hiddenCount = server.tools.length - 3;
+  const preview = previewTools ? ` - ${previewTools}${hiddenCount > 0 ? ` +${hiddenCount}` : ""}` : "";
+  return `${server.tools.length} MCP tool${server.tools.length === 1 ? "" : "s"}${preview}`;
+}
+
+function getTaskCapabilityLabels(task: AutomationTask, installedMcpServers: McpServerState[] = []) {
+  const labels = task.capabilityScope.capabilities.map((id) => getAutomationCapabilityDefinition(id)?.label ?? id);
+  const installedServerIds = new Set(installedMcpServers.filter((server) => server.enabled).map((server) => server.id));
+  const mcpLabels = task.capabilityScope.mcpServers
+    .filter((server) => installedServerIds.has(server.serverId))
+    .map((server) => server.toolNames.length === 1
+      ? `${server.serverName}: ${formatMcpToolLabel(server.toolNames[0] ?? "")}`
+      : `${server.serverName}: ${server.toolNames.length} MCP tools`);
+
+  const skillLabels = task.capabilityScope.skills.map((skill) => `${skill.trigger} ${skill.name}`);
+
+  return [...labels, ...skillLabels, ...mcpLabels];
+}
+
+function formatCapabilityList(
+  capabilities: AutomationCapabilityId[],
+  mcpServers: AutomationTask["capabilityScope"]["mcpServers"] = [],
+  skills: AutomationTask["capabilityScope"]["skills"] = [],
+) {
+  const labels = [
+    ...capabilities.map((id) => getAutomationCapabilityDefinition(id)?.label ?? id),
+    ...skills.map((skill) => `${skill.trigger} ${skill.name}`),
+    ...mcpServers.map((server) => server.toolNames.length === 1
+      ? `${server.serverName}: ${formatMcpToolLabel(server.toolNames[0] ?? "")}`
+      : `${server.serverName}: ${server.toolNames.length} MCP tools`),
+  ];
+
+  return labels.length > 0 ? labels.join(", ") : "Plain agent";
 }
 
 function formatNotify(policy: AutomationNotificationPolicy) {

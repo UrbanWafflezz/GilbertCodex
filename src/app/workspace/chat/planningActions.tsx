@@ -195,6 +195,7 @@ export async function handleSubmitPlanningInput(deps: WorkspaceRuntimeDeps, mess
                             ...message,
                             content: snapshot.content ?? message.content,
                             progress: withWebSearchProgress(message.webSearch, snapshot.progress),
+                            reasoning: snapshot.reasoning ?? message.reasoning,
                           })
                         : message,
                     ),
@@ -235,12 +236,7 @@ export async function handleSubmitPlanningInput(deps: WorkspaceRuntimeDeps, mess
                               }
                             : undefined,
                           progress: withWebSearchProgress(message.webSearch, assistantResponse.progress),
-                          thinking: message.thinking
-                            ? {
-                                ...message.thinking,
-                                completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-                              }
-                            : undefined,
+                          reasoning: assistantResponse.reasoning ?? message.reasoning,
                         })
                       : message,
                   ),
@@ -292,12 +288,6 @@ export async function handleSubmitPlanningInput(deps: WorkspaceRuntimeDeps, mess
                           content: errorContent,
                           isStreaming: false,
                           status: "error",
-                          thinking: message.thinking
-                            ? {
-                                ...message.thinking,
-                                completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-                              }
-                            : undefined,
                         }
                       : message,
                   ),
@@ -359,12 +349,6 @@ export async function handleRequestPlanRevision(deps: WorkspaceRuntimeDeps, mess
         startedAt: now,
       },
       progress: createPlanningProgress("drafting"),
-      thinking: toolSettings.thinking
-        ? {
-            effort: "high",
-            startedAt: now,
-          }
-        : undefined,
     };
     const agentRun = createAgentRunForMessage({
       chatId: currentChat.id,
@@ -479,6 +463,7 @@ export async function handleRequestPlanRevision(deps: WorkspaceRuntimeDeps, mess
             ...message,
             content: snapshot.content ?? message.content,
             progress: withWebSearchProgress(message.webSearch, snapshot.progress),
+            reasoning: snapshot.reasoning ?? message.reasoning,
           }));
         },
       });
@@ -512,12 +497,7 @@ export async function handleRequestPlanRevision(deps: WorkspaceRuntimeDeps, mess
                               }
                             : undefined,
                           progress: withWebSearchProgress(message.webSearch, assistantResponse.progress),
-                          thinking: message.thinking
-                            ? {
-                                ...message.thinking,
-                                completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-                              }
-                            : undefined,
+                          reasoning: assistantResponse.reasoning ?? message.reasoning,
                         })
                       : message,
                   ),
@@ -551,12 +531,6 @@ export async function handleRequestPlanRevision(deps: WorkspaceRuntimeDeps, mess
                           content: errorContent,
                           isStreaming: false,
                           status: "error",
-                          thinking: message.thinking
-                            ? {
-                                ...message.thinking,
-                                completedAt: message.thinking.completedAt ?? new Date().toISOString(),
-                              }
-                            : undefined,
                         }
                       : message,
                   ),
