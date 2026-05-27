@@ -898,7 +898,7 @@ function createInlineBatchFileGroup(toolCall: ChatToolCall, fileItems: RunFileIt
   const extraCount = Math.max(0, fileItems.length - 1);
   const filePreview = firstFile ? `${firstFile}${extraCount > 0 ? ` and ${extraCount} more` : ""}` : "";
   const diffPreview = changedFiles.length > 0 && (additions > 0 || deletions > 0)
-    ? `+${formatNumber(additions)} / -${formatNumber(deletions)}`
+    ? `+${formatNumber(additions)} -${formatNumber(deletions)}`
     : "";
   const pendingCount = live ? Math.max(0, totalCount - processedCount) : 0;
   const outcomeDetail = [
@@ -928,7 +928,7 @@ function createInlineFileGroup(key: string, files: RunFileItem[], label: string,
   const extraCount = Math.max(0, files.length - 1);
   const filePreview = firstFile ? `${firstFile}${extraCount > 0 ? ` +${extraCount}` : ""}` : "";
   const diffPreview = changedFiles.length > 0 && (additions > 0 || deletions > 0)
-    ? `+${formatNumber(additions)} / -${formatNumber(deletions)}`
+    ? `+${formatNumber(additions)} -${formatNumber(deletions)}`
     : "";
   const detail = detailOverride || [filePreview, diffPreview].filter(Boolean).join(" ");
 
@@ -1668,7 +1668,7 @@ function formatActivityPath(path: string): string {
 function cleanInlineText(value: string) {
   return value
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/[*_`~]/g, "")
+    .replace(/[*`~]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }

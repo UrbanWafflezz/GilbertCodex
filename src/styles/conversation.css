@@ -864,15 +864,19 @@
 }
 
 .assistant-run-inline-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  display: grid;
+  gap: 4px;
   min-width: 0;
   padding-left: 1px;
 }
 
-.assistant-run-inline-files span,
-.assistant-run-inline-files em,
+.assistant-run-inline-mcp {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding-left: 1px;
+}
+
 .assistant-run-inline-sources a,
 .assistant-run-inline-code-list code {
   display: inline-flex;
@@ -890,50 +894,100 @@
   text-decoration: none;
 }
 
-.assistant-run-inline-files span {
-  position: relative;
+.assistant-run-inline-file-line,
+.assistant-run-inline-mcp-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content) auto auto;
+  align-items: baseline;
+  justify-content: start;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text-dim);
+  font-size: var(--font-size-13, 13px);
+  line-height: 1.45;
 }
 
-.assistant-run-inline-files span[data-action="edited"],
-.assistant-run-inline-files span[data-action="wrote"],
-.assistant-run-inline-files span[data-action="created"] {
-  border-color: color-mix(in srgb, var(--green) 30%, var(--line));
-  background: color-mix(in srgb, var(--green) 9%, transparent);
+.assistant-run-inline-file-line[data-action="more"],
+.assistant-run-inline-mcp-line[data-status="more"] {
+  color: var(--text-dim);
+  font-size: var(--font-size-12, 12px);
 }
 
-.assistant-run-inline-files span[data-action="read"] {
-  border-color: color-mix(in srgb, var(--blue) 28%, var(--line));
-  background: color-mix(in srgb, var(--blue-soft) 34%, transparent);
+.assistant-run-inline-file-line em,
+.assistant-run-inline-mcp-line em {
+  color: color-mix(in srgb, var(--text) 72%, var(--text-dim) 28%);
+  font-style: normal;
+  font-weight: 680;
 }
 
-.assistant-run-inline-files span[data-action="searched"],
-.assistant-run-inline-files span[data-action="checked"],
-.assistant-run-inline-files span[data-action="unchanged"] {
-  border-color: color-mix(in srgb, var(--violet) 22%, var(--line));
-  background: color-mix(in srgb, var(--violet-soft) 16%, transparent);
+.assistant-run-inline-file-line[data-action="created"] em,
+.assistant-run-inline-file-line[data-action="wrote"] em,
+.assistant-run-inline-file-line[data-action="edited"] em,
+.assistant-run-inline-file-line[data-action="copied"] em,
+.assistant-run-inline-file-line[data-action="moved"] em {
+  color: color-mix(in srgb, var(--green) 72%, var(--text) 28%);
 }
 
-.assistant-run-inline-files span[data-action="deleted"],
-.assistant-run-inline-files span[data-action="skipped"] {
-  border-color: color-mix(in srgb, var(--red) 30%, var(--line));
-  background: color-mix(in srgb, var(--red) 8%, transparent);
+.assistant-run-inline-file-line[data-action="deleted"] em,
+.assistant-run-inline-file-line[data-action="skipped"] em,
+.assistant-run-inline-mcp-line[data-status="error"] em {
+  color: color-mix(in srgb, var(--red) 76%, var(--text) 24%);
 }
 
-.assistant-run-inline-files b {
+.assistant-run-inline-file-line b,
+.assistant-run-inline-mcp-line b {
   overflow: hidden;
-  color: color-mix(in srgb, var(--text) 82%, var(--blue) 18%);
+  color: color-mix(in srgb, var(--blue) 72%, var(--text) 28%);
   font-family: var(--font-mono);
-  font-size: var(--font-size-11-7, 11.7px);
+  font-size: var(--font-size-13, 13px);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.assistant-run-inline-files small {
-  flex: 0 0 auto;
-  color: color-mix(in srgb, var(--green) 70%, var(--text-dim));
+.assistant-run-inline-file-line small,
+.assistant-run-inline-mcp-line small {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-dim);
   font-family: var(--font-mono);
-  font-weight: 720;
+  font-size: var(--font-size-12, 12px);
+  font-weight: 700;
+}
+
+.assistant-run-inline-file-line small i {
+  font-style: normal;
+}
+
+.assistant-run-inline-file-line small i[data-kind="add"] {
+  color: color-mix(in srgb, var(--green) 82%, var(--text) 18%);
+}
+
+.assistant-run-inline-file-line small i[data-kind="delete"] {
+  color: color-mix(in srgb, var(--red) 82%, var(--text) 18%);
+}
+
+.assistant-run-inline-file-state {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--blue) 74%, var(--text-dim) 26%);
+  transform: translateY(-1px);
+}
+
+.assistant-run-inline-file-line[data-status="active"] .assistant-run-inline-file-state,
+.assistant-run-inline-mcp-line[data-status="active"] .assistant-run-inline-file-state {
+  background: var(--blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 16%, transparent);
+}
+
+.assistant-run-inline-file-line[data-status="error"] .assistant-run-inline-file-state,
+.assistant-run-inline-mcp-line[data-status="error"] .assistant-run-inline-file-state {
+  background: var(--red);
 }
 
 .assistant-run-inline-code-list,
@@ -1179,6 +1233,7 @@
 .assistant-run-terminal-list,
 .assistant-run-browser-list,
 .assistant-run-source-list,
+.assistant-run-mcp-list,
 .assistant-run-approval-list {
   display: grid;
   gap: 6px;
@@ -1187,6 +1242,7 @@
 .assistant-run-file-row,
 .assistant-run-browser-row,
 .assistant-run-source-row,
+.assistant-run-mcp-row,
 .assistant-run-approval-card {
   min-width: 0;
   border: 1px solid color-mix(in srgb, var(--line) 48%, transparent);
@@ -1270,7 +1326,8 @@
 }
 
 .assistant-run-browser-row,
-.assistant-run-source-row {
+.assistant-run-source-row,
+.assistant-run-mcp-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -1282,6 +1339,7 @@
 
 .assistant-run-browser-row span,
 .assistant-run-source-row span:not(.assistant-run-source-index),
+.assistant-run-mcp-row span,
 .assistant-run-approval-card > div {
   display: grid;
   min-width: 0;
@@ -1290,6 +1348,7 @@
 
 .assistant-run-browser-row strong,
 .assistant-run-source-row strong,
+.assistant-run-mcp-row strong,
 .assistant-run-approval-card strong {
   min-width: 0;
   overflow: hidden;
@@ -1301,6 +1360,7 @@
 
 .assistant-run-browser-row small,
 .assistant-run-source-row small,
+.assistant-run-mcp-row small,
 .assistant-run-approval-card small {
   min-width: 0;
   overflow: hidden;
@@ -1308,6 +1368,25 @@
   font-size: var(--font-size-11, 11px);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.assistant-run-mcp-row b {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--blue) 72%, var(--text) 28%);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-11-5, 11.5px);
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-run-mcp-row[data-status="active"] strong {
+  color: var(--blue);
+}
+
+.assistant-run-mcp-row[data-status="error"] strong {
+  color: var(--red);
 }
 
 .assistant-run-source-row {

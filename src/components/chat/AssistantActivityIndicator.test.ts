@@ -117,6 +117,46 @@ describe("AssistantWorkTrace", () => {
     expect(html).toContain("aria-expanded=\"true\"");
   });
 
+  it("shows file creation deltas and MCP calls in the expanded work ledger", () => {
+    const message = assistantMessage({
+      isStreaming: true,
+      reasoning: "I am creating the site files and calling the connected deployment server.",
+      streamTiming: {
+        requestStartedAt: "2026-05-27T12:00:00.000Z",
+      },
+      toolCalls: [
+        {
+          fileChanges: [{ additions: 146, deletions: 0, kind: "create", path: "src/App.jsx" }],
+          id: "tool-file",
+          label: "Write file",
+          status: "complete",
+          toolId: "files_write",
+        },
+        {
+          id: "tool-mcp",
+          input: JSON.stringify({ server: "firebase", tool: "firebase_deploy" }),
+          label: "MCP firebase_deploy",
+          status: "complete",
+          toolId: "mcp_firebase_deploy",
+        },
+      ],
+    });
+    const html = renderToStaticMarkup(createElement(AssistantWorkTrace, {
+      activitySnapshot: createAssistantActivitySnapshot(message),
+      createdAt: message.createdAt,
+      message,
+      responseStarted: false,
+    }));
+
+    expect(html).toContain("Created");
+    expect(html).toContain("App.jsx");
+    expect(html).toContain("+146");
+    expect(html).toContain("-0");
+    expect(html).toContain("Called MCP");
+    expect(html).toContain("firebase_deploy");
+    expect(html).toContain("firebase");
+  });
+
   it("renders visible provider reasoning separately from the final answer", () => {
     const message = assistantMessage({
       content: "Hello!",
