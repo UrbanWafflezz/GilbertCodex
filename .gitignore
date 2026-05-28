@@ -19,10 +19,6 @@ node_modules/
 !/plugins/github/**
 !/plugins/linkedin/
 !/plugins/linkedin/**
-src/toolBridge/
-src/toolBridge/tools/
-src/toolBridge/memory/
-src/toolBridge/__tests__/
 src/webSearch/
 docs/promo/reddit/
 docs/promo/social/
