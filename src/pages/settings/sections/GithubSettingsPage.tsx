@@ -83,7 +83,7 @@ export function GithubSettingsPage({
             <Github size={19} aria-hidden="true" />
             <div>
               <h2>Connection</h2>
-              <p>{githubUsesCloud ? "Authorize repositories, workflows, packages, gists, and pull requests through the hosted connector." : "Authorize repositories, workflows, packages, gists, and pull requests from one desktop token."}</p>
+              <p>{githubUsesCloud ? "Authorize repositories, workflows, packages, gists, and pull requests through managed sign-in." : "Authorize repositories, workflows, packages, gists, and pull requests from one desktop token."}</p>
             </div>
           </div>
 
@@ -165,16 +165,16 @@ export function GithubSettingsPage({
             <KeyRound size={19} aria-hidden="true" />
             <div>
               <h2>OAuth app</h2>
-              <p>{githubUsesCloud ? "Hosted in Google Cloud. No user-supplied Client ID is needed." : githubConnection.connected ? (hasFullGithubAccess ? "Token has the requested scope set." : "Reconnect after changing scopes.") : "Saved locally for browser sign-in."}</p>
+              <p>{githubUsesCloud ? "Hosted sign-in is ready. No user-supplied Client ID is needed." : githubConnection.connected ? (hasFullGithubAccess ? "Token has the requested scope set." : "Reconnect after changing scopes.") : "Saved locally for browser sign-in."}</p>
             </div>
           </div>
 
           {githubUsesCloud ? (
-            <div className="github-scope-summary">
-              <ShieldCheck size={16} aria-hidden="true" />
-              <span>Hosted OAuth</span>
-              <code>Cloud Run</code>
-            </div>
+              <div className="github-scope-summary">
+                <ShieldCheck size={16} aria-hidden="true" />
+                <span>Hosted OAuth</span>
+              <code>Managed</code>
+              </div>
           ) : (
             <label className="settings-field">
               <span>Client ID</span>

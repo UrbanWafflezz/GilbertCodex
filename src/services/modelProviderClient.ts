@@ -829,7 +829,7 @@ async function ensureNineRouterSelectedAutoRoute(
     if (options.required) {
       throw error;
     }
-    console.warn("Could not refresh 9Router Free Auto route before sending; continuing with the selected route.", error);
+    console.warn("Could not refresh the Free Auto subscription route before sending; continuing with the selected route.", error);
   }
 }
 
@@ -961,14 +961,14 @@ function formatNineRouterRequestError(model: string, providerMessage: string | u
     const providerName = formatNineRouterProviderName(providerId);
 
     if (model === "free-combo" || model === NINE_ROUTER_SMART_SAVER_MODEL || model === NINE_ROUTER_ALWAYS_FREE_MODEL) {
-      return `9Router is running, but the selected Free Auto route fell through to ${providerName} with no active credentials. Open Usage, refresh Free Auto routing, then retry.`;
+      return `Subscription routing is running, but the selected Free Auto route fell through to ${providerName} with no active credentials. Open Usage, refresh Free Auto routing, then retry.`;
     }
 
     return `Subscription routing is running, but ${providerName} is not connected for ${model}. Open Subscriptions, connect ${providerName}, then retry or choose a connected subscription model.`;
   }
 
   if (status === 404 && (model === "free-combo" || model === NINE_ROUTER_SMART_SAVER_MODEL || model === NINE_ROUTER_ALWAYS_FREE_MODEL)) {
-    return "9Router is running, but the selected Free Auto route is not available in the local catalog. Open Usage, refresh Free Auto routing, then retry.";
+    return "Subscription routing is running, but the selected Free Auto route is not available in the catalog. Open Usage, refresh Free Auto routing, then retry.";
   }
 
   return "";

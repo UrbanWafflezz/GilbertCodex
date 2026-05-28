@@ -31,7 +31,7 @@ export function BillingPlansSettingsPage({ onSettingsPatch, settings }: BillingP
 
   useEffect(() => {
     if (!billingGatewayConfigured) {
-      setStatusMessage({ kind: "warning", text: "Stripe billing is not configured for this build." });
+      setStatusMessage({ kind: "warning", text: "Billing is not available in this build." });
       return;
     }
 
@@ -40,7 +40,7 @@ export function BillingPlansSettingsPage({ onSettingsPatch, settings }: BillingP
 
   async function refreshBillingStatus(options: { silent?: boolean } = {}) {
     if (!billingGatewayConfigured) {
-      setStatusMessage({ kind: "warning", text: "Stripe billing is not configured for this build." });
+      setStatusMessage({ kind: "warning", text: "Billing is not available in this build." });
       return;
     }
 
@@ -75,9 +75,9 @@ export function BillingPlansSettingsPage({ onSettingsPatch, settings }: BillingP
     try {
       const session = await createBillingCheckoutSession(tier);
       await openExternalUrl(session.url);
-      setStatusMessage({ kind: "success", text: session.trialDays ? `Stripe Checkout opened with a ${session.trialDays}-day trial.` : "Stripe Checkout opened." });
+      setStatusMessage({ kind: "success", text: session.trialDays ? `Checkout opened with a ${session.trialDays}-day trial.` : "Checkout opened." });
     } catch (error) {
-      setStatusMessage({ kind: "error", text: error instanceof Error ? error.message : "Could not start Stripe Checkout." });
+      setStatusMessage({ kind: "error", text: error instanceof Error ? error.message : "Could not start checkout." });
     } finally {
       setBusyAction(null);
     }
@@ -89,7 +89,7 @@ export function BillingPlansSettingsPage({ onSettingsPatch, settings }: BillingP
     try {
       const session = await createBillingPortalSession();
       await openExternalUrl(session.url);
-      setStatusMessage({ kind: "success", text: "Stripe Customer Portal opened." });
+      setStatusMessage({ kind: "success", text: "Subscription management opened." });
     } catch (error) {
       setStatusMessage({ kind: "error", text: error instanceof Error ? error.message : "Could not open billing management." });
     } finally {
@@ -99,7 +99,7 @@ export function BillingPlansSettingsPage({ onSettingsPatch, settings }: BillingP
 
   return (
     <>
-      <SettingsSectionHeading detail="Plan access, usage quotas, Stripe readiness, and paid-model gates." icon={BadgeDollarSign} title="Plans" />
+      <SettingsSectionHeading detail="Plan access, usage quotas, billing, and paid-model access." icon={BadgeDollarSign} title="Plans" />
       <div className="settings-section-grid billing-plan-overview">
         <article className="settings-card settings-card-wide billing-current-card">
           <div className="settings-card-heading">
@@ -167,20 +167,14 @@ export function BillingPlansSettingsPage({ onSettingsPatch, settings }: BillingP
           <div className="settings-card-heading">
             <BadgeDollarSign size={19} aria-hidden="true" />
             <div>
-              <h2>Stripe handoff</h2>
-              <p>Checkout, Customer Portal, and Firestore subscription sync are handled by the billing gateway.</p>
+              <h2>Subscription billing</h2>
+              <p>Manage your subscription or refresh your current plan.</p>
             </div>
-          </div>
-          <div className="billing-stripe-grid">
-            <BillingMetric label="Plus lookup key" value={BILLING_TIERS.plus.stripePriceLookupKey ?? "Not set"} />
-            <BillingMetric label="Pro lookup key" value={BILLING_TIERS.pro.stripePriceLookupKey ?? "Not set"} />
-            <BillingMetric label="Status source" value={settings.billingPlan.source} />
-            <BillingMetric label="Entitlement" value={formatBillingEntitlement(currentTier, settings.billingPlan.status)} />
           </div>
           <div className="settings-actions-row">
             <button type="button" disabled={!billingGatewayConfigured || busyAction !== null} onClick={() => void openPortal()}>
               <ExternalLink size={16} aria-hidden="true" />
-              {busyAction === "portal" ? "Opening billing" : "Manage billing"}
+              {busyAction === "portal" ? "Opening subscription" : "Manage subscription"}
             </button>
             <button type="button" disabled={!billingGatewayConfigured || busyAction !== null} onClick={() => void refreshBillingStatus()}>
               <RefreshCcw size={16} aria-hidden="true" />
@@ -205,7 +199,7 @@ function BillingMetric({ label, value }: { label: string; value: string }) {
 
 function formatBillingPlanSource(source: ProviderSettings["billingPlan"]["source"], status: ProviderSettings["billingPlan"]["status"]) {
   if (source === "stripe") {
-    return status === "active" || status === "trialing" ? "Stripe synced subscription" : `Stripe status: ${status}`;
+    return status === "active" || status === "trialing" ? "Subscription synced" : `Subscription status: ${status}`;
   }
 
   if (source === "admin") {
@@ -213,12 +207,4 @@ function formatBillingPlanSource(source: ProviderSettings["billingPlan"]["source
   }
 
   return "Free account baseline";
-}
-
-function formatBillingEntitlement(tier: BillingTierId, status: ProviderSettings["billingPlan"]["status"]) {
-  if (tier === "free") {
-    return "Free";
-  }
-
-  return `${BILLING_TIERS[tier].name} (${status})`;
 }

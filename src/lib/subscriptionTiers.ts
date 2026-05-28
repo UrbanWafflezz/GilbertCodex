@@ -79,7 +79,7 @@ export const BILLING_TIERS: Record<BillingTierId, BillingTierConfig> = {
     features: [
       "1 month free, then $20/mo",
       "Managed hosted models and paid OpenRouter routes",
-      "Subscription account routes through 9Router",
+      "Subscription account routes",
       "Image generation",
       "Higher chat, token, tool, and search limits",
     ],

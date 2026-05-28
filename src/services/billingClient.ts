@@ -123,7 +123,7 @@ function readViteEnv(key: string) {
 function formatBillingGatewayError(error: string | undefined, status: number) {
   const message = error?.trim();
   if (message?.includes("STRIPE_CONTEXT") || message?.includes("live Stripe account ID")) {
-    return "Billing is waiting for the live Stripe account ID. Add the matching acct_... account to the billing gateway, then try again.";
+    return "Billing setup needs attention. Try again later or contact support.";
   }
 
   return message || `Billing request failed with HTTP ${status}.`;

@@ -18,7 +18,7 @@ curl https://your-connector.run.app/__gilbert/health
 
 GitHub can run with only `GITHUB_CLIENT_ID`; in that mode the hosted service starts GitHub's device flow from the cloud. Add `GITHUB_CLIENT_SECRET` to the deploy secrets later to switch to full web OAuth callback sign-in.
 
-Discord can run with `DISCORD_CLIENT_ID`, `DISCORD_PUBLIC_KEY`, and `DISCORD_BOT_TOKEN`; in that mode the hosted service provides the signed interactions endpoint and command registration without local ngrok. Add `DISCORD_CLIENT_SECRET` later if you want per-user Discord OAuth account linking.
+Discord needs `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_PUBLIC_KEY`, and `DISCORD_BOT_TOKEN` for the full hosted experience: per-user Discord sign-in, the signed interactions endpoint, slash-command registration, and channel posting without local ngrok. Without `DISCORD_CLIENT_SECRET`, the receiver can stay online, but users cannot sign in with Discord from the app.
 
 ## Scripts
 

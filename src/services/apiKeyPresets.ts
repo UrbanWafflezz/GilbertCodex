@@ -47,7 +47,7 @@ export const API_KEY_PRESETS: ApiKeyPreset[] = [
     service: "exa",
   },
   {
-    description: "Required for Firecrawl cloud MCP search, scrape, crawl, and extraction tools.",
+    description: "Required for hosted Firecrawl MCP search, scrape, crawl, and extraction tools.",
     group: "MCP",
     id: "mcp-firecrawl-api-key",
     keyName: "FIRECRAWL_API_KEY",
@@ -65,7 +65,7 @@ export const API_KEY_PRESETS: ApiKeyPreset[] = [
     service: "tavily",
   },
   {
-    description: "Browserbase service key for cloud browser MCP automation. Model-provider keys stay on the Models page.",
+    description: "Browserbase service key for hosted browser MCP automation. Model-provider keys stay on the Models page.",
     group: "MCP",
     id: "mcp-browserbase-api-key",
     keyName: "BROWSERBASE_API_KEY",
@@ -92,7 +92,7 @@ export const API_KEY_PRESETS: ApiKeyPreset[] = [
     service: "heroku",
   },
   {
-    description: "Pulumi Cloud token for Pulumi MCP deployment, stack, refresh, and resource-search tools.",
+    description: "Pulumi access token for Pulumi MCP deployment, stack, refresh, and resource-search tools.",
     group: "MCP",
     id: "mcp-pulumi-access-token",
     keyName: "PULUMI_ACCESS_TOKEN",
@@ -106,7 +106,7 @@ export const API_KEY_PRESETS: ApiKeyPreset[] = [
     id: "mcp-stripe-secret",
     keyName: "STRIPE_SECRET_KEY",
     kind: "mcp",
-    label: "Stripe restricted key",
+    label: "Payments restricted key",
     service: "stripe",
   },
   {
@@ -252,15 +252,6 @@ export const API_KEY_PRESETS: ApiKeyPreset[] = [
     kind: "mcp",
     label: "Apify API token",
     service: "apify",
-  },
-  {
-    description: "Firebase CLI token fallback for imported Firebase skills or CI-style workflows. Prefer local Firebase CLI login for the official Firebase MCP.",
-    group: "Skill",
-    id: "skill-firebase-token",
-    keyName: "FIREBASE_TOKEN",
-    kind: "skill",
-    label: "Firebase CLI token",
-    service: "firebase",
   },
   {
     description: "Required workspace/team ID for the official Slack MCP server.",

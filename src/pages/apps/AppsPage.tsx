@@ -38,6 +38,7 @@ import {
 } from "../../app/githubClient";
 import { DialogShell } from "../../components/dialogs/AppDialog";
 import { loadApiKeyVault } from "../../lib/appStorage";
+import { GMAIL_CORE_OAUTH_SCOPES, GOOGLE_CALENDAR_CORE_OAUTH_SCOPES } from "../../lib/googleOAuthScopes";
 import { SkillsManagerPanel } from "./SkillsManagerPanel";
 import {
   getOpenAiPluginDescription,
@@ -74,6 +75,7 @@ type AppsCatalogSection = "all" | "mcp" | "plugins" | "skills";
 type MarketplaceStatusKind = "connected" | "installed" | "ready" | "setup";
 const GMAIL_ACCOUNT_LIMIT = 6;
 const GOOGLE_CALENDAR_ACCOUNT_LIMIT = 6;
+const GOOGLE_HOSTED_OAUTH_SCOPE = [...new Set([...GMAIL_CORE_OAUTH_SCOPES, ...GOOGLE_CALENDAR_CORE_OAUTH_SCOPES])].join(" ");
 const MCP_SERVER_LIMIT = 50;
 const MCP_PRESET_PAGE_SIZE = 6;
 const MCP_REGISTRY_PAGE_SIZE = 5;
@@ -202,15 +204,15 @@ const EMPTY_API_KEY_VAULT: ApiKeyVaultState = { keys: [], version: 1 };
 const mcpRemoteArgs = (endpoint: string) => ["-y", "mcp-remote@latest", endpoint];
 
 const STRIPE_SECRET_KEY_REQUIREMENT: McpSetupRequirement = {
-  helper: "Use a restricted Stripe secret key. Local @stripe/mcp will not start without it.",
-  label: "Stripe secret key",
+  helper: "Use a restricted payment-service key. The local payments MCP will not start without it.",
+  label: "Payments secret key",
   location: "environment",
   name: "STRIPE_SECRET_KEY",
   placeholder: "sk_live_... or rk_live_...",
 };
 
 const REDIS_URL_REQUIREMENT: McpSetupRequirement = {
-  helper: "Use redis://localhost:6379 for local Redis, or paste your Redis/Redis Cloud URL here so credentials stay in secure storage.",
+  helper: "Use redis://localhost:6379 for local Redis, or paste your hosted Redis URL here so credentials stay in secure storage.",
   label: "Redis URL",
   location: "environment",
   name: "REDIS_URL",
@@ -298,7 +300,7 @@ const EXA_API_KEY_REQUIREMENT: McpSetupRequirement = {
 };
 
 const FIRECRAWL_API_KEY_REQUIREMENT: McpSetupRequirement = {
-  helper: "Required for Firecrawl cloud API usage. Self-hosted Firecrawl can use FIRECRAWL_API_URL instead.",
+  helper: "Required for hosted Firecrawl API usage. Self-hosted Firecrawl can use FIRECRAWL_API_URL instead.",
   label: "Firecrawl API key",
   location: "environment",
   name: "FIRECRAWL_API_KEY",
@@ -322,7 +324,7 @@ const HEROKU_API_KEY_REQUIREMENT: McpSetupRequirement = {
 };
 
 const PULUMI_ACCESS_TOKEN_REQUIREMENT: McpSetupRequirement = {
-  helper: "Required for Pulumi Cloud deployment, stack output, refresh, and resource-search tools.",
+  helper: "Required for Pulumi deployment, stack output, refresh, and resource-search tools.",
   label: "Pulumi access token",
   location: "environment",
   name: "PULUMI_ACCESS_TOKEN",
@@ -382,18 +384,18 @@ const MCP_FEATURED_PRESETS: McpProviderPreset[] = [
   {
     args: ["-y", "firebase-tools@latest", "mcp"],
     command: "npx",
-    description: "Official Firebase MCP for projects, Auth, Firestore, Data Connect, rules, docs, and Cloud Messaging.",
+    description: "Official app backend MCP for projects, auth, database rules, docs, and messaging.",
     docsUrl: "https://firebase.google.com/docs/cli/mcp-server",
     id: "firebase",
-    name: "Firebase",
-    note: "Gilbert auto-resolves npm/npx shims on Windows. If the MCP login link fails with a Google code-challenge error, close that tab and run `npx.cmd -y firebase-tools@latest login --reauth` in a terminal, then Save and test again.",
-    publisher: "Firebase",
+    name: "App Backend",
+    note: "Gilbert auto-resolves npm/npx shims on Windows. If the MCP login link fails with a Google code-challenge error, close that tab and run the provider CLI login in a terminal, then Save and test again.",
+    publisher: "Google",
     setupSteps: [
-      "Uses the official firebase-tools MCP server.",
-      "Requires Firebase CLI Google sign-in on this machine.",
-      "Firebase Hosting deploy tools still need an explicit project and hosting target/site.",
+      "Uses the official app backend MCP server.",
+      "Requires Google sign-in on this machine.",
+      "Hosting deploy tools still need an explicit project and hosting target/site.",
     ],
-    tags: ["Auth", "Firestore", "Hosting"],
+    tags: ["Auth", "Database", "Hosting"],
     transport: "stdio",
   },
   {
@@ -406,7 +408,7 @@ const MCP_FEATURED_PRESETS: McpProviderPreset[] = [
     publisher: "GoDaddy",
     setupSteps: [
       "Public Streamable HTTP MCP endpoint; no GoDaddy token is required for domain search.",
-      "Use it for domain brainstorming and availability checks before configuring Firebase Hosting custom domains.",
+      "Use it for domain brainstorming and availability checks before configuring custom domains.",
       "DNS changes still require GoDaddy's dashboard or a separate GoDaddy Domains API integration; do not treat this MCP as write-capable.",
     ],
     tags: ["Domains", "Availability", "Public"],
@@ -477,13 +479,13 @@ const MCP_FEATURED_PRESETS: McpProviderPreset[] = [
       "If you use explicit IAM keys instead, store them in Settings > Keys and apply them as secure environment values.",
       "Change AWS_REGION in Arguments before testing if you operate outside us-east-1.",
     ],
-    tags: ["IAM", "Docs", "Cloud"],
+    tags: ["IAM", "Docs", "Resources"],
     transport: "stdio",
   },
   {
     args: ["-y", "@azure/mcp@latest", "server", "start"],
     command: "npx",
-    description: "Official Azure MCP Server for Azure resources, docs, Terraform guidance, CLI generation, and cloud operations.",
+    description: "Official Azure MCP Server for Azure resources, docs, Terraform guidance, CLI generation, and infrastructure operations.",
     docsUrl: "https://learn.microsoft.com/azure/developer/azure-mcp-server/",
     id: "azure",
     name: "Azure MCP",
@@ -494,7 +496,7 @@ const MCP_FEATURED_PRESETS: McpProviderPreset[] = [
       "Uses local Azure identity through Azure CLI, Azure PowerShell, or Microsoft developer tooling.",
       "Run az login first if no Azure account is available to the process.",
     ],
-    tags: ["Azure", "Cloud", "Resources"],
+    tags: ["Azure", "Resources"],
     transport: "stdio",
   },
   {
@@ -581,24 +583,24 @@ const MCP_FEATURED_PRESETS: McpProviderPreset[] = [
   {
     args: ["-y", "@stripe/mcp@latest"],
     command: "npx",
-    description: "Official local Stripe MCP for customers, payment links, billing, docs, and API-backed commerce work.",
+    description: "Official local payments MCP for customers, payment links, billing, docs, and API-backed commerce work.",
     docsUrl: "https://docs.stripe.com/mcp",
     environmentText: "STRIPE_SECRET_KEY=",
     id: "stripe",
-    name: "Stripe",
-    note: "Paste a restricted Stripe secret key into Environment as STRIPE_SECRET_KEY. Gilbert stores stdio env values in secure storage.",
+    name: "Payments",
+    note: "Paste a restricted payment-service key into Environment. Gilbert stores stdio env values in secure storage.",
     requiredSetup: [
       {
         id: "stripe-secret",
-        label: "Stripe restricted key",
+        label: "Payments restricted key",
         requirements: [STRIPE_SECRET_KEY_REQUIREMENT],
       },
     ],
-    publisher: "Stripe",
+    publisher: "Payments",
     setupSteps: [
-      "The local @stripe/mcp server cannot start without STRIPE_SECRET_KEY or --api-key.",
-      "Use a restricted API key with only the Stripe permissions you want chat to have.",
-      "Gilbert stores STRIPE_SECRET_KEY in the desktop secure store and hides it after saving.",
+      "The local payments MCP server cannot start without its restricted API key.",
+      "Use a restricted API key with only the payment permissions you want chat to have.",
+      "Gilbert stores the key in the desktop secure store and hides it after saving.",
     ],
     tags: ["Payments", "Billing", "Secure env"],
     transport: "stdio",
@@ -678,20 +680,20 @@ const MCP_FEATURED_PRESETS: McpProviderPreset[] = [
   {
     args: ["-y", "@pulumi/mcp-server@latest", "stdio"],
     command: "npx",
-    description: "Pulumi MCP for IaC registry docs, previews, cloud deployments, stack outputs, refresh, and resource search.",
+    description: "Pulumi MCP for IaC registry docs, previews, deployments, stack outputs, refresh, and resource search.",
     docsUrl: "https://www.pulumi.com/docs/iac/using-pulumi/mcp-server/",
     environmentText: "PULUMI_ACCESS_TOKEN=",
     id: "pulumi",
     name: "Pulumi",
-    note: "Registry/documentation tools can orient infrastructure work; Pulumi Cloud and deployment tools need PULUMI_ACCESS_TOKEN plus a working Pulumi CLI/project.",
+    note: "Registry/documentation tools can orient infrastructure work; Pulumi deployment tools need PULUMI_ACCESS_TOKEN plus a working Pulumi CLI/project.",
     optionalSetup: [PULUMI_ACCESS_TOKEN_REQUIREMENT],
     publisher: "Pulumi",
     setupSteps: [
       "Install the Pulumi CLI for preview/deploy tools.",
-      "Save PULUMI_ACCESS_TOKEN in Settings > Keys for Pulumi Cloud, deployment, and resource-search operations.",
+      "Save PULUMI_ACCESS_TOKEN in Settings > Keys for Pulumi deployment and resource-search operations.",
       "Mount or open the intended Pulumi project before using stack-changing tools.",
     ],
-    tags: ["IaC", "Cloud", "Deployments"],
+    tags: ["IaC", "Deployments"],
     transport: "stdio",
   },
   {
@@ -861,7 +863,7 @@ const MCP_FEATURED_PRESETS: McpProviderPreset[] = [
     environmentText: "FIRECRAWL_API_KEY=",
     id: "firecrawl",
     name: "Firecrawl",
-    note: "Cloud Firecrawl requires FIRECRAWL_API_KEY. Gilbert stores it as secure environment; self-hosted users can add FIRECRAWL_API_URL manually.",
+    note: "Hosted Firecrawl requires FIRECRAWL_API_KEY. Gilbert stores it as secure environment; self-hosted users can add FIRECRAWL_API_URL manually.",
     publisher: "Firecrawl",
     requiredSetup: [
       {
@@ -871,7 +873,7 @@ const MCP_FEATURED_PRESETS: McpProviderPreset[] = [
       },
     ],
     setupSteps: [
-      "Create a Firecrawl API key for the hosted cloud API.",
+      "Create a Firecrawl API key for the hosted API.",
       "Save FIRECRAWL_API_KEY in Settings > Keys.",
       "For self-hosted Firecrawl, also add FIRECRAWL_API_URL to Environment before testing.",
     ],
@@ -930,7 +932,7 @@ const MCP_FEATURED_PRESETS: McpProviderPreset[] = [
     transport: "stdio",
   },
   {
-    description: "Browserbase hosted MCP for cloud browser automation, navigation, extraction, screenshots, and Stagehand actions.",
+    description: "Browserbase hosted MCP for browser automation, navigation, extraction, screenshots, and Stagehand actions.",
     docsUrl: "https://docs.browserbase.com/integrations/mcp/setup",
     endpoint: "https://mcp.browserbase.com/mcp",
     id: "browserbase",
@@ -972,7 +974,7 @@ const MCP_FEATURED_PRESETS: McpProviderPreset[] = [
     ],
     publisher: "Redis",
     setupSteps: [
-      "Requires a reachable Redis or Redis Cloud endpoint.",
+      "Requires a reachable Redis or hosted Redis endpoint.",
       "REDIS_URL is stored as a secure stdio environment value.",
       "Use redis://127.0.0.1:6379 if localhost resolution fails on Windows.",
     ],
@@ -1213,7 +1215,7 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
   const [mcpPresetPage, setMcpPresetPage] = useState(0);
   const [mcpRegistryBusy, setMcpRegistryBusy] = useState(false);
   const [mcpRegistryPage, setMcpRegistryPage] = useState(0);
-  const [mcpRegistryQuery, setMcpRegistryQuery] = useState("firebase");
+  const [mcpRegistryQuery, setMcpRegistryQuery] = useState("slack");
   const [mcpRegistryResults, setMcpRegistryResults] = useState<McpRegistryServerSummary[]>([]);
   const [mcpRegistryStatus, setMcpRegistryStatus] = useState<AppsStatusMessage | null>(null);
   const [mcpProgressEvents, setMcpProgressEvents] = useState<McpServerProgressEvent[]>([]);
@@ -1469,7 +1471,7 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
       "registry",
       "marketplace",
       "Supabase",
-      "Firebase",
+      "App Backend",
       "AWS",
       "Figma",
       mcpStatusLabel,
@@ -1744,7 +1746,7 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
       const connection = await connectGmailOAuth({
         clientId: googleOAuthClientId,
         clientSecret: googleOAuthClientSecret,
-        scope: getDefaultGmailOAuthScope(),
+        scope: googleHostedAvailable ? GOOGLE_HOSTED_OAUTH_SCOPE : getDefaultGmailOAuthScope(),
       });
 
       setGmailConnection(connection);
@@ -1861,7 +1863,7 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
       const connection = await connectGoogleCalendarOAuth({
         clientId: googleOAuthClientId,
         clientSecret: googleOAuthClientSecret,
-        scope: getDefaultGoogleCalendarOAuthScope(),
+        scope: googleHostedAvailable ? GOOGLE_HOSTED_OAUTH_SCOPE : getDefaultGoogleCalendarOAuthScope(),
       });
 
       setCalendarConnection(connection);
@@ -2833,7 +2835,7 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
                   <Puzzle size={20} aria-hidden="true" />
                   <span>
                     <strong>No marketplace plugins match</strong>
-                    <small>Try Figma, Slack, Notion, Vercel, Stripe, Supabase, or Developer Docs.</small>
+                    <small>Try Figma, Slack, Notion, Vercel, Payments, Supabase, or Developer Docs.</small>
                   </span>
                 </div>
               )}
@@ -2975,7 +2977,7 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
                 <div className="apps-mcp-panel-head">
                   <div className="apps-plugin-expanded-head">
                     <strong>Featured MCPs</strong>
-                    <small>{normalizedSearchQuery ? `${mcpFilteredPresets.length} of ${MCP_FEATURED_PRESETS.length} matching curated app, cloud, database, design, and docs servers` : `${MCP_FEATURED_PRESETS.length} curated app, cloud, database, design, and docs servers`}</small>
+                    <small>{normalizedSearchQuery ? `${mcpFilteredPresets.length} of ${MCP_FEATURED_PRESETS.length} matching curated app, database, design, and docs servers` : `${MCP_FEATURED_PRESETS.length} curated app, database, design, and docs servers`}</small>
                   </div>
                   <div className="apps-mcp-pagination" aria-label="Featured MCP pagination">
                     <span>{mcpFilteredPresets.length > 0 ? `${mcpPresetPageStart + 1}-${Math.min(mcpPresetPageStart + MCP_PRESET_PAGE_SIZE, mcpFilteredPresets.length)} of ${mcpFilteredPresets.length}` : "0 of 0"}</span>
@@ -3005,7 +3007,7 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
                   {mcpVisiblePresets.length === 0 ? (
                     <div className="apps-empty-state">
                       <strong>No featured MCPs match</strong>
-                      <small>Try AWS, Firebase, Slack, Brave, Postgres, Netlify, or Playwright.</small>
+                      <small>Try AWS, App Backend, Slack, Brave, Postgres, Netlify, or Playwright.</small>
                     </div>
                   ) : null}
                 </div>
@@ -3021,7 +3023,7 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
                   void searchMcpRegistryCatalog();
                 }}>
                   <Search size={15} aria-hidden="true" />
-                  <input value={mcpRegistryQuery} placeholder="Search supabase, firebase, aws, figma..." onChange={(event) => setMcpRegistryQuery(event.target.value)} />
+                  <input value={mcpRegistryQuery} placeholder="Search supabase, aws, figma..." onChange={(event) => setMcpRegistryQuery(event.target.value)} />
                   <button type="submit" disabled={mcpRegistryBusy || !mcpAvailable}>
                     {mcpRegistryBusy ? "Searching" : "Search"}
                   </button>

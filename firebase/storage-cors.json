@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://gilbertcodex.com", "https://www.gilbertcodex.com", "https://gilbertcodexweb.web.app"],
+    "method": ["GET", "HEAD"],
+    "responseHeader": ["Content-Type", "Content-Length", "Cache-Control", "ETag"],
+    "maxAgeSeconds": 3600
+  }
+]

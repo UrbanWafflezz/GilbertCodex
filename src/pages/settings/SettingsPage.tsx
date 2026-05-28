@@ -75,6 +75,7 @@ import { WeatherSourcesSettingsPage } from "./weather-sources/WeatherSourcesSett
 const GITHUB_FULL_ACCESS_SCOPES = getRequiredGithubOAuthScopes();
 type GithubActionState = "disconnect" | "idle" | "login" | "refresh";
 const GITHUB_DEVICE_LOGIN_START_TIMEOUT_MS = 18_000;
+const GITHUB_BROWSER_OPEN_TIMEOUT_MS = 4_000;
 const EMPTY_DISABLED_MODELS: string[] = [];
 
 export function preloadSettingsSection(section: SettingsSectionId) {
@@ -451,31 +452,39 @@ function SettingsPageComponent({
       setGithubStatus({
         kind: "success",
         text: usesDeviceCode
-          ? `Your GitHub code is ${session.userCode}. Enter it in the browser to finish signing in.`
-          : "Complete GitHub sign-in in the browser to finish connecting.",
+          ? `Your GitHub code is ${session.userCode}. If the browser does not open, press Open GitHub.`
+          : "GitHub sign-in is ready. If the browser does not open, press Open GitHub.",
       });
       scheduleGithubDevicePoll(session, clientId, runId, session.interval);
 
       if (usesDeviceCode && navigator.clipboard?.writeText) {
         void navigator.clipboard.writeText(session.userCode).then(() => {
           if (mountedRef.current && githubDeviceRunRef.current === runId) {
-            setGithubStatus({ kind: "success", text: `Your GitHub code is ${session.userCode}. It was copied for the browser.` });
+            setGithubStatus({ kind: "success", text: `Your GitHub code is ${session.userCode}. It was copied. Press Open GitHub if the browser does not appear.` });
           }
         }).catch(() => {});
       }
 
-      try {
-        await openGithubDeviceLogin(session.verificationUri);
-      } catch {
-        if (mountedRef.current && githubDeviceRunRef.current === runId) {
-          setGithubStatus({
-            kind: "success",
-            text: usesDeviceCode
-              ? `Your GitHub code is ${session.userCode}. Open ${session.verificationUri} and enter it to finish signing in.`
-              : `Open ${session.verificationUri} to finish GitHub sign-in.`,
-          });
+      window.setTimeout(() => {
+        if (!mountedRef.current || githubDeviceRunRef.current !== runId) {
+          return;
         }
-      }
+
+        void withTimeout(
+          openGithubDeviceLogin(session.verificationUri),
+          GITHUB_BROWSER_OPEN_TIMEOUT_MS,
+          "GitHub sign-in is ready. Use Open GitHub to continue.",
+        ).catch(() => {
+          if (mountedRef.current && githubDeviceRunRef.current === runId) {
+            setGithubStatus({
+              kind: "warning",
+              text: usesDeviceCode
+                ? `The browser did not open automatically. Press Open GitHub and enter ${session.userCode}.`
+                : "The browser did not open automatically. Press Open GitHub to finish signing in.",
+            });
+          }
+        });
+      }, 0);
     } catch (error) {
       if (mountedRef.current && githubDeviceRunRef.current === runId) {
         setGithubDevicePolling(false);

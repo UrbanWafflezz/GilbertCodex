@@ -1,6 +1,6 @@
 [package]
 name = "gilbert-codex"
-version = "0.8.5"
+version = "0.8.6"
 description = "GUI-first local agent workspace."
 authors = ["Gilbert Codex Contributors"]
 edition = "2021"

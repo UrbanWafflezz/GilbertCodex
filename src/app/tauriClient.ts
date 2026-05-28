@@ -197,10 +197,12 @@ export interface DiscordBridgeStartRequest {
 }
 
 export interface DiscordBridgeStatus {
+  accountConnected?: boolean;
   configKey?: string | null;
   error?: string | null;
   localUrl?: string | null;
   message: string;
+  oauthConfigured?: boolean;
   port?: number | null;
   publicUrl?: string | null;
   running: boolean;
@@ -453,7 +455,15 @@ export async function setNativeAuthAccountScope(userId: string | null): Promise<
 
 export async function openExternalUrl(url: string): Promise<void> {
   if (!isTauriDesktopRuntime()) {
-    window.open(url, "_blank", "noopener,noreferrer");
+    const opened = window.open(url, "_blank");
+    if (!opened) {
+      throw new Error("The browser blocked the sign-in window. Use the on-screen Open button to continue.");
+    }
+    try {
+      opened.opener = null;
+    } catch {
+      // Some browsers restrict WindowProxy writes after navigation starts.
+    }
     return;
   }
 
@@ -1153,6 +1163,8 @@ interface CloudDiscordAccount {
   guildId?: string;
   interactionsEndpointUrl?: string;
   label?: string;
+  oauthConfigured?: boolean;
+  receiverReady?: boolean;
   user?: {
     globalName?: string;
     id?: string;
@@ -1165,16 +1177,22 @@ function isDiscordCloudAvailable() {
 }
 
 function createCloudDiscordStatus(account: CloudDiscordAccount): DiscordBridgeStatus {
-  const connected = account.connected === true;
+  const accountConnected = Boolean(account.user?.id);
+  const oauthConfigured = account.oauthConfigured !== false;
+  const connected = account.connected === true || account.receiverReady === true;
   const publicUrl = account.interactionsEndpointUrl || null;
   const label = account.label || account.user?.globalName || account.user?.username || "Discord";
 
   return {
+    accountConnected,
     configKey: connected ? `cloud:${account.guildId || account.user?.id || "discord"}` : null,
     localUrl: null,
-    message: connected
-      ? `Hosted Discord connector is connected as ${label}.`
-      : "Hosted Discord connector is ready. Sign in with Discord to enable slash commands.",
+    message: accountConnected
+      ? `Discord is connected as ${label}.`
+      : oauthConfigured
+        ? "Discord sign-in is ready. Sign in with Discord to link your account or server."
+        : "Discord sign-in needs server-side OAuth setup. Contact support, then try again.",
+    oauthConfigured,
     port: null,
     publicUrl,
     running: connected,

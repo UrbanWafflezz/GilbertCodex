@@ -143,8 +143,8 @@ const FALLBACK_MODE_OPTIONS: Array<{ detail: string; label: string; mode: Subscr
   { detail: "Stay on docs-backed OpenCode Free routes when the local catalog has them.", label: "Free Auto", mode: "always-free" },
 ];
 const TOKEN_SAVER_LEVEL_OPTIONS: Array<{ detail: string; label: string; level: SubscriptionTokenSaverLevel }> = [
-  { detail: "RTK helper off. Gilbert keeps the normal tool-result budget.", label: "Off", level: "off" },
-  { detail: "RTK on with the normal Gilbert tool-result budget.", label: "Low", level: "low" },
+  { detail: "Compression off. Gilbert keeps the normal tool-result budget.", label: "Off", level: "off" },
+  { detail: "Light compression with the normal Gilbert tool-result budget.", label: "Low", level: "low" },
   { detail: "Trims large tool results earlier while keeping broad evidence.", label: "Medium", level: "medium" },
   { detail: "Keeps only tighter tool evidence for cheaper long tool runs.", label: "High", level: "high" },
   { detail: "Most aggressive compression for max token savings.", label: "Max", level: "max" },
@@ -379,7 +379,7 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
 
     try {
       if (cloudSubscriptionsUnavailable) {
-        setOptimizerStatus({ kind: "warning", text: `${formatFallbackModeLabel(effectiveMode)} is queued. Cloud subscription routing is required, but this build does not have a cloud router URL configured.` });
+        setOptimizerStatus({ kind: "warning", text: `${formatFallbackModeLabel(effectiveMode)} is queued until subscription routing is available.` });
         return;
       }
 
@@ -448,14 +448,14 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
     try {
       if (cloudSubscriptionsUnavailable) {
         setTokenSaverHelper({
-          message: level === "off" ? "Off" : "On after cloud setup",
+          message: level === "off" ? "Off" : "On after setup",
           rtkEnabled: level !== "off",
           status: "idle",
         });
         if (!options.quiet) {
           setTokenSaverStatus({
             kind: level === "off" ? "success" : "warning",
-            text: level === "off" ? "Token saver is off." : "Token saver is queued until cloud subscription routing is configured.",
+            text: level === "off" ? "Token saver is off." : "Token saver is queued until subscription routing is available.",
           });
         }
         return;
@@ -488,7 +488,7 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
       });
       const rtkEnabled = payload.rtkEnabled ?? level !== "off";
       setTokenSaverHelper({
-        message: `RTK ${rtkEnabled ? "enabled" : "disabled"}`,
+        message: `Compression ${rtkEnabled ? "enabled" : "disabled"}`,
         rtkEnabled,
         status: "ready",
       });
@@ -599,7 +599,7 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
             <UsageMetric icon={Route} label="Requests" value={formatNumber(summary.totals.requests)} detail={`${formatNumber(summary.totals.providerCount)} provider${summary.totals.providerCount === 1 ? "" : "s"}`} />
             <UsageMetric icon={Layers3} label="Tokens" value={formatCompactTokens(summary.totals.totalTokens)} detail={formatTokenDetail(summary.totals.inputTokens, summary.totals.outputTokens, summary.totals.cachedInputTokens)} />
             <UsageMetric icon={Coins} label="Estimated cost" value={formatUsd(summary.totals.costUsd)} detail={formatCostDetail(summary.totals.catalogCostRecords, summary.totals.unknownCostRecords, summary.totals.cacheSavingsUsd)} />
-            <UsageMetric icon={Database} label="Database" value="Firebase" detail="Firestore-backed cloud usage and billing counters" />
+            <UsageMetric icon={Database} label="Storage" value="Account library" detail="Usage and plan counters tied to your signed-in account" />
           </div>
         </article>
 
@@ -645,7 +645,7 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
             <ServerCog size={19} aria-hidden="true" />
             <div>
               <h2>Token saver</h2>
-              <p>RTK helper compression plus Gilbert's local tool-result budget for long tool runs.</p>
+              <p>Compression plus Gilbert's local tool-result budget for long tool runs.</p>
             </div>
           </div>
           {tokenSaverStatus ? (
@@ -655,7 +655,7 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
           ) : null}
           <div className="usage-token-saver-summary">
             <div>
-              <span>RTK helper</span>
+              <span>Compression</span>
               <strong>{tokenSaverHelperLabel}</strong>
               <em>{tokenSaverHelper.status === "error" ? formatSubscriptionHelperText(tokenSaverHelper.message) : tokenSaverEnabled ? "Local helper" : "No compression"}</em>
             </div>
@@ -666,7 +666,7 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
             </div>
           </div>
           <div className="usage-token-saver-row">
-            <span>RTK helper</span>
+            <span>Compression</span>
             <button
               className="settings-switch"
               type="button"

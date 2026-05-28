@@ -1,4 +1,4 @@
-import { CheckCircle2, Cloud, Download, ExternalLink, Gauge, KeyRound, LockKeyhole, LogOut, Play, RefreshCcw, Route, ServerCog, ShieldCheck, SlidersHorizontal, TerminalSquare, Trash2, UserCheck } from "lucide-react";
+import { CheckCircle2, Download, ExternalLink, Gauge, KeyRound, LockKeyhole, LogOut, Play, RefreshCcw, Route, ServerCog, ShieldCheck, SlidersHorizontal, Trash2, UserCheck, Wifi } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ensureNineRouterLocal,
@@ -156,8 +156,8 @@ const CODEX_CONTEXT_WINDOW_OPTIONS: Array<{ detail: string; label: string; mode:
   { detail: "Allow 1M context for higher-cost long-context Codex runs.", label: "1M", mode: "extended" },
 ];
 const TOKEN_SAVER_LEVEL_OPTIONS: Array<{ detail: string; label: string; level: SubscriptionTokenSaverLevel }> = [
-  { detail: "RTK helper off. Gilbert keeps the normal tool-result budget.", label: "Off", level: "off" },
-  { detail: "RTK on with the normal Gilbert tool-result budget.", label: "Low", level: "low" },
+  { detail: "Compression off. Gilbert keeps the normal tool-result budget.", label: "Off", level: "off" },
+  { detail: "Light compression with the normal Gilbert tool-result budget.", label: "Low", level: "low" },
   { detail: "Trims large tool results earlier while keeping broad evidence.", label: "Medium", level: "medium" },
   { detail: "Keeps only tighter tool evidence for cheaper long tool runs.", label: "High", level: "high" },
   { detail: "Most aggressive compression for max token savings.", label: "Max", level: "max" },
@@ -171,15 +171,6 @@ const COMBO_STRATEGY_OPTIONS: Array<{ detail: string; label: string; strategy: N
   { detail: "Rotate across eligible routes for repeated requests.", label: "Round robin", strategy: "round-robin" },
 ];
 const COMBO_STICKY_LIMIT_OPTIONS = [1, 2, 3, 5] as const;
-const NINE_ROUTER_DASHBOARD_SHORTCUTS = [
-  { icon: Gauge, label: "Usage", path: "/dashboard/usage" },
-  { icon: KeyRound, label: "API keys", path: "/dashboard/endpoint" },
-  { icon: ServerCog, label: "Combos", path: "/dashboard/combos" },
-  { icon: TerminalSquare, label: "CLI tools", path: "/dashboard/cli-tools" },
-  { icon: SlidersHorizontal, label: "Providers", path: "/dashboard/providers" },
-  { icon: ShieldCheck, label: "MITM", path: "/dashboard/mitm" },
-] as const;
-
 const NINE_ROUTER_MODEL_TEST_MESSAGE = "Reply with OK only.";
 const NINE_ROUTER_INSTALL_PROGRESS_IDLE: NineRouterInstallProgressState = {
   detail: "",
@@ -232,7 +223,6 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
   const billingTier = getBillingPlanTier(settings.billingPlan);
   const subscriptionAccountsLocked = billingTier === "free";
   const primaryLanBaseUrl = status?.lanBaseUrls?.[0] ?? "";
-  const primaryLanDashboardUrl = status?.lanDashboardUrls?.[0] ?? "";
   const accountRows = useMemo(
     () => NINE_ROUTER_ACCOUNT_PROVIDERS.map((provider) => {
       const connections = connectionCatalog.connections.filter((connection) => connection.provider === provider.id);
@@ -303,7 +293,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     return missing.length > 0 ? `${missing.join(", ")} required` : "";
   }, [desktopRuntime, status]);
   const helperInstallBlocked = cloudSubscriptionsUnavailable
-    ? "Cloud subscription routing is required for this build but no cloud router URL is configured."
+    ? "Subscription routing is required for this build but no routing URL is configured."
     : !status?.installed && (desktopRuntime ? installBlocked : "Open the desktop app to install subscriptions");
   const displayStatusMessage = statusMessage
     ? {
@@ -365,7 +355,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
       if (cloudSubscriptionsUnavailable) {
         setStatus(null);
         if (!options.quiet) {
-          setStatusMessage({ kind: "warning", text: "Cloud subscription routing is required, but this build does not have a cloud router URL configured." });
+          setStatusMessage({ kind: "warning", text: "Subscription routing is required for this build but no routing URL is configured." });
         }
         return;
       }
@@ -485,7 +475,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     accountConnectRunRef.current += 1;
     setUninstallConfirmOpen(false);
     setBusy("uninstall");
-    setStatusMessage({ kind: "warning", text: "Uninstalling subscriptions. Stopping the local runtime and removing saved subscription data." });
+    setStatusMessage({ kind: "warning", text: "Uninstalling subscriptions. Stopping the local setup and removing saved subscription data." });
     setUninstallProgress({
       detail: "Stopping the local routing process.",
       label: "Uninstalling subscriptions",
@@ -496,7 +486,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     try {
       void stopCodexOAuthProxy();
       setUninstallProgress({
-        detail: "Removing the local runtime, saved sign-ins, and cached routing data.",
+        detail: "Removing local setup, saved sign-ins, and cached routing data.",
         label: "Removing subscription files",
         percent: 58,
         status: "running",
@@ -722,7 +712,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     if (!status?.running) {
       setAdvancedSettings((current) => ({
         ...current,
-        message: "Start subscriptions to sync runtime controls.",
+        message: "Start subscriptions to sync controls.",
         status: "idle",
       }));
       return;
@@ -747,7 +737,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     const tunnelOk = tunnelResult.status === "fulfilled";
 
     setAdvancedSettings((current) => ({
-      message: settingsOk || tunnelOk ? "Runtime controls synced" : readErrorMessage(settingsResult.status === "rejected" ? settingsResult.reason : tunnelResult.status === "rejected" ? tunnelResult.reason : null, "Could not sync runtime controls."),
+      message: settingsOk || tunnelOk ? "Controls synced" : readErrorMessage(settingsResult.status === "rejected" ? settingsResult.reason : tunnelResult.status === "rejected" ? tunnelResult.reason : null, "Could not sync controls."),
       settings: settingsOk ? settingsResult.value : current.settings,
       status: settingsOk || tunnelOk ? "ready" : "error",
       tunnel: tunnelOk ? tunnelResult.value : current.tunnel,
@@ -756,7 +746,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     if (!options.quiet) {
       setStatusMessage({
         kind: settingsOk || tunnelOk ? "success" : "warning",
-        text: settingsOk || tunnelOk ? "Subscription runtime controls are synced." : "Some subscription runtime controls could not be loaded.",
+        text: settingsOk || tunnelOk ? "Subscription controls are synced." : "Some subscription controls could not be loaded.",
       });
       setBusy((current) => (current === "advanced" ? null : current));
     }
@@ -768,7 +758,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     successText: string,
   ) {
     if (!status?.running) {
-      setStatusMessage({ kind: "warning", text: "Start subscriptions before changing runtime controls." });
+      setStatusMessage({ kind: "warning", text: "Start subscriptions before changing controls." });
       return null;
     }
 
@@ -779,7 +769,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
       const nextSettings = await updateNineRouterCoreSettings(nineRouterDashboardUrl, patch);
       setAdvancedSettings((current) => ({
         ...current,
-        message: "Runtime controls synced",
+        message: "Controls synced",
         settings: {
           ...current.settings,
           ...patch,
@@ -790,7 +780,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
       setStatusMessage({ kind: "success", text: successText });
       return nextSettings;
     } catch (error) {
-      setStatusMessage({ kind: "error", text: error instanceof Error ? error.message : "Could not update subscription runtime controls." });
+      setStatusMessage({ kind: "error", text: error instanceof Error ? error.message : "Could not update subscription controls." });
       return null;
     } finally {
       setBusy((current) => (current === busyKey ? null : current));
@@ -846,7 +836,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
   }
 
   async function setComboStrategy(strategy: NineRouterComboStrategy) {
-    await patchAdvancedSettings({ comboStrategy: strategy }, "comboStrategy", `Combo strategy is now ${strategy === "round-robin" ? "Round robin" : "Fallback"}.`);
+    await patchAdvancedSettings({ comboStrategy: strategy }, "comboStrategy", `Route order is now ${strategy === "round-robin" ? "rotation" : "fallback"}.`);
   }
 
   async function setComboStickyLimit(limit: number) {
@@ -1347,7 +1337,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
       });
       setAdvancedSettings((current) => ({
         ...current,
-        message: "Runtime controls synced",
+        message: "Controls synced",
         settings: {
           ...current.settings,
           rtkEnabled: level !== "off",
@@ -1439,10 +1429,6 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     updateSubscriptionOptimization({ codexContextWindow: mode });
   }
 
-  function openDashboardPath(path: string) {
-    void openExternalUrl(joinLocalUrl(nineRouterDashboardUrl, path));
-  }
-
   function openTunnelUrl() {
     if (tunnelUrl) {
       void openExternalUrl(tunnelUrl);
@@ -1466,22 +1452,22 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
         {cloudSubscriptionsUnavailable ? (
           <article className="settings-card settings-card-wide">
             <div className="settings-card-heading">
-              <Cloud size={19} aria-hidden="true" />
+              <Route size={19} aria-hidden="true" />
               <div>
-                <h2>Cloud subscriptions</h2>
-                <p>This build is configured for cloud subscription routing, but no cloud router URL is set.</p>
+                <h2>Subscription routing</h2>
+                <p>This build is missing the routing URL needed for managed subscriptions.</p>
               </div>
             </div>
             <div className="settings-row-list">
               <div className="settings-row">
-                <span>Router</span>
-                <strong>Cloud Run URL missing from this build.</strong>
+                <span>Routing</span>
+                <strong>Routing URL missing from this build.</strong>
                 <span className="settings-row-static-pill">Required</span>
               </div>
               <div className="settings-row">
                 <span>Accounts</span>
-                <strong>Subscription accounts stay isolated by Firebase user after the cloud router is configured.</strong>
-                <span className="settings-row-static-pill">Cloud</span>
+                <strong>Subscription accounts stay isolated by signed-in account after routing is configured.</strong>
+                <span className="settings-row-static-pill">Managed</span>
               </div>
             </div>
             <div className="settings-actions-row">
@@ -1504,7 +1490,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
             <div className="nine-router-setup-steps" aria-label="Subscription setup steps">
               <div className="nine-router-setup-step" data-state={helperInstalled ? "done" : helperInstalling || !status ? "active" : "next"}>
                 <strong>1. Install</strong>
-                <span>Add the local subscription runtime.</span>
+                <span>Prepare subscriptions on this device.</span>
               </div>
               <div className="nine-router-setup-step" data-state={helperInstalled ? "next" : "locked"}>
                 <strong>2. Sign in</strong>
@@ -1641,24 +1627,18 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
             {primaryLanBaseUrl ? (
               <article className="settings-card nine-router-routing-card">
                 <div className="settings-card-heading">
-                  <Cloud size={19} aria-hidden="true" />
+                  <Wifi size={19} aria-hidden="true" />
                   <div>
                     <h2>Wi-Fi access</h2>
-                    <p>Devices on this network can use the subscription router through the desktop.</p>
+                    <p>Devices on this network can use subscriptions through this desktop app.</p>
                   </div>
                 </div>
                 <div className="settings-row-list">
                   <div className="settings-row">
-                    <span>Mobile API URL</span>
+                    <span>Mobile connection URL</span>
                     <strong>{primaryLanBaseUrl}</strong>
                     <span className="settings-row-static-pill">LAN</span>
                   </div>
-                  {primaryLanDashboardUrl ? (
-                    <div className="settings-row">
-                      <span>Dashboard URL</span>
-                      <strong>{primaryLanDashboardUrl}</strong>
-                    </div>
-                  ) : null}
                 </div>
               </article>
             ) : null}
@@ -1681,7 +1661,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
                 </div>
                 <div className="nine-router-routing-badges">
                   <span className="settings-row-static-pill">{isNineRouterActive ? "Active" : "Ready"}</span>
-                  <span className="settings-row-static-pill">{modelCatalog.status === "ready" ? `${modelCatalog.models.length} routes` : modelCatalog.status === "error" ? "Check catalog" : "Local catalog"}</span>
+                  <span className="settings-row-static-pill">{modelCatalog.status === "ready" ? `${modelCatalog.models.length} routes` : modelCatalog.status === "error" ? "Check catalog" : "Catalog"}</span>
                 </div>
               </div>
 
@@ -1759,19 +1739,19 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
               <div className="settings-card-heading">
                 <SlidersHorizontal size={19} aria-hidden="true" />
                 <div>
-                  <h2>Runtime controls</h2>
-                  <p>Manage optimizer, fallback, tunnel, and local dashboard features.</p>
+                  <h2>Savings controls</h2>
+                  <p>Tune token savings, fallback behavior, and private device access.</p>
                 </div>
               </div>
 
               <div className="settings-row-list">
                 <div className="settings-row">
-                  <span>Runtime</span>
-                  <strong>{advancedSettings.status === "ready" ? "Controls synced" : advancedSettings.status === "loading" ? "Syncing controls" : advancedSettings.message}</strong>
+                  <span>Controls</span>
+                  <strong>{advancedSettings.status === "ready" ? "Synced" : advancedSettings.status === "loading" ? "Syncing" : advancedSettings.message}</strong>
                   <span className="settings-row-static-pill">{advancedSettings.status === "error" ? "Check" : advancedSettings.status === "ready" ? "Ready" : "Local"}</span>
                 </div>
                 <div className="settings-row">
-                  <span>RTK helper</span>
+                  <span>Compression</span>
                   <strong>{optimizerRuntimeEnabled ? `${formatTokenSaverLevel(tokenSaverLevel)} token saver` : "Off"}</strong>
                   <span className="settings-row-static-pill">{optimizerRuntimeEnabled ? "On" : "Off"}</span>
                 </div>
@@ -1847,10 +1827,10 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
                 <section className="nine-router-advanced-panel">
                   <div className="nine-router-advanced-panel-heading">
                     <ServerCog size={16} aria-hidden="true" />
-                    <strong>Combo strategy</strong>
+                    <strong>Route order</strong>
                     <span>{comboStrategy === "round-robin" ? "Round robin" : "Fallback"}</span>
                   </div>
-                  <div className="settings-segmented-control settings-segmented-control-compact" aria-label="Combo strategy">
+                  <div className="settings-segmented-control settings-segmented-control-compact" aria-label="Route order">
                     {COMBO_STRATEGY_OPTIONS.map((option) => (
                       <button
                         type="button"
@@ -1866,7 +1846,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
                     ))}
                   </div>
                   {comboStrategy === "round-robin" ? (
-                    <div className="settings-segmented-control settings-segmented-control-compact" aria-label="Round-robin stickiness">
+                    <div className="settings-segmented-control settings-segmented-control-compact" aria-label="Rotation stickiness">
                       {COMBO_STICKY_LIMIT_OPTIONS.map((limit) => (
                         <button
                           type="button"
@@ -1904,13 +1884,13 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
 
                 <section className="nine-router-advanced-panel">
                   <div className="nine-router-advanced-panel-heading">
-                    <Cloud size={16} aria-hidden="true" />
-                    <strong>Tunnel</strong>
+                    <Wifi size={16} aria-hidden="true" />
+                    <strong>Private link</strong>
                     <span>{tunnelEnabled ? "Enabled" : "Off"}</span>
                   </div>
                   <div className="settings-actions-row">
                     <button className="settings-ghost-button" type="button" disabled={busy !== null} onClick={() => void toggleTunnel()}>
-                      <Cloud size={16} aria-hidden="true" />
+                      <Wifi size={16} aria-hidden="true" />
                       {busy === "tunnel" ? "Updating" : tunnelEnabled ? "Disable" : "Enable"}
                     </button>
                     {tunnelUrl ? (
@@ -1922,33 +1902,10 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
                   </div>
                 </section>
 
-                <section className="nine-router-advanced-panel">
-                  <div className="nine-router-advanced-panel-heading">
-                    <ExternalLink size={16} aria-hidden="true" />
-                    <strong>Dashboard</strong>
-                    <span>{cloudSubscriptionsEnabled ? "Cloud" : "Local"}</span>
-                  </div>
-                  <button className="settings-ghost-button settings-full-width-button" type="button" onClick={() => openDashboardPath("/dashboard")}>
-                    <ExternalLink size={16} aria-hidden="true" />
-                    Open dashboard
-                  </button>
-                </section>
-              </div>
-
-              <div className="nine-router-shortcut-grid" aria-label="Subscription dashboard shortcuts">
-                {NINE_ROUTER_DASHBOARD_SHORTCUTS.map((shortcut) => {
-                  const ShortcutIcon = shortcut.icon;
-                  return (
-                    <button className="settings-ghost-button" type="button" key={shortcut.path} onClick={() => openDashboardPath(shortcut.path)}>
-                      <ShortcutIcon size={15} aria-hidden="true" />
-                      {shortcut.label}
-                    </button>
-                  );
-                })}
               </div>
               <button className="settings-ghost-button settings-full-width-button" type="button" disabled={advancedSettings.status === "loading"} onClick={() => refreshAdvancedSettings()}>
                 <RefreshCcw size={16} aria-hidden="true" />
-                {advancedSettings.status === "loading" ? "Syncing controls" : "Refresh runtime controls"}
+                {advancedSettings.status === "loading" ? "Syncing controls" : "Refresh controls"}
               </button>
             </article>
 
@@ -1961,7 +1918,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
               <Trash2 size={19} aria-hidden="true" />
               <div>
                 <h2>Installed subscriptions</h2>
-                <p>Remove the local subscription runtime, saved subscription sign-ins, and cached routing data from this device.</p>
+                <p>Remove subscription setup, saved subscription sign-ins, and cached routing data from this device.</p>
               </div>
             </div>
             <div className="settings-row-list">
@@ -2001,7 +1958,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
       />
       <ConfirmDialog
         confirmLabel="Uninstall subscriptions"
-        description="This removes the local subscription runtime from this device, including saved subscription sign-ins and local routing data. You can reinstall it from Subscriptions."
+        description="This removes subscription setup from this device, including saved subscription sign-ins and local routing data. You can reinstall it from Subscriptions."
         onClose={() => {
           if (busy !== "uninstall") {
             setUninstallConfirmOpen(false);
@@ -2137,11 +2094,11 @@ function getSubscriptionSetupDescription(
   desktopRuntime: boolean,
 ) {
   if (busy === "install" || installProgress.status === "running") {
-    return "Installing the local subscription runtime. Progress updates appear below.";
+    return "Preparing subscriptions on this device. Progress updates appear below.";
   }
 
   if (busy === "start") {
-    return "Starting the local subscription runtime. This usually takes a moment.";
+    return "Starting subscriptions. This usually takes a moment.";
   }
 
   if (!status) {
@@ -2160,7 +2117,7 @@ function getSubscriptionSetupDescription(
     return "Setup did not finish. Review the status below and try again when ready.";
   }
 
-  return "Install the local subscription runtime once. Gilbert starts it automatically for subscription routing. Requires Git, Node.js 20+, and npm.";
+  return "Prepare subscriptions once. Gilbert starts them automatically when a subscription route needs them. Requires Git, Node.js 20+, and npm.";
 }
 
 function getSubscriptionNodeRequirementLabel(version: string | null | undefined) {
@@ -2369,6 +2326,11 @@ function formatSubscriptionHelperText(text: string) {
     .replace(/\b[9]Router Local is already running\./g, "Subscriptions are ready.")
     .replace(/\b[9]Router Local is installed\./g, "Subscriptions are installed.")
     .replace(/\b[9]Router Local was started, but the API is not ready yet\./g, "Subscriptions are still starting. Try again in a moment.")
+    .replace(/\b[Cc]loud subscription routing is ready\./g, "Subscription routing is ready.")
+    .replace(/\b[Cc]loud subscription routing is required, but this build does not have a [Cc]loud router URL configured\./g, "Subscription routing is required for this build but no routing URL is configured.")
+    .replace(/\b[Cc]loud router URL\b/g, "routing URL")
+    .replace(/\b[Cc]loud Run\b/g, "routing service")
+    .replace(/\b[Cc]loud subscription routing\b/g, "subscription routing")
     .replace(/\b[9]Router Local\b/g, "subscriptions")
     .replace(/\b[9]Router\b/g, "subscriptions")
     .replace(/\s+at\s+https?:\/\/(?:127\.0\.0\.1|localhost):20128(?:\/[^\s.]*)?/gi, "")
@@ -2590,7 +2552,7 @@ function createCloudNineRouterStatus(dashboardUrl: string, baseUrl: string): Nin
     installed: true,
     launchSupported: false,
     launched: true,
-    message: "Cloud subscription routing is ready.",
+    message: "Subscription routing is ready.",
     running: true,
   };
 }

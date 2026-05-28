@@ -42,7 +42,7 @@ export async function createAuthAccount(input: CreateAuthAccountInput): Promise<
     if (createdUser) {
       await deleteUser(createdUser).catch(() => undefined);
     }
-    throw normalizeFirebaseAuthError(error, "Could not create your cloud account.");
+    throw normalizeFirebaseAuthError(error, "Could not create your account.");
   }
 }
 
@@ -51,7 +51,7 @@ export async function loginAuthAccount(input: LoginAuthAccountInput): Promise<Au
   const email = await resolveLoginEmail(login);
   const credential = await signInWithEmailAndPassword(getGilbertFirebaseAuth(), email, input.password)
     .catch((error) => {
-      throw normalizeFirebaseAuthError(error, "Could not sign in to your cloud account.");
+      throw normalizeFirebaseAuthError(error, "Could not sign in to your account.");
     });
 
   return createSessionFromFirebaseUser(credential.user);

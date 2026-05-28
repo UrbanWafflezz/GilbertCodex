@@ -17,6 +17,7 @@ const DISCORD_EVENT_COLLECTION = "discordConnectorEvents";
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const DISCORD_EVENT_TTL_MS = 15 * 60 * 1000;
 const GOOGLE_TOKEN_REFRESH_SKEW_MS = 90 * 1000;
+const UPSTREAM_FETCH_TIMEOUT_MS = 15 * 1000;
 
 const DEFAULT_GITHUB_SCOPES = "repo workflow delete_repo admin:repo_hook admin:org admin:public_key admin:org_hook gist notifications user project write:packages read:packages delete:packages admin:gpg_key codespace read:audit_log security_events";
 const DEFAULT_GOOGLE_SCOPES = [
@@ -856,12 +857,18 @@ async function readPublicAccount(uid) {
   }
 
   const data = snapshot.data();
-  return {
+  const account = {
     ...createDisconnectedAccount(),
     ...data,
     connected: data.connected === true,
     pluginInstalled: data.pluginInstalled !== false,
   };
+
+  if (service === "discord") {
+    return withDiscordServiceMetadata(account);
+  }
+
+  return account;
 }
 
 async function readSecret(uid, connectorService) {
@@ -907,7 +914,7 @@ function createDisconnectedAccount() {
 }
 
 function createDiscordServiceAccount(patch = {}) {
-  return {
+  return withDiscordServiceMetadata({
     connected: true,
     connectedAt: Date.now(),
     interactionsEndpointUrl: `${publicBaseUrl().replace(/\/+$/, "")}/discord/interactions`,
@@ -918,6 +925,14 @@ function createDiscordServiceAccount(patch = {}) {
     service: "discord",
     updatedAt: Date.now(),
     ...patch,
+  });
+}
+
+function withDiscordServiceMetadata(account) {
+  return {
+    ...account,
+    oauthConfigured: hasOAuthClientSecret("discord"),
+    receiverReady: isDiscordServiceConfigured(),
   };
 }
 
@@ -1034,7 +1049,7 @@ function publicBaseUrl() {
 }
 
 async function postFormJson(url, form) {
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     body: new URLSearchParams(form),
     headers: {
       accept: "application/json",
@@ -1050,12 +1065,31 @@ async function postFormJson(url, form) {
 }
 
 async function fetchJson(url, init) {
-  const response = await fetch(url, init);
+  const response = await fetchWithTimeout(url, init);
   const payload = await readUpstreamPayload(response);
   if (!response.ok) {
     throw new Error(readProviderError(payload, `${url} returned HTTP ${response.status}.`));
   }
   return payload;
+}
+
+async function fetchWithTimeout(url, init = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), UPSTREAM_FETCH_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`${url} did not respond before the connector timeout.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function readUpstreamPayload(response) {

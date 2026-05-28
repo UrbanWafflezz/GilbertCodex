@@ -4,6 +4,7 @@ import {
   getDiscordBridgeStatus,
   isTauriDesktopRuntime,
   listenForDiscordBridgeStatus,
+  openExternalUrl,
   registerDiscordSlashCommand,
   sendDiscordWebhookMessage,
   startDiscordBridge,
@@ -20,11 +21,12 @@ import {
   type DiscordBridgeSettings,
   type DiscordTunnelProvider,
 } from "../../../types/discord";
-import { isCloudConnectorEnabled } from "../../../services/cloudConnectorClient";
+import { getConfiguredCloudConnectorUrl, isCloudConnectorEnabled, startCloudConnectorOAuth, waitForCloudConnectorOAuth } from "../../../services/cloudConnectorClient";
 import { SettingsSectionHeading } from "../components/SettingsSectionHeading";
 import type { SettingsStatusMessage } from "../types";
 
 const DISCORD_CHAT_COMMANDS = ["gilbert", "gilbertnewchat"] as const;
+const DISCORD_BROWSER_OPEN_TIMEOUT_MS = 4_000;
 
 const DISCORD_DOC_LINKS = [
   { href: "https://discord.com/developers/applications", label: "Developer Portal" },
@@ -47,16 +49,19 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [bridgeStatus, setBridgeStatus] = useState<DiscordBridgeStatus | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<SettingsStatusMessage | null>(null);
+  const [discordAuthUrl, setDiscordAuthUrl] = useState("");
   const [showSecrets, setShowSecrets] = useState(false);
   const [copyStatus, setCopyStatus] = useState<SettingsStatusMessage | null>(null);
   const desktopBridgeAvailable = isTauriDesktopRuntime();
   const discordCloudAvailable = isCloudConnectorEnabled("discord");
   const bridgeRuntimeAvailable = desktopBridgeAvailable || discordCloudAvailable;
+  const hostedInteractionsEndpointUrl = discordCloudAvailable ? `${getConfiguredCloudConnectorUrl("discord")}/discord/interactions` : "";
+  const hostedDiscordAccountConnected = bridgeStatus?.accountConnected === true;
   const readiness = discordCloudAvailable
-    ? [{ detail: "Hosted Discord OAuth and signed interaction receiver are configured for this build.", label: "Hosted connector", mode: "interactions" as DiscordBridgeMode, ready: true }]
+    ? [{ detail: "Discord sign-in and bot command handling are ready for this build.", label: "Discord sign-in", mode: "interactions" as DiscordBridgeMode, ready: true }]
     : createReadiness(settings);
   const activeModeReady = readiness.find((item) => item.mode === settings.mode)?.ready ?? false;
-  const liveInteractionsEndpointUrl = bridgeStatus?.publicUrl || settings.publicInteractionsUrl || settings.interactionsEndpointUrl;
+  const liveInteractionsEndpointUrl = discordCloudAvailable ? bridgeStatus?.publicUrl || hostedInteractionsEndpointUrl : bridgeStatus?.publicUrl || settings.publicInteractionsUrl || settings.interactionsEndpointUrl;
 
   useEffect(() => {
     let disposed = false;
@@ -130,7 +135,13 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
 
   async function startBridgeRuntime() {
     setCopyStatus(null);
-    setRuntimeStatus({ kind: "warning", text: discordCloudAvailable ? "Opening hosted Discord sign-in..." : "Starting the local Discord receiver and tunnel..." });
+
+    if (discordCloudAvailable) {
+      await startHostedDiscordSignIn();
+      return;
+    }
+
+    setRuntimeStatus({ kind: "warning", text: "Starting the local Discord receiver and tunnel..." });
 
     if (!discordCloudAvailable && (!settings.applicationId.trim() || !settings.publicKey.trim())) {
       setRuntimeStatus({ kind: "error", text: "Add the Discord Application ID and Public Key first." });
@@ -169,10 +180,48 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
       });
       setRuntimeStatus({
         kind: status.publicUrl ? "success" : "warning",
-        text: status.publicUrl ? `${discordCloudAvailable ? "Hosted Discord connector ready at" : "Bridge running at"} ${status.publicUrl}` : status.message,
+        text: status.publicUrl ? `${discordCloudAvailable ? "Discord connection ready at" : "Bridge running at"} ${status.publicUrl}` : status.message,
       });
     } catch (error) {
       setRuntimeStatus({ kind: "error", text: readErrorMessage(error, "Could not start the Discord bridge.") });
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function startHostedDiscordSignIn() {
+    setRuntimeStatus({ kind: "warning", text: "Starting Discord sign-in..." });
+    setDiscordAuthUrl("");
+    setBridgeBusy(true);
+
+    try {
+      const session = await startCloudConnectorOAuth("discord");
+      setDiscordAuthUrl(session.authorizationUrl);
+      setRuntimeStatus({ kind: "success", text: "Discord sign-in is ready. If the browser does not open, press Open Discord." });
+
+      void withTimeout(
+        openExternalUrl(session.authorizationUrl),
+        DISCORD_BROWSER_OPEN_TIMEOUT_MS,
+        "Discord sign-in is ready. Use Open Discord to continue.",
+      ).catch(() => {
+        setRuntimeStatus({ kind: "warning", text: "The browser did not open automatically. Press Open Discord to finish signing in." });
+      });
+
+      await waitForCloudConnectorOAuth("discord", session);
+      const status = await getDiscordBridgeStatus();
+      setBridgeStatus(status);
+      setDiscordAuthUrl("");
+      onSettingsChange({
+        ...settings,
+        autoStartBridge: true,
+        enabled: true,
+        interactionsEndpointUrl: status.publicUrl || hostedInteractionsEndpointUrl,
+        mode: "interactions",
+        publicInteractionsUrl: status.publicUrl || hostedInteractionsEndpointUrl,
+      });
+      setRuntimeStatus({ kind: "success", text: status.message });
+    } catch (error) {
+      setRuntimeStatus({ kind: "error", text: readDiscordCloudError(error) });
     } finally {
       setBridgeBusy(false);
     }
@@ -186,6 +235,7 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
     try {
       const status = await stopDiscordBridge();
       setBridgeStatus(status);
+      setDiscordAuthUrl("");
       setRuntimeStatus({ kind: "warning", text: status.message });
     } catch (error) {
       setRuntimeStatus({ kind: "error", text: readErrorMessage(error, "Could not stop the Discord bridge.") });
@@ -263,7 +313,7 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
 
   return (
     <>
-      <SettingsSectionHeading detail={discordCloudAvailable ? "Hosted Discord slash commands and channel posting without ngrok." : "Connect Discord directly to Gilbert chat with slash commands, gateway chat, or channel posting."} icon={MessageCircle} title="Discord" />
+      <SettingsSectionHeading detail={discordCloudAvailable ? "Connect Discord slash commands and channel posting." : "Connect Discord directly to Gilbert chat with slash commands, gateway chat, or channel posting."} icon={MessageCircle} title="Discord" />
 
       <div className="discord-settings-layout">
         <article className="settings-card settings-card-wide discord-bridge-card" data-enabled={settings.enabled}>
@@ -271,7 +321,7 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
             <Network size={19} aria-hidden="true" />
             <div>
               <h2>Bridge mode</h2>
-              <p>{discordCloudAvailable ? "Use the hosted connector so users do not install ngrok or run a local receiver." : "Choose how Discord connects to Gilbert before wiring the hosted receiver."}</p>
+              <p>{discordCloudAvailable ? "Sign in with Discord without installing ngrok or running a local receiver." : "Choose how Discord connects to Gilbert before wiring the receiver."}</p>
             </div>
           </div>
 
@@ -317,8 +367,8 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
           <div className="settings-card-heading">
             <Network size={19} aria-hidden="true" />
             <div>
-              <h2>{discordCloudAvailable ? "Hosted receiver" : "Local receiver"}</h2>
-              <p>{discordCloudAvailable ? "Runs in its own Cloud Run service and queues signed Discord interactions for this account." : "Runs the signed Discord Interactions receiver and starts the tunnel for this machine."}</p>
+              <h2>{discordCloudAvailable ? "Discord account" : "Local receiver"}</h2>
+              <p>{discordCloudAvailable ? "Connect your account and register slash commands for this workspace." : "Runs the signed Discord Interactions receiver and starts the tunnel for this machine."}</p>
             </div>
           </div>
 
@@ -403,12 +453,12 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
           <div className="settings-actions-row discord-action-row">
             <button className="settings-primary-button" type="button" disabled={!bridgeRuntimeAvailable || bridgeBusy} onClick={startBridgeRuntime}>
               <Play size={16} aria-hidden="true" />
-              {discordCloudAvailable ? "Connect Discord" : "Start bridge"}
+              {discordCloudAvailable ? hostedDiscordAccountConnected ? "Reconnect Discord" : "Sign in with Discord" : "Start bridge"}
             </button>
-            <button className="settings-ghost-button" type="button" disabled={!bridgeRuntimeAvailable || bridgeBusy || !bridgeStatus?.running} onClick={stopBridgeRuntime}>
+            {(discordCloudAvailable ? hostedDiscordAccountConnected : true) ? <button className="settings-ghost-button" type="button" disabled={!bridgeRuntimeAvailable || bridgeBusy || !bridgeStatus?.running} onClick={stopBridgeRuntime}>
               <Square size={15} aria-hidden="true" />
-              {discordCloudAvailable ? "Disconnect" : "Stop"}
-            </button>
+              {discordCloudAvailable ? "Disconnect account" : "Stop"}
+            </button> : null}
             <button className="settings-ghost-button" type="button" disabled={bridgeBusy} onClick={refreshBridgeStatus}>
               <RefreshCw size={15} aria-hidden="true" />
               Status
@@ -419,6 +469,15 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
             </button>
           </div>
 
+          {discordAuthUrl ? (
+            <div className="settings-actions-row discord-action-row">
+              <a className="settings-ghost-button discord-doc-link" href={discordAuthUrl} rel="noreferrer" target="_blank">
+                <ExternalLink size={16} aria-hidden="true" />
+                Open Discord
+              </a>
+            </div>
+          ) : null}
+
           {runtimeStatus ? (
             <div className="settings-status-banner" data-kind={runtimeStatus.kind}>
               {runtimeStatus.text}
@@ -427,14 +486,14 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
 
           <p className="settings-field-note" data-kind={bridgeStatus?.running ? "ready" : undefined}>
             {discordCloudAvailable
-              ? bridgeStatus?.message || "Hosted Discord connector is ready for browser sign-in."
+              ? bridgeStatus?.message || "Discord sign-in is ready for account sign-in and slash commands."
               : desktopBridgeAvailable
                 ? bridgeStatus?.message || "Auto-start uses this receiver when the Discord bridge is enabled."
                 : "Open the desktop app to run the local Discord receiver."}
           </p>
         </article>
 
-        <article className="settings-card">
+        {!discordCloudAvailable ? <article className="settings-card">
           <div className="settings-card-heading">
             <Bot size={19} aria-hidden="true" />
             <div>
@@ -478,7 +537,30 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
               </button>
             </div>
           </label>
-        </article>
+        </article> : <article className="settings-card">
+          <div className="settings-card-heading">
+            <Bot size={19} aria-hidden="true" />
+            <div>
+              <h2>Discord chat</h2>
+              <p>Users sign in with Discord here; application credentials stay on the managed service.</p>
+            </div>
+          </div>
+
+          <div className="settings-row-list">
+            <div className="settings-row">
+              <span>User account</span>
+              <strong>{hostedDiscordAccountConnected ? "Connected" : "Not connected"}</strong>
+            </div>
+            <div className="settings-row">
+              <span>Receiver</span>
+              <strong>Signed interactions</strong>
+            </div>
+            <div className="settings-row">
+              <span>Command install</span>
+              <strong>Register commands</strong>
+            </div>
+          </div>
+        </article>}
 
         <article className="settings-card">
           <div className="settings-card-heading">
@@ -543,12 +625,12 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
             <ShieldCheck size={19} aria-hidden="true" />
             <div>
               <h2>Setup handoff</h2>
-              <p>Copy the local configuration notes for the bridge runtime and Discord developer portal.</p>
+              <p>{discordCloudAvailable ? "Copy the Discord setup notes for the Developer Portal." : "Copy the local configuration notes for the bridge and Discord Developer Portal."}</p>
             </div>
           </div>
 
           <div className="settings-actions-row discord-action-row">
-            <button className="settings-primary-button" type="button" onClick={() => copyText(createDiscordSetupSummary(settings), "Discord setup checklist copied.")}>
+            <button className="settings-primary-button" type="button" onClick={() => copyText(createDiscordSetupSummary(settings, discordCloudAvailable, liveInteractionsEndpointUrl), "Discord setup checklist copied.")}>
               <Copy size={16} aria-hidden="true" />
               Copy setup checklist
             </button>
@@ -577,19 +659,30 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
           <div className="integration-docs-body">
             <section className="integration-doc-section" aria-labelledby="discord-docs-setup-title">
               <h3 id="discord-docs-setup-title">Setup steps</h3>
-              <ol className="integration-doc-steps">
-                <li>Open the Discord Developer Portal, create an application, then copy its Application ID and Public Key into this page.</li>
-                <li>Keep Slash chat selected for the normal Gilbert flow. Use Bot gateway only for DMs, mentions, or approved message-content flows.</li>
-                <li>Install and authenticate ngrok, or set Tunnel provider to Local only when you are using your own public HTTPS tunnel.</li>
-                <li>On macOS, Homebrew installs under <code>/opt/homebrew/bin</code> or <code>/usr/local/bin</code>; Gilbert checks those even when launched from Finder.</li>
-                <li>Click Start bridge. Gilbert starts the local receiver, opens the tunnel, and fills the public Interactions URL.</li>
-                <li>Paste that URL into the Discord app's Interactions Endpoint URL field and save it so Discord can validate the receiver.</li>
-                <li>Paste a bot token only when registering slash commands or testing gateway mode, then click Register commands.</li>
-                <li>Install the app into the target server with the applications.commands scope, then test <code>/gilbert</code> and <code>/gilbertnewchat</code>.</li>
-                <li>Use an incoming webhook only for one-way channel posts from Gilbert. It cannot read Discord messages.</li>
-                <li>After pasting a webhook URL, click Send test to confirm Discord accepted and saved the message.</li>
-                <li>Use a normal text channel webhook for task notifications. Forum and media channels need thread targeting that Tasks v1 does not configure yet.</li>
-              </ol>
+              {discordCloudAvailable ? (
+                <ol className="integration-doc-steps">
+                  <li>Press <code>Sign in with Discord</code> so Gilbert can link this user's Discord account or install target.</li>
+                  <li>Copy the Public Interactions URL from Discord account.</li>
+                  <li>Paste it into the Discord app's Interactions Endpoint URL field and save it so Discord validates the receiver.</li>
+                  <li>Enter a server ID under Allowed guild IDs when you want commands to appear immediately in one server.</li>
+                  <li>Click Register commands to publish <code>/gilbert</code> and <code>/gilbertnewchat</code>.</li>
+                  <li>Install the Discord app into the target server with the <code>applications.commands</code> scope, then test the slash commands.</li>
+                </ol>
+              ) : (
+                <ol className="integration-doc-steps">
+                  <li>Open the Discord Developer Portal, create an application, then copy its Application ID and Public Key into this page.</li>
+                  <li>Keep Slash chat selected for the normal Gilbert flow. Use Bot gateway only for DMs, mentions, or approved message-content flows.</li>
+                  <li>Install and authenticate ngrok, or set Tunnel provider to Local only when you are using your own public HTTPS tunnel.</li>
+                  <li>On macOS, Homebrew installs under <code>/opt/homebrew/bin</code> or <code>/usr/local/bin</code>; Gilbert checks those even when launched from Finder.</li>
+                  <li>Click Start bridge. Gilbert starts the local receiver, opens the tunnel, and fills the public Interactions URL.</li>
+                  <li>Paste that URL into the Discord app's Interactions Endpoint URL field and save it so Discord can validate the receiver.</li>
+                  <li>Paste a bot token only when registering slash commands or testing gateway mode, then click Register commands.</li>
+                  <li>Install the app into the target server with the applications.commands scope, then test <code>/gilbert</code> and <code>/gilbertnewchat</code>.</li>
+                  <li>Use an incoming webhook only for one-way channel posts from Gilbert. It cannot read Discord messages.</li>
+                  <li>After pasting a webhook URL, click Send test to confirm Discord accepted and saved the message.</li>
+                  <li>Use a normal text channel webhook for task notifications. Forum and media channels need thread targeting that Tasks v1 does not configure yet.</li>
+                </ol>
+              )}
             </section>
 
             <section className="integration-doc-section" aria-labelledby="discord-docs-links-title">
@@ -649,7 +742,24 @@ function createReadiness(settings: DiscordBridgeSettings): ReadinessItem[] {
   ];
 }
 
-function createDiscordSetupSummary(settings: DiscordBridgeSettings) {
+function createDiscordSetupSummary(settings: DiscordBridgeSettings, hosted: boolean, hostedInteractionsEndpointUrl: string) {
+  if (hosted) {
+    return [
+      "Gilbert Discord setup",
+      "Mode: Slash chat",
+      `Interactions endpoint: ${hostedInteractionsEndpointUrl || "(not loaded)"}`,
+      "Connection: Managed Discord service",
+      "Commands: /gilbert continues, /gilbertnewchat starts fresh",
+      `Allowed guild IDs: ${settings.allowedGuildIds || "(not set)"}`,
+      `Allowed channel IDs: ${settings.allowedChannelIds || "(not set)"}`,
+      "",
+      "Discord Developer Portal",
+      "Paste the interactions endpoint into the app's Interactions Endpoint URL field.",
+      "Install the app with the applications.commands scope.",
+      "Use Register commands in Gilbert after adding a guild ID for immediate server command updates.",
+    ].join("\n");
+  }
+
   return [
     "Gilbert Discord bridge setup",
     `Enabled: ${settings.enabled ? "yes" : "no"}`,
@@ -702,4 +812,23 @@ function readErrorMessage(error: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function readDiscordCloudError(error: unknown) {
+  const message = readErrorMessage(error, "Could not connect Discord.");
+  if (/missing.*oauth.*client.*secret|missing.*client id.*client secret|client id or client secret/i.test(message)) {
+    return "Discord login needs server-side OAuth setup. Contact support, then try again.";
+  }
+  return message;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+
+    promise
+      .then(resolve)
+      .catch(reject)
+      .finally(() => window.clearTimeout(timeoutId));
+  });
 }

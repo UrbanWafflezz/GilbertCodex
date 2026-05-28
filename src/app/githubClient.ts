@@ -321,7 +321,7 @@ export async function pollGithubDeviceLogin(request: GithubPollDeviceLoginReques
 /** Connects with a token pasted by the user and returns the persisted account state. */
 export async function connectGithubWithToken(token: string): Promise<GithubConnectionState> {
   if (githubCloudAvailable()) {
-    throw new Error("Hosted GitHub uses browser sign-in. Personal access tokens are not accepted by the cloud connector.");
+    throw new Error("Hosted GitHub uses browser sign-in. Personal access tokens are not accepted by managed sign-in.");
   }
 
   assertGithubDesktop();

@@ -159,7 +159,7 @@ export function KeysSettingsPage(_props: KeysSettingsPageProps) {
 
           <label className="settings-field">
             <span>Label</span>
-            <input value={draft.label} placeholder="Stripe production restricted key" onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} />
+            <input value={draft.label} placeholder="Production restricted key" onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} />
           </label>
 
           <div className="keys-form-grid">
@@ -175,13 +175,13 @@ export function KeysSettingsPage(_props: KeysSettingsPageProps) {
             </label>
             <label className="settings-field">
               <span>Service</span>
-              <input value={draft.service} placeholder="stripe" onChange={(event) => setDraft((current) => ({ ...current, service: event.target.value }))} />
+              <input value={draft.service} placeholder="service-name" onChange={(event) => setDraft((current) => ({ ...current, service: event.target.value }))} />
             </label>
           </div>
 
           <label className="settings-field">
             <span>Key name</span>
-            <input value={draft.keyName} placeholder="STRIPE_SECRET_KEY" onChange={(event) => setDraft((current) => ({ ...current, keyName: event.target.value }))} />
+            <input value={draft.keyName} placeholder="SERVICE_API_KEY" onChange={(event) => setDraft((current) => ({ ...current, keyName: event.target.value }))} />
           </label>
 
           <label className="settings-field">

@@ -115,7 +115,7 @@ export function ProviderConnectionDialog({
         setConnections([]);
         setModels([]);
         if (!options.quiet) {
-          setStatusMessage({ kind: "warning", text: "Cloud subscription routing is required, but this build does not have a cloud router URL configured." });
+          setStatusMessage({ kind: "warning", text: "Subscription routing is required, but this build is missing its routing URL." });
         }
         return;
       }
@@ -302,7 +302,7 @@ export function ProviderConnectionDialog({
   const primaryBusyLabel = busy === "activate-subscriptions" ? "Using subscriptions" : busy === "fallback" ? "Switching" : busy === "refresh" ? "Checking" : primaryActionLabel;
   const dialogTitle = subscriptionSetupNeeded || cloudSubscriptionsUnavailable ? "Choose how Gilbert connects" : "Connect an AI provider";
   const dialogDescription = cloudSubscriptionsUnavailable
-    ? "Cloud subscriptions are required for this build, but the cloud router URL is not configured yet. Provider keys and OpenRouter fallback remain available."
+    ? "Subscriptions are required for this build, but routing is not configured yet. Provider keys and OpenRouter fallback remain available."
     : subscriptionSetupNeeded
       ? "Subscriptions need one setup step before account sign-in. You can set them up now, use provider keys, or keep going with OpenRouter."
     : "Use subscriptions first, fall back cleanly. Sign in with the provider accounts you already pay for; Gilbert keeps OpenRouter ready when nothing is connected.";
@@ -458,7 +458,7 @@ function createCloudNineRouterStatus(dashboardUrl: string, baseUrl: string): Nin
     installed: true,
     launchSupported: false,
     launched: true,
-    message: "Cloud subscription routing is ready.",
+    message: "Subscription routing is ready.",
     running: true,
   };
 }
@@ -487,7 +487,7 @@ function SubscriptionSetupPanel({
   subscriptionSetupNeeded: boolean;
 }) {
   const headline = cloudSubscriptionsUnavailable
-    ? "Cloud subscriptions need configuration"
+    ? "Subscription routing needs configuration"
     : runtimeChecking
     ? "Checking subscription setup"
     : subscriptionSetupNeeded
@@ -496,13 +496,13 @@ function SubscriptionSetupPanel({
         ? "Subscriptions are starting"
         : "Subscriptions need the desktop app";
   const detail = cloudSubscriptionsUnavailable
-    ? "This official build uses cloud subscription routing. Add the Cloud Run router URL to the build before account sign-in."
+    ? "This build uses managed subscription routing. Add the routing URL before account sign-in."
     : runtimeChecking
     ? "Gilbert is checking this device before showing subscription sign-in options."
-    : subscriptionSetupNeeded
-      ? "After setup, this dialog will show Codex, Copilot, Claude, Gemini, and other subscription accounts you can connect."
+      : subscriptionSetupNeeded
+        ? "After setup, this dialog will show Codex, Copilot, Claude, Gemini, and other subscription accounts you can connect."
       : runtimeInstalled
-        ? "The local subscription runtime is installed and should be ready in a moment."
+        ? "Subscription setup is installed and should be ready in a moment."
         : "Subscription account sign-in is available after local setup. API-key and OpenRouter routes are still available.";
   const installStepState = cloudSubscriptionsUnavailable ? "active" : runtimeInstalled ? "done" : runtimeChecking ? "active" : "next";
   const signInStepState = runtimeInstalled ? "next" : "locked";
@@ -514,13 +514,13 @@ function SubscriptionSetupPanel({
           <h4>{headline}</h4>
           <span>{detail}</span>
         </div>
-        <em>{cloudSubscriptionsUnavailable ? "Cloud URL needed" : runtimeChecking ? "Checking" : runtimeInstalled ? "Installed" : connectedAccountCount > 0 ? `${connectedAccountCount} saved` : "Not installed"}</em>
+        <em>{cloudSubscriptionsUnavailable ? "Setup needed" : runtimeChecking ? "Checking" : runtimeInstalled ? "Installed" : connectedAccountCount > 0 ? `${connectedAccountCount} saved` : "Not installed"}</em>
       </div>
 
       <div className="provider-subscription-step-grid" aria-label="Subscription setup steps">
         <div className="provider-subscription-step" data-state={installStepState}>
-          <strong>1. Cloud router</strong>
-          <span>{cloudSubscriptionsUnavailable ? "Configure the Cloud Run subscription router URL." : "Add subscription routing once."}</span>
+          <strong>1. Routing</strong>
+          <span>{cloudSubscriptionsUnavailable ? "Configure subscription routing." : "Add subscription routing once."}</span>
         </div>
         <div className="provider-subscription-step" data-state={signInStepState}>
           <strong>2. Sign in</strong>
@@ -556,6 +556,11 @@ function formatSubscriptionHelperText(text: string) {
     .replace(/\b[9]Router Local is already running\./g, "Subscriptions are ready.")
     .replace(/\b[9]Router Local is installed\./g, "Subscriptions are installed.")
     .replace(/\b[9]Router Local was started, but the API is not ready yet\./g, "Subscriptions are still starting. Try again in a moment.")
+    .replace(/\b[Cc]loud subscription routing is ready\./g, "Subscription routing is ready.")
+    .replace(/\b[Cc]loud subscription routing is required, but this build does not have a [Cc]loud router URL configured\./g, "Subscription routing is required, but this build is missing its routing URL.")
+    .replace(/\b[Cc]loud router URL\b/g, "routing URL")
+    .replace(/\b[Cc]loud Run\b/g, "routing service")
+    .replace(/\b[Cc]loud subscription routing\b/g, "subscription routing")
     .replace(/\b[9]Router Local\b/g, "subscriptions")
     .replace(/\b[9]Router\b/g, "subscriptions")
     .replace(/\s+at\s+https?:\/\/(?:127\.0\.0\.1|localhost):20128(?:\/[^\s.]*)?/gi, "")

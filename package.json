@@ -1,6 +1,6 @@
 {
   "name": "gilbert-codex",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "GUI-first local desktop agent workspace built with React, Tauri, and Rust.",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
@@ -71,7 +71,7 @@
     "cloud:connectors:build": "node scripts/gcloud.mjs builds submit cloud/connector-gateway --tag us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-connector-gateway:latest --project gilbertcodex-40428",
     "cloud:github:deploy": "node scripts/gcloud.mjs run deploy gilbert-github-connector --image us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-connector-gateway:latest --region us-central1 --project gilbertcodex-40428 --allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=40 --timeout=300 --set-env-vars FIREBASE_PROJECT_ID=gilbertcodex-40428,GILBERT_CONNECTOR_SERVICE=github,GILBERT_PUBLIC_BASE_URL=https://gilbert-github-connector-4bwbtno2aq-uc.a.run.app --set-secrets GITHUB_CLIENT_ID=gilbert-github-oauth-client-id:latest",
     "cloud:google:deploy": "node scripts/gcloud.mjs run deploy gilbert-google-connector --image us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-connector-gateway:latest --region us-central1 --project gilbertcodex-40428 --allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=40 --timeout=300 --set-env-vars FIREBASE_PROJECT_ID=gilbertcodex-40428,GILBERT_CONNECTOR_SERVICE=google,GILBERT_PUBLIC_BASE_URL=https://gilbert-google-connector-4bwbtno2aq-uc.a.run.app --set-secrets GOOGLE_CLIENT_ID=gilbert-google-oauth-client-id:latest,GOOGLE_CLIENT_SECRET=gilbert-google-oauth-client-secret:latest",
-    "cloud:discord:deploy": "node scripts/gcloud.mjs run deploy gilbert-discord-connector --image us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-connector-gateway:latest --region us-central1 --project gilbertcodex-40428 --allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=40 --timeout=300 --set-env-vars FIREBASE_PROJECT_ID=gilbertcodex-40428,GILBERT_CONNECTOR_SERVICE=discord,GILBERT_PUBLIC_BASE_URL=https://gilbert-discord-connector-4bwbtno2aq-uc.a.run.app --set-secrets DISCORD_CLIENT_ID=gilbert-discord-oauth-client-id:latest,DISCORD_PUBLIC_KEY=gilbert-discord-public-key:latest,DISCORD_BOT_TOKEN=gilbert-discord-bot-token:latest"
+    "cloud:discord:deploy": "node scripts/gcloud.mjs run deploy gilbert-discord-connector --image us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-connector-gateway:latest --region us-central1 --project gilbertcodex-40428 --allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=40 --timeout=300 --set-env-vars FIREBASE_PROJECT_ID=gilbertcodex-40428,GILBERT_CONNECTOR_SERVICE=discord,GILBERT_PUBLIC_BASE_URL=https://gilbert-discord-connector-4bwbtno2aq-uc.a.run.app --set-secrets DISCORD_CLIENT_ID=gilbert-discord-oauth-client-id:latest,DISCORD_CLIENT_SECRET=gilbert-discord-oauth-client-secret:latest,DISCORD_PUBLIC_KEY=gilbert-discord-public-key:latest,DISCORD_BOT_TOKEN=gilbert-discord-bot-token:latest"
   },
   "engines": {
     "node": ">=18"

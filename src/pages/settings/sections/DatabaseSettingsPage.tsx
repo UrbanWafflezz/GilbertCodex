@@ -1,5 +1,4 @@
-import { Cloud, Database, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-react";
-import { firebaseProjectId, firebaseWebConfig } from "../../../firebase";
+import { Database, FolderLock, HardDrive, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-react";
 import { SettingsSectionHeading } from "../components/SettingsSectionHeading";
 
 interface DatabaseSettingsPageProps {
@@ -9,21 +8,21 @@ interface DatabaseSettingsPageProps {
 export function DatabaseSettingsPage({ showHeading = true }: DatabaseSettingsPageProps = {}) {
   return (
     <>
-      {showHeading ? <SettingsSectionHeading detail="Cloud account data, Firebase security, and sync status." icon={Database} title="Cloud Data" /> : null}
+      {showHeading ? <SettingsSectionHeading detail="Account data, privacy, and sync status." icon={Database} title="Library & Data" /> : null}
       <div className="settings-section-grid database-settings-grid">
         <article className="settings-card settings-card-wide database-storage-hero">
           <div className="settings-card-heading">
-            <Cloud size={19} aria-hidden="true" />
+            <FolderLock size={19} aria-hidden="true" />
             <div>
-              <h2>Firebase workspace</h2>
-              <p>{firebaseProjectId}</p>
+              <h2>Private workspace</h2>
+              <p>Your account keeps chats, projects, files, settings, and plan state separate from every other user.</p>
             </div>
           </div>
           <div className="database-metric-grid">
-            <CloudDataMetric icon={Database} label="Primary database" value="Cloud Firestore" detail="Chats, projects, settings, usage, and billing state sync through the signed-in account." />
-            <CloudDataMetric icon={Cloud} label="Storage bucket" value="Firebase Storage" detail={firebaseWebConfig.storageBucket} />
-            <CloudDataMetric icon={LockKeyhole} label="Access model" value="Per-user rules" detail="Only the signed-in Firebase UID can read or write its workspace data." />
-            <CloudDataMetric icon={ShieldCheck} label="Local database" value="Disconnected" detail="The app hydrates from Firebase before the workspace opens." />
+            <AccountDataMetric icon={Database} label="Workspace data" value="Private account library" detail="Chats, projects, settings, usage, and plan state stay attached to your sign-in." />
+            <AccountDataMetric icon={HardDrive} label="Files and images" value="Account storage" detail="Uploaded files and generated media stay scoped to your account." />
+            <AccountDataMetric icon={LockKeyhole} label="Access model" value="Owner-only" detail="Only your signed-in account can read or write your workspace data." />
+            <AccountDataMetric icon={ShieldCheck} label="Local cache" value="Protected" detail="Gilbert keeps local app state separate for each signed-in user." />
           </div>
         </article>
 
@@ -31,30 +30,30 @@ export function DatabaseSettingsPage({ showHeading = true }: DatabaseSettingsPag
           <div className="settings-card-heading">
             <ShieldCheck size={19} aria-hidden="true" />
             <div>
-              <h2>Security rules</h2>
-              <p>Firestore and Storage rules are deployed for the Gilbert Codex cloud project.</p>
+              <h2>Privacy rules</h2>
+              <p>Account data is separated by owner and protected from client-side plan changes.</p>
             </div>
           </div>
           <div className="settings-row-list">
             <div className="settings-row">
-              <span>Users</span>
+              <span>Workspace</span>
               <strong>Owner-only</strong>
-              <em>users/&lt;uid&gt; and nested cloud app storage</em>
+              <em>Your chats, projects, and settings</em>
             </div>
             <div className="settings-row">
               <span>Username lookup</span>
-              <strong>Readable</strong>
-              <em>required for username sign-in before Cloud Functions are added</em>
+              <strong>Sign-in only</strong>
+              <em>Used to find your account during login</em>
             </div>
             <div className="settings-row">
-              <span>Billing customer records</span>
-              <strong>Server-only writes</strong>
-              <em>ready for Stripe webhook ownership</em>
+              <span>Plan records</span>
+              <strong>Protected writes</strong>
+              <em>Users cannot grant themselves paid access</em>
             </div>
             <div className="settings-row">
               <span>Files and images</span>
               <strong>Owner-only</strong>
-              <em>users/&lt;uid&gt;/... in Firebase Storage</em>
+              <em>Saved only under your account</em>
             </div>
           </div>
         </article>
@@ -64,21 +63,21 @@ export function DatabaseSettingsPage({ showHeading = true }: DatabaseSettingsPag
             <RefreshCw size={19} aria-hidden="true" />
             <div>
               <h2>Sync behavior</h2>
-              <p>Gilbert hydrates cloud state before rendering the workspace, then queues Firestore writes during normal app use.</p>
+              <p>Gilbert loads your account state before opening the workspace, then saves changes as you work.</p>
             </div>
           </div>
           <div className="settings-row-list">
             <div className="settings-row">
               <span>Authentication</span>
-              <strong>Firebase Auth</strong>
+              <strong>Gilbert account</strong>
             </div>
             <div className="settings-row">
               <span>Workspace persistence</span>
-              <strong>Firestore</strong>
+              <strong>Account library</strong>
             </div>
             <div className="settings-row">
               <span>Media persistence</span>
-              <strong>Storage-ready</strong>
+              <strong>Account files</strong>
             </div>
           </div>
         </article>
@@ -87,14 +86,14 @@ export function DatabaseSettingsPage({ showHeading = true }: DatabaseSettingsPag
   );
 }
 
-interface CloudDataMetricProps {
+interface AccountDataMetricProps {
   detail: string;
   icon: typeof Database;
   label: string;
   value: string;
 }
 
-function CloudDataMetric({ detail, icon: Icon, label, value }: CloudDataMetricProps) {
+function AccountDataMetric({ detail, icon: Icon, label, value }: AccountDataMetricProps) {
   return (
     <div className="database-metric">
       <Icon size={17} aria-hidden="true" />

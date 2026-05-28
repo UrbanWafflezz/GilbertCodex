@@ -31,6 +31,9 @@ export interface CloudConnectorApiResponse<TData = unknown> {
 
 export const CLOUD_CONNECTOR_FIREBASE_ID_TOKEN_HEADER = "X-Gilbert-Firebase-ID-Token";
 
+const CLOUD_CONNECTOR_REQUEST_TIMEOUT_MS = 15_000;
+const CLOUD_CONNECTOR_TOKEN_TIMEOUT_MS = 8_000;
+
 const CONNECTOR_URL_ENV: Record<CloudConnectorKind, string> = {
   discord: "VITE_GILBERT_DISCORD_CONNECTOR_URL",
   github: "VITE_GILBERT_GITHUB_CONNECTOR_URL",
@@ -89,14 +92,14 @@ export async function waitForCloudConnectorOAuth<TAccount>(
     }
 
     if (status.status === "error" || status.status === "expired") {
-      throw new Error(status.error || status.message || "Cloud sign-in failed.");
+      throw new Error(status.error || status.message || "Sign-in failed.");
     }
 
     await delay(intervalMs, options.signal);
     intervalMs = Math.min(intervalMs + 250, 5000);
   }
 
-  throw new Error("Cloud sign-in timed out. Start sign-in again.");
+  throw new Error("Sign-in timed out. Start sign-in again.");
 }
 
 export async function cloudConnectorApi<TData = unknown>(
@@ -121,29 +124,59 @@ export async function cloudConnectorApi<TData = unknown>(
 export async function cloudConnectorRequest<TResponse>(kind: CloudConnectorKind, path: string, init: RequestInit = {}): Promise<TResponse> {
   const baseUrl = getConfiguredCloudConnectorUrl(kind);
   if (!baseUrl) {
-    throw new Error(`${kind} cloud connector is not configured.`);
+    throw new Error(`${formatCloudConnectorName(kind)} sign-in is not configured.`);
   }
 
   const user = getGilbertFirebaseAuth().currentUser;
-  const token = user ? await user.getIdToken().catch(() => "") : "";
+  const token = user
+    ? await withCloudConnectorTimeout(
+      user.getIdToken().catch(() => ""),
+      CLOUD_CONNECTOR_TOKEN_TIMEOUT_MS,
+      "Could not refresh your Gilbert sign-in token. Sign out and back in, then try again.",
+    )
+    : "";
   if (!token) {
-    throw new Error("Sign in to Gilbert before connecting cloud apps.");
+    throw new Error("Sign in to Gilbert before connecting apps.");
   }
 
   const headers = new Headers(init.headers);
   headers.set(CLOUD_CONNECTOR_FIREBASE_ID_TOKEN_HEADER, token);
 
-  const response = await fetch(`${baseUrl}${path}`, {
+  const response = await fetchCloudConnector(kind, `${baseUrl}${path}`, {
     ...init,
     headers,
   });
   const payload = await readJsonResponse(response);
 
   if (!response.ok) {
-    throw new Error(readErrorMessage(payload, `${kind} cloud connector failed with HTTP ${response.status}.`));
+    throw new Error(readErrorMessage(payload, `${formatCloudConnectorName(kind)} connection failed with HTTP ${response.status}.`));
   }
 
   return payload as TResponse;
+}
+
+async function fetchCloudConnector(kind: CloudConnectorKind, url: string, init: RequestInit) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), CLOUD_CONNECTOR_REQUEST_TIMEOUT_MS);
+  const upstreamSignal = init.signal;
+  const onUpstreamAbort = () => controller.abort();
+
+  upstreamSignal?.addEventListener("abort", onUpstreamAbort, { once: true });
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`${formatCloudConnectorName(kind)} did not respond. Check your connection and try again.`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+    upstreamSignal?.removeEventListener("abort", onUpstreamAbort);
+  }
 }
 
 function normalizeConnectorUrl(value: string) {
@@ -190,6 +223,21 @@ function readErrorMessage(payload: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function formatCloudConnectorName(kind: CloudConnectorKind) {
+  return kind === "github" ? "GitHub" : kind === "google" ? "Google" : "Discord";
+}
+
+function withCloudConnectorTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+
+    promise
+      .then(resolve)
+      .catch(reject)
+      .finally(() => window.clearTimeout(timeoutId));
+  });
 }
 
 function delay(ms: number, signal?: AbortSignal) {

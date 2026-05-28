@@ -525,7 +525,7 @@ export const lightThemePresets: ModeThemePreset[] = [
   {
     id: "cloud-notebook",
     mode: "light",
-    name: "Cloud Notebook",
+    name: "Notebook Blue",
     theme: preset({ accent: "#2D7FF9", background: "#F7FBFF", border: "#CFDAE8", dim: "#718094", foreground: "#1E2A37", muted: "#56677C", pageAlt: "#ECF4FD", panel: "#FFFFFF", raised: "#E4EEF9", cyan: "#15AABF", rose: "#D6336C", sidebar: "#EFF6FF", sidebarWarm: "#E7F0FB", effect: "spotlight", codeFont: GEIST_MONO, uiFont: MAC_POLISHED_UI }),
   },
   {
@@ -651,7 +651,7 @@ export const lightThemePresets: ModeThemePreset[] = [
   {
     id: "cloudburst-light",
     mode: "light",
-    name: "Cloudburst",
+    name: "Blueburst",
     theme: preset({ accent: "#1C7ED6", background: "#F4F9FF", border: "#C5D6E8", cyan: "#1098AD", dim: "#698197", foreground: "#152B3E", muted: "#4A6680", pageAlt: "#E1EEF9", panel: "#FBFDFF", raised: "#D7E6F4", rose: "#D6336C", sidebar: "#E9F4FD", sidebarWarm: "#DCECF8", effect: "ocean", codeFont: GEIST_MONO }),
   },
   {
