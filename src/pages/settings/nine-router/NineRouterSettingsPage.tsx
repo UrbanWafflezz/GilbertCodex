@@ -29,6 +29,7 @@ import {
   chooseNineRouterModelForAccount,
   chooseNineRouterModelForConnectedAccounts,
   getNineRouterAccountProviderForModel,
+  getNineRouterCodexRedirectUri,
   hasNineRouterAccountConnection,
   choosePreferredConnection,
   formatConnectionExpiry,
@@ -40,7 +41,6 @@ import {
   NINE_ROUTER_CODEX_MAX_POLL_ATTEMPTS,
   NINE_ROUTER_CODEX_POLL_INTERVAL_MS,
   NINE_ROUTER_CODEX_PROXY_APP_PORT,
-  NINE_ROUTER_CODEX_REDIRECT_URI,
   NINE_ROUTER_DASHBOARD_FALLBACK,
   NINE_ROUTER_DEVICE_POLL_MAX_ATTEMPTS,
   NINE_ROUTER_PROVIDER_ID,
@@ -59,6 +59,14 @@ import {
   type NineRouterOAuthPollResponse,
   type NineRouterTunnelStatus,
 } from "../../../services/nineRouterClient";
+import {
+  getConfiguredNineRouterBaseUrl,
+  getConfiguredNineRouterDashboardUrl,
+  isConfiguredNineRouterCloudEnabled,
+  isNineRouterCloudRequired,
+  isNineRouterNativeBridgeUrl,
+  withNineRouterCloudAuthHeaders,
+} from "../../../services/nineRouterCloud";
 import type { ProviderSettings, SubscriptionCodexContextWindow, SubscriptionFallbackMode, SubscriptionTokenSaverLevel } from "../../../types/settings";
 import { ConfirmDialog } from "../../../components/dialogs/AppDialog";
 import { SettingsSectionHeading } from "../components/SettingsSectionHeading";
@@ -212,8 +220,15 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
   const [uninstallConfirmOpen, setUninstallConfirmOpen] = useState(false);
   const [usageByConnectionId, setUsageByConnectionId] = useState<Record<string, NineRouterUsageState>>({});
   const isNineRouterActive = settings.provider === NINE_ROUTER_PROVIDER_ID;
-  const nineRouterBaseUrl = settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim() || status?.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID);
-  const nineRouterDashboardUrl = status?.dashboardUrl || NINE_ROUTER_DASHBOARD_FALLBACK;
+  const configuredCloudSubscriptions = isConfiguredNineRouterCloudEnabled();
+  const cloudSubscriptionsRequired = isNineRouterCloudRequired();
+  const savedNineRouterBaseUrl = settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim() || "";
+  const nineRouterBaseUrl = configuredCloudSubscriptions
+    ? getConfiguredNineRouterBaseUrl(savedNineRouterBaseUrl || status?.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID))
+    : savedNineRouterBaseUrl || status?.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID);
+  const cloudSubscriptionsEnabled = configuredCloudSubscriptions || (!cloudSubscriptionsRequired && !isNineRouterNativeBridgeUrl(nineRouterBaseUrl));
+  const cloudSubscriptionsUnavailable = cloudSubscriptionsRequired && !configuredCloudSubscriptions;
+  const nineRouterDashboardUrl = cloudSubscriptionsEnabled ? getConfiguredNineRouterDashboardUrl(nineRouterBaseUrl) : status?.dashboardUrl || NINE_ROUTER_DASHBOARD_FALLBACK;
   const billingTier = getBillingPlanTier(settings.billingPlan);
   const subscriptionAccountsLocked = billingTier === "free";
   const primaryLanBaseUrl = status?.lanBaseUrls?.[0] ?? "";
@@ -255,7 +270,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     Boolean(savedNineRouterModel) &&
     !modelCatalog.models.includes(savedNineRouterModel);
   const desktopRuntime = isTauriDesktopRuntime();
-  const helperReady = Boolean(status?.running && status.installed);
+  const helperReady = cloudSubscriptionsEnabled || Boolean(status?.running && status.installed);
   const helperInstalled = Boolean(status?.installed);
   const helperInstalling = busy === "install" || installProgress.status === "running";
   const helperStarting = busy === "start";
@@ -271,7 +286,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
   const tunnelEnabled = Boolean(advancedSettings.tunnel?.enabled || advancedSettings.tunnel?.running || tunnelUrl);
   const cavemanEnabled = advancedSettings.settings?.cavemanEnabled === true;
   const hasRecoverableSubscriptionFootprint = !helperInstalled && Boolean(status?.dataDir || status?.installDir);
-  const showInstalledRuntimeRemoval = helperInstalled && !helperInstalling && !helperStarting;
+  const showInstalledRuntimeRemoval = !cloudSubscriptionsEnabled && helperInstalled && !helperInstalling && !helperStarting;
   const showInstallProgress = busy === "install" || installProgress.status === "running" || installProgress.status === "error";
   const showUninstallProgress = busy === "uninstall" || uninstallProgress?.status === "running" || uninstallProgress?.status === "error";
   const installBlocked = useMemo(() => {
@@ -287,7 +302,9 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
 
     return missing.length > 0 ? `${missing.join(", ")} required` : "";
   }, [desktopRuntime, status]);
-  const helperInstallBlocked = !status?.installed && (desktopRuntime ? installBlocked : "Open the desktop app to install subscriptions");
+  const helperInstallBlocked = cloudSubscriptionsUnavailable
+    ? "Cloud subscription routing is required for this build but no cloud router URL is configured."
+    : !status?.installed && (desktopRuntime ? installBlocked : "Open the desktop app to install subscriptions");
   const displayStatusMessage = statusMessage
     ? {
         ...statusMessage,
@@ -297,6 +314,11 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
 
   useEffect(() => {
     const cancelStartup = scheduleIdleTask(() => {
+      if (cloudSubscriptionsEnabled || cloudSubscriptionsUnavailable) {
+        void refreshStatus({ quiet: true });
+        return;
+      }
+
       void startNineRouter({ quiet: true });
     }, 350);
 
@@ -326,6 +348,28 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     }
 
     try {
+      if (cloudSubscriptionsEnabled) {
+        const cloudStatus = createCloudNineRouterStatus(nineRouterDashboardUrl, nineRouterBaseUrl);
+        setStatus(cloudStatus);
+        if (!options.quiet) {
+          setStatusMessage({ kind: "success", text: cloudStatus.message });
+        }
+        void refreshProviderConnections({ quiet: true });
+        void refreshModelCatalog({ quiet: true });
+        void refreshSubscriptionOptimizer({ quiet: true });
+        void refreshAdvancedSettings({ quiet: true });
+        void syncTokenSaverToHelper(tokenSaverLevel, { quiet: true });
+        return;
+      }
+
+      if (cloudSubscriptionsUnavailable) {
+        setStatus(null);
+        if (!options.quiet) {
+          setStatusMessage({ kind: "warning", text: "Cloud subscription routing is required, but this build does not have a cloud router URL configured." });
+        }
+        return;
+      }
+
       const nextStatus = await getNineRouterLocalStatus();
       setStatus(nextStatus);
       if (!options.quiet) {
@@ -354,6 +398,11 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     }
 
     try {
+      if (cloudSubscriptionsEnabled) {
+        await refreshStatus(options);
+        return;
+      }
+
       const nextStatus = await setNineRouterLocalAutoStart(true).catch(() => ensureNineRouterLocal());
       setStatus(nextStatus);
       if (!options.quiet) {
@@ -918,7 +967,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     try {
       let nextStatus = status;
       if (!nextStatus?.running) {
-        nextStatus = await ensureNineRouterLocal();
+        nextStatus = cloudSubscriptionsEnabled ? createCloudNineRouterStatus(nineRouterDashboardUrl, nineRouterBaseUrl) : await ensureNineRouterLocal();
         setStatus(nextStatus);
       }
 
@@ -926,9 +975,14 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
         throw new Error(nextStatus.message || "Set up subscriptions before connecting Codex.");
       }
 
-      await stopCodexOAuthProxy();
+      const useDesktopCallback = !isNineRouterNativeBridgeUrl(nineRouterDashboardUrl);
+      const callback = useDesktopCallback ? await startNineRouterOAuthCallback({ path: "/auth/callback", port: 1455 }) : null;
+      if (!useDesktopCallback) {
+        await stopCodexOAuthProxy();
+      }
+      const redirectUri = callback?.redirectUri || getNineRouterCodexRedirectUri(nineRouterDashboardUrl);
       const authUrl = createNineRouterUrl(nineRouterDashboardUrl, "/api/oauth/codex/authorize", {
-        redirect_uri: NINE_ROUTER_CODEX_REDIRECT_URI,
+        redirect_uri: redirectUri,
       });
       const authData = await fetchNineRouterJson<NineRouterAuthorizeResponse>(authUrl);
 
@@ -936,21 +990,54 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
         throw new Error("Subscriptions did not return a complete Codex sign-in request.");
       }
 
-      const proxyUrl = createNineRouterUrl(nineRouterDashboardUrl, "/api/oauth/codex/start-proxy", {
-        app_port: NINE_ROUTER_CODEX_PROXY_APP_PORT,
-        code_verifier: authData.codeVerifier,
-        redirect_uri: NINE_ROUTER_CODEX_REDIRECT_URI,
-        state: authData.state,
-      });
-      const proxy = await fetchNineRouterJson<NineRouterCodexProxyResponse>(proxyUrl);
+      if (useDesktopCallback && callback) {
+        setStatusMessage({ kind: "warning", text: "Finish the OpenAI sign-in in your browser. Gilbert will pick it up automatically." });
+        await openExternalUrl(authData.authUrl);
+        const callbackData = await finishNineRouterOAuthCallback(callback.id, 300_000);
 
-      if (!proxy.success || !proxy.serverSide) {
-        throw new Error(proxy.reason === "port_busy" ? "Codex sign-in is already open. Finish or close the previous sign-in window, then retry." : "Subscriptions could not start the Codex sign-in callback.");
+        if (accountConnectRunRef.current !== runId) {
+          return;
+        }
+
+        if (callbackData.error) {
+          throw new Error(callbackData.errorDescription || callbackData.error);
+        }
+
+        if (!callbackData.code) {
+          throw new Error("OpenAI did not return an authorization code.");
+        }
+
+        if (callbackData.state && callbackData.state !== authData.state) {
+          throw new Error("OpenAI sign-in returned an unexpected state. Restart Codex sign-in and try again.");
+        }
+
+        const exchange = await postNineRouterJson<NineRouterExchangeResponse>(joinLocalUrl(nineRouterDashboardUrl, "/api/oauth/codex/exchange"), {
+          code: callbackData.code,
+          codeVerifier: authData.codeVerifier,
+          redirectUri,
+          state: authData.state,
+        });
+
+        if (!exchange.success) {
+          throw new Error(exchange.errorDescription || exchange.error || "Codex sign-in did not complete.");
+        }
+      } else {
+        const proxyUrl = createNineRouterUrl(nineRouterDashboardUrl, "/api/oauth/codex/start-proxy", {
+          app_port: NINE_ROUTER_CODEX_PROXY_APP_PORT,
+          code_verifier: authData.codeVerifier,
+          redirect_uri: redirectUri,
+          state: authData.state,
+        });
+        const proxy = await fetchNineRouterJson<NineRouterCodexProxyResponse>(proxyUrl);
+
+        if (!proxy.success || !proxy.serverSide) {
+          throw new Error(proxy.reason === "port_busy" ? "Codex sign-in is already open. Finish or close the previous sign-in window, then retry." : "Subscriptions could not start the Codex sign-in callback.");
+        }
+
+        setStatusMessage({ kind: "warning", text: "Finish the OpenAI sign-in in your browser. Gilbert will pick it up automatically." });
+        await openExternalUrl(authData.authUrl);
+        await waitForCodexConnection(nineRouterDashboardUrl, authData.state, runId);
       }
-
-      setStatusMessage({ kind: "warning", text: "Finish the OpenAI sign-in in your browser. Gilbert will pick it up automatically." });
-      await openExternalUrl(authData.authUrl);
-      await waitForCodexConnection(authData.state, runId);
 
       if (accountConnectRunRef.current !== runId) {
         return;
@@ -966,7 +1053,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
       activateConnectedAccountModel("Codex subscription", nextModel, `${formatConnectionIdentity(connectedCodex) || "Codex"} is connected. Gilbert is using ${nextModel} through your subscriptions.`);
     } catch (error) {
       if (accountConnectRunRef.current === runId) {
-        setStatusMessage({ kind: "error", text: error instanceof Error ? error.message : "Could not connect Codex." });
+        setStatusMessage({ kind: "error", text: readErrorMessage(error, "Could not connect Codex.") });
       }
     } finally {
       void stopCodexOAuthProxy();
@@ -990,7 +1077,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     try {
       let nextStatus = status;
       if (!nextStatus?.running) {
-        nextStatus = await ensureNineRouterLocal();
+        nextStatus = cloudSubscriptionsEnabled ? createCloudNineRouterStatus(nineRouterDashboardUrl, nineRouterBaseUrl) : await ensureNineRouterLocal();
         setStatus(nextStatus);
       }
 
@@ -1005,7 +1092,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
       }
     } catch (error) {
       if (accountConnectRunRef.current === runId) {
-        setStatusMessage({ kind: "error", text: error instanceof Error ? error.message : `Could not connect ${provider.name}.` });
+        setStatusMessage({ kind: "error", text: readErrorMessage(error, `Could not connect ${provider.name}.`) });
       }
     } finally {
       if (accountConnectRunRef.current === runId) {
@@ -1031,7 +1118,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
     try {
       let nextStatus = status;
       if (!nextStatus?.running) {
-        nextStatus = await ensureNineRouterLocal();
+        nextStatus = cloudSubscriptionsEnabled ? createCloudNineRouterStatus(nineRouterDashboardUrl, nineRouterBaseUrl) : await ensureNineRouterLocal();
         setStatus(nextStatus);
       }
 
@@ -1376,7 +1463,35 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
         </div>
       ) : null}
       <div className="settings-section-grid">
-        {!helperReady ? (
+        {cloudSubscriptionsUnavailable ? (
+          <article className="settings-card settings-card-wide">
+            <div className="settings-card-heading">
+              <Cloud size={19} aria-hidden="true" />
+              <div>
+                <h2>Cloud subscriptions</h2>
+                <p>This build is configured for cloud subscription routing, but no cloud router URL is set.</p>
+              </div>
+            </div>
+            <div className="settings-row-list">
+              <div className="settings-row">
+                <span>Router</span>
+                <strong>Cloud Run URL missing from this build.</strong>
+                <span className="settings-row-static-pill">Required</span>
+              </div>
+              <div className="settings-row">
+                <span>Accounts</span>
+                <strong>Subscription accounts stay isolated by Firebase user after the cloud router is configured.</strong>
+                <span className="settings-row-static-pill">Cloud</span>
+              </div>
+            </div>
+            <div className="settings-actions-row">
+              <button className="settings-ghost-button" type="button" disabled={busy !== null} onClick={() => refreshStatus()}>
+                <RefreshCcw size={16} aria-hidden="true" />
+                {busy === "status" ? "Checking" : "Check again"}
+              </button>
+            </div>
+          </article>
+        ) : !helperReady ? (
           <>
             <article className="settings-card settings-card-wide" aria-busy={helperInstalling || helperStarting || !status}>
             <div className="settings-card-heading">
@@ -1811,7 +1926,7 @@ export function NineRouterSettingsPage({ onActivateProvider, onSettingsChange, o
                   <div className="nine-router-advanced-panel-heading">
                     <ExternalLink size={16} aria-hidden="true" />
                     <strong>Dashboard</strong>
-                    <span>Local</span>
+                    <span>{cloudSubscriptionsEnabled ? "Cloud" : "Local"}</span>
                   </div>
                   <button className="settings-ghost-button settings-full-width-button" type="button" onClick={() => openDashboardPath("/dashboard")}>
                     <ExternalLink size={16} aria-hidden="true" />
@@ -1934,7 +2049,15 @@ function formatTokenSaverLevel(level: SubscriptionTokenSaverLevel) {
 }
 
 function readErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  return fallback;
 }
 
 function getSubscriptionSetupStatusLabel(
@@ -2458,9 +2581,23 @@ function titleCaseProviderText(value: string) {
     .join(" ");
 }
 
-async function waitForCodexConnection(state: string, _runId: number) {
+function createCloudNineRouterStatus(dashboardUrl: string, baseUrl: string): NineRouterLocalStatus {
+  return {
+    autoStartEnabled: true,
+    baseUrl,
+    built: true,
+    dashboardUrl,
+    installed: true,
+    launchSupported: false,
+    launched: true,
+    message: "Cloud subscription routing is ready.",
+    running: true,
+  };
+}
+
+async function waitForCodexConnection(dashboardUrl: string, state: string, _runId: number) {
   for (let attempt = 0; attempt < NINE_ROUTER_CODEX_MAX_POLL_ATTEMPTS; attempt += 1) {
-    const payload = await fetchNineRouterJson<NineRouterCodexPollResponse>(createNineRouterUrl(NINE_ROUTER_DASHBOARD_FALLBACK, "/api/oauth/codex/poll-status", {
+    const payload = await fetchNineRouterJson<NineRouterCodexPollResponse>(createNineRouterUrl(dashboardUrl, "/api/oauth/codex/poll-status", {
       state,
     }));
 
@@ -2557,15 +2694,16 @@ async function deleteNineRouterConnection(dashboardUrl: string, connectionId: st
 
 async function fetchWithTimeout(url: string, init: RequestInit) {
   const controller = new AbortController();
-  const timeoutId = globalThis.setTimeout(() => controller.abort(), 10_000);
+  const timeoutMs = isNineRouterNativeBridgeUrl(url) ? 10_000 : 60_000;
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    if (isTauriDesktopRuntime()) {
+    if (isTauriDesktopRuntime() && isNineRouterNativeBridgeUrl(url)) {
       const nativeResponse = await nineRouterLocalHttp({
         body: normalizeNativeRequestBody(init.body, "The subscriptions bridge"),
         headers: headersToRecord(init.headers),
         method: normalizeNativeRequestMethod(init.method, "The subscriptions bridge"),
-        timeoutMs: 10_000,
+        timeoutMs,
         url,
       });
 
@@ -2575,13 +2713,14 @@ async function fetchWithTimeout(url: string, init: RequestInit) {
       });
     }
 
+    const requestInit = await withNineRouterCloudAuthHeaders(url, init);
     return await fetch(url, {
-      ...init,
+      ...requestInit,
       signal: controller.signal,
     });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`Subscriptions did not answer ${url} within 10 seconds.`);
+      throw new Error(`Subscriptions did not answer ${url} within ${Math.round(timeoutMs / 1000)} seconds.`);
     }
 
     const message = error instanceof Error ? error.message : String(error);

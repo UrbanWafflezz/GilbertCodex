@@ -1,18 +1,18 @@
 {
   "name": "gilbert-codex",
-  "version": "0.8.2",
+  "version": "0.8.5",
   "description": "GUI-first local desktop agent workspace built with React, Tauri, and Rust.",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "author": "Gilbert Codex Contributors",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/UrbanWafflezz/GilbertCodex.git"
+    "url": "git+https://github.com/UrbanWafflezz/GilbertCodex-Official.git"
   },
   "bugs": {
-    "url": "https://github.com/UrbanWafflezz/GilbertCodex/issues"
+    "url": "https://gilbertcodex.com/help"
   },
-  "homepage": "https://github.com/UrbanWafflezz/GilbertCodex#readme",
+  "homepage": "https://gilbertcodex.com",
   "keywords": [
     "agent",
     "desktop",
@@ -55,7 +55,23 @@
     "app:release": "node scripts/run-tauri-host-release.mjs",
     "app:release:windows": "npm run installer:assets && npm run dictation:model && npm run dictation:vulkan-sdk && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-native-whisper-command.ps1 tauri build --bundles nsis --config src-tauri/tauri.updater.conf.json --features offline-dictation-gpu",
     "app:release:macos": "tauri build --bundles app,dmg --config src-tauri/tauri.macos.updater.conf.json",
-    "app:release:linux": "tauri build --bundles deb,appimage --config src-tauri/tauri.linux.updater.conf.json"
+    "app:release:linux": "tauri build --bundles deb,appimage --config src-tauri/tauri.linux.updater.conf.json",
+    "release:firebase:prepare": "node scripts/prepare-firebase-release.mjs",
+    "firebase:deploy:firestore-rules": "npx --yes firebase-tools deploy --only firestore:rules --project gilbertcodex-40428",
+    "firebase:deploy:rules": "npx --yes firebase-tools deploy --only firestore:rules,storage --project gilbertcodex-40428",
+    "firebase:deploy:storage-rules": "npx --yes firebase-tools deploy --only storage --project gilbertcodex-40428",
+    "firebase:emulators": "npx --yes firebase-tools emulators:start --only auth,firestore,storage --project gilbertcodex-40428",
+    "cloud:9router:check": "npm --prefix cloud/nine-router-gateway run check",
+    "cloud:9router:build": "node scripts/gcloud.mjs builds submit cloud/nine-router-gateway --tag us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-nine-router-gateway:latest --project gilbertcodex-40428",
+    "cloud:9router:deploy": "node scripts/gcloud.mjs run deploy gilbert-nine-router-gateway --image us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-nine-router-gateway:latest --region us-central1 --project gilbertcodex-40428 --allow-unauthenticated --min-instances=1 --max-instances=1 --concurrency=10 --timeout=3600 --set-env-vars FIREBASE_PROJECT_ID=gilbertcodex-40428,FIREBASE_STORAGE_BUCKET=gilbertcodex-40428.firebasestorage.app,GILBERT_PUBLIC_BASE_URL=https://gilbert-nine-router-gateway-4bwbtno2aq-uc.a.run.app",
+    "cloud:billing:check": "npm --prefix cloud/billing-gateway run check",
+    "cloud:billing:build": "node scripts/gcloud.mjs builds submit cloud/billing-gateway --tag us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-billing-gateway:latest --project gilbertcodex-40428",
+    "cloud:billing:deploy": "node scripts/gcloud.mjs run deploy gilbert-billing-gateway --image us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-billing-gateway:latest --region us-central1 --project gilbertcodex-40428 --allow-unauthenticated --min-instances=1 --max-instances=3 --concurrency=40 --timeout=300 --set-env-vars FIREBASE_PROJECT_ID=gilbertcodex-40428,GILBERT_BILLING_RETURN_URL=https://gilbertcodex.com/billing,STRIPE_PORTAL_CONFIGURATION_ID=bpc_1TbsPyRutIy9oqiFTTjy5eSY --set-secrets STRIPE_SECRET_KEY=gilbert-stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=gilbert-stripe-webhook-secret:latest",
+    "cloud:connectors:check": "npm --prefix cloud/connector-gateway run check",
+    "cloud:connectors:build": "node scripts/gcloud.mjs builds submit cloud/connector-gateway --tag us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-connector-gateway:latest --project gilbertcodex-40428",
+    "cloud:github:deploy": "node scripts/gcloud.mjs run deploy gilbert-github-connector --image us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-connector-gateway:latest --region us-central1 --project gilbertcodex-40428 --allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=40 --timeout=300 --set-env-vars FIREBASE_PROJECT_ID=gilbertcodex-40428,GILBERT_CONNECTOR_SERVICE=github,GILBERT_PUBLIC_BASE_URL=https://gilbert-github-connector-4bwbtno2aq-uc.a.run.app --set-secrets GITHUB_CLIENT_ID=gilbert-github-oauth-client-id:latest",
+    "cloud:google:deploy": "node scripts/gcloud.mjs run deploy gilbert-google-connector --image us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-connector-gateway:latest --region us-central1 --project gilbertcodex-40428 --allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=40 --timeout=300 --set-env-vars FIREBASE_PROJECT_ID=gilbertcodex-40428,GILBERT_CONNECTOR_SERVICE=google,GILBERT_PUBLIC_BASE_URL=https://gilbert-google-connector-4bwbtno2aq-uc.a.run.app --set-secrets GOOGLE_CLIENT_ID=gilbert-google-oauth-client-id:latest,GOOGLE_CLIENT_SECRET=gilbert-google-oauth-client-secret:latest",
+    "cloud:discord:deploy": "node scripts/gcloud.mjs run deploy gilbert-discord-connector --image us-central1-docker.pkg.dev/gilbertcodex-40428/gilbert-cloud/gilbert-connector-gateway:latest --region us-central1 --project gilbertcodex-40428 --allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=40 --timeout=300 --set-env-vars FIREBASE_PROJECT_ID=gilbertcodex-40428,GILBERT_CONNECTOR_SERVICE=discord,GILBERT_PUBLIC_BASE_URL=https://gilbert-discord-connector-4bwbtno2aq-uc.a.run.app --set-secrets DISCORD_CLIENT_ID=gilbert-discord-oauth-client-id:latest,DISCORD_PUBLIC_KEY=gilbert-discord-public-key:latest,DISCORD_BOT_TOKEN=gilbert-discord-bot-token:latest"
   },
   "engines": {
     "node": ">=18"
@@ -65,6 +81,7 @@
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "firebase": "^11.10.0",
     "lucide-react": "^0.468.0",
     "mapbox-gl": "^3.23.1",
     "qrcode": "^1.5.4",

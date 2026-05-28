@@ -1,0 +1,61 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owns(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function createsFreeBillingPlan() {
+      return !("billingPlan" in request.resource.data)
+        || request.resource.data.billingPlan.tier == "free";
+    }
+
+    function keepsServerBillingPlan() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(["billingPlan"]);
+    }
+
+    match /users/{userId} {
+      allow read: if owns(userId);
+      allow create: if owns(userId) && createsFreeBillingPlan();
+      allow update: if owns(userId) && keepsServerBillingPlan();
+      allow delete: if false;
+
+      match /{document=**} {
+        allow read, create, update, delete: if owns(userId);
+      }
+    }
+
+    match /usernames/{username} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username == username
+        && request.resource.data.email == request.auth.token.email;
+      allow update, delete: if false;
+    }
+
+    match /billingCustomers/{userId} {
+      allow read: if owns(userId);
+      allow create, update, delete: if false;
+
+      match /{document=**} {
+        allow read: if owns(userId);
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /plans/{planId} {
+      allow read: if true;
+      allow create, update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, create, update, delete: if false;
+    }
+  }
+}

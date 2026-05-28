@@ -475,7 +475,9 @@ fn wait_for_desktop_payload(
     let started_at = now_millis();
     loop {
         if let Ok(inner) = state.lock() {
-            if inner.desktop_sync_version > since_version || now_millis().saturating_sub(started_at) >= 25_000 {
+            if inner.desktop_sync_version > since_version
+                || now_millis().saturating_sub(started_at) >= 25_000
+            {
                 return (inner.desktop_payload.clone(), inner.desktop_sync_version);
             }
         } else {
@@ -793,7 +795,10 @@ mod tests {
         let (payload, version) = wait_for_desktop_payload(&state, 1);
 
         assert_eq!(version, 2);
-        assert_eq!(payload.and_then(|value| value["value"].as_str().map(str::to_string)), Some("new".to_string()));
+        assert_eq!(
+            payload.and_then(|value| value["value"].as_str().map(str::to_string)),
+            Some("new".to_string())
+        );
     }
 
     #[test]
@@ -821,7 +826,9 @@ mod tests {
 
         let mut client = TcpStream::connect(("127.0.0.1", port)).expect("client");
         client
-            .write_all(b"GET /sync/watch?token=pair-token&version=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            .write_all(
+                b"GET /sync/watch?token=pair-token&version=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            )
             .expect("write request");
         let mut response = String::new();
         client.read_to_string(&mut response).expect("read response");

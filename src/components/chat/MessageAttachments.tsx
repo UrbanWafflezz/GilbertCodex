@@ -529,6 +529,18 @@ export function OpenableImage({
 }: OpenableImageProps) {
   const [viewerOpen, setViewerOpen] = useState(false);
 
+  useEffect(() => {
+    if (!viewerOpen || typeof document === "undefined") {
+      return;
+    }
+
+    document.documentElement.classList.add("image-viewer-open");
+
+    return () => {
+      document.documentElement.classList.remove("image-viewer-open");
+    };
+  }, [viewerOpen]);
+
   return (
     <>
       <button className={className ?? "message-image-button"} type="button" aria-label={`Open ${alt}`} onClick={() => setViewerOpen(true)}>
@@ -537,16 +549,19 @@ export function OpenableImage({
           <Maximize2 size={15} aria-hidden="true" />
         </span>
       </button>
-      {viewerOpen ? (
-        <ImageLightbox
-          alt={alt}
-          caption={caption}
-          downloadName={downloadName}
-          showCaption={showViewerCaption}
-          src={src}
-          onClose={() => setViewerOpen(false)}
-        />
-      ) : null}
+      {viewerOpen && typeof document !== "undefined"
+        ? createPortal(
+          <ImageLightbox
+            alt={alt}
+            caption={caption}
+            downloadName={downloadName}
+            showCaption={showViewerCaption}
+            src={src}
+            onClose={() => setViewerOpen(false)}
+          />,
+          document.body,
+        )
+        : null}
     </>
   );
 }

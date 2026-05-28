@@ -16,6 +16,7 @@ interface GithubSettingsPageProps {
   githubRequestedScope: string;
   githubStartingLogin: boolean;
   githubStatus: SettingsStatusMessage | null;
+  githubUsesCloud: boolean;
   hasFullGithubAccess: boolean;
   missingGithubScopes: string[];
   onCancelBrowserLogin: () => void;
@@ -36,7 +37,7 @@ const GITHUB_DOC_LINKS = [
   { href: "https://docs.github.com/en/rest/repos/contents", label: "Contents API" },
   { href: "https://docs.github.com/en/rest/pulls/pulls", label: "Pull requests API" },
   { href: "https://docs.github.com/en/rest/actions/workflows", label: "Actions workflows" },
-  { href: "https://github.com/UrbanWafflezz/GilbertCodex/blob/main/docs/github/README.md", label: "Repo setup guide" },
+  { href: "https://gilbertcodex.com/help", label: "Setup guide" },
 ] as const;
 
 export function GithubSettingsPage({
@@ -52,6 +53,7 @@ export function GithubSettingsPage({
   githubRequestedScope,
   githubStartingLogin,
   githubStatus,
+  githubUsesCloud,
   hasFullGithubAccess,
   missingGithubScopes,
   onCancelBrowserLogin,
@@ -62,7 +64,10 @@ export function GithubSettingsPage({
   onUpdateGithubOauthClientId,
 }: GithubSettingsPageProps) {
   const hasGithubOauthClientId = Boolean(githubOauthClientId.trim());
-  const loginStatusNote = githubDevicePolling
+  const githubLoginUsesDeviceCode = githubDeviceLogin?.userCode !== "BROWSER";
+  const loginStatusNote = githubUsesCloud
+    ? "Hosted GitHub OAuth is configured for this build. Users only need to sign in in the browser."
+    : githubDevicePolling
     ? "Finish or cancel the current GitHub browser sign-in before changing the Client ID."
     : hasGithubOauthClientId
       ? "Client ID saved locally. No client secret is used for device-flow sign-in."
@@ -78,7 +83,7 @@ export function GithubSettingsPage({
             <Github size={19} aria-hidden="true" />
             <div>
               <h2>Connection</h2>
-              <p>Authorize repositories, workflows, packages, gists, and pull requests from one desktop token.</p>
+              <p>{githubUsesCloud ? "Authorize repositories, workflows, packages, gists, and pull requests through the hosted connector." : "Authorize repositories, workflows, packages, gists, and pull requests from one desktop token."}</p>
             </div>
           </div>
 
@@ -91,7 +96,7 @@ export function GithubSettingsPage({
                 {githubConnection.connected ? (hasFullGithubAccess ? "Full access" : "Reconnect needed") : "Not connected"}
               </span>
               <strong>{githubConnection.connected ? githubConnection.user?.login ?? "GitHub" : "Sign in with GitHub"}</strong>
-              <small>{githubConnection.connected ? accountDetail : "Use your browser to authorize source-control access."}</small>
+              <small>{githubConnection.connected ? accountDetail : githubUsesCloud ? "No local OAuth setup needed." : "Use your browser to authorize source-control access."}</small>
             </div>
           </div>
 
@@ -113,18 +118,18 @@ export function GithubSettingsPage({
           {githubDeviceLogin ? (
             <div className="github-device-login-panel" aria-live="polite">
               <div>
-                <span>Enter this code on GitHub</span>
-                <strong>{githubDeviceLogin.userCode}</strong>
+                <span>{githubLoginUsesDeviceCode ? "Enter this code on GitHub" : "Finish sign-in on GitHub"}</span>
+                <strong>{githubLoginUsesDeviceCode ? githubDeviceLogin.userCode : "Browser authorization"}</strong>
               </div>
               <div className="github-device-actions">
                 <a className="settings-ghost-button" href={githubDeviceLogin.verificationUri} rel="noreferrer" target="_blank">
                   <ExternalLink size={16} aria-hidden="true" />
                   Open GitHub
                 </a>
-                <button className="settings-ghost-button" type="button" onClick={onCopyUserCode}>
+                {githubLoginUsesDeviceCode ? <button className="settings-ghost-button" type="button" onClick={onCopyUserCode}>
                   <Copy size={16} aria-hidden="true" />
                   Copy code
-                </button>
+                </button> : null}
                 <button className="settings-ghost-button" type="button" onClick={onCancelBrowserLogin}>
                   <X size={16} aria-hidden="true" />
                   Cancel
@@ -160,34 +165,44 @@ export function GithubSettingsPage({
             <KeyRound size={19} aria-hidden="true" />
             <div>
               <h2>OAuth app</h2>
-              <p>{githubConnection.connected ? (hasFullGithubAccess ? "Token has the requested scope set." : "Reconnect after changing scopes.") : "Saved locally for browser sign-in."}</p>
+              <p>{githubUsesCloud ? "Hosted in Google Cloud. No user-supplied Client ID is needed." : githubConnection.connected ? (hasFullGithubAccess ? "Token has the requested scope set." : "Reconnect after changing scopes.") : "Saved locally for browser sign-in."}</p>
             </div>
           </div>
 
-          <label className="settings-field">
-            <span>Client ID</span>
-            <input
-              autoComplete="off"
-              disabled={githubDevicePolling}
-              placeholder="Paste GitHub Client ID"
-              value={githubOauthClientId}
-              onChange={(event) => onUpdateGithubOauthClientId(event.target.value)}
-            />
-            <small className="settings-field-note" data-kind={hasGithubOauthClientId ? "ready" : "error"}>
-              {loginStatusNote}
-            </small>
-          </label>
+          {githubUsesCloud ? (
+            <div className="github-scope-summary">
+              <ShieldCheck size={16} aria-hidden="true" />
+              <span>Hosted OAuth</span>
+              <code>Cloud Run</code>
+            </div>
+          ) : (
+            <label className="settings-field">
+              <span>Client ID</span>
+              <input
+                autoComplete="off"
+                disabled={githubDevicePolling}
+                placeholder="Paste GitHub Client ID"
+                value={githubOauthClientId}
+                onChange={(event) => onUpdateGithubOauthClientId(event.target.value)}
+              />
+              <small className="settings-field-note" data-kind={hasGithubOauthClientId ? "ready" : "error"}>
+                {loginStatusNote}
+              </small>
+            </label>
+          )}
 
-          <div className="settings-actions-row github-oauth-actions">
-            <a className="settings-ghost-button github-doc-link" href="https://github.com/settings/developers" rel="noreferrer" target="_blank">
-              <ExternalLink size={16} aria-hidden="true" />
-              Create OAuth App
-            </a>
-            <a className="settings-ghost-button github-doc-link" href="https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps" rel="noreferrer" target="_blank">
-              <ExternalLink size={16} aria-hidden="true" />
-              Device flow docs
-            </a>
-          </div>
+          {!githubUsesCloud ? (
+            <div className="settings-actions-row github-oauth-actions">
+              <a className="settings-ghost-button github-doc-link" href="https://github.com/settings/developers" rel="noreferrer" target="_blank">
+                <ExternalLink size={16} aria-hidden="true" />
+                Create OAuth App
+              </a>
+              <a className="settings-ghost-button github-doc-link" href="https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps" rel="noreferrer" target="_blank">
+                <ExternalLink size={16} aria-hidden="true" />
+                Device flow docs
+              </a>
+            </div>
+          ) : null}
 
           <div className="github-scope-summary">
             <ShieldCheck size={16} aria-hidden="true" />

@@ -1,6 +1,6 @@
 # Google OAuth Setup
 
-Last updated: May 25, 2026 for the v0.8.2 build.
+Last updated: May 28, 2026 for the v0.8.5 build.
 
 Gilbert Codex uses a bring-your-own Google OAuth setup. Each user supplies their own Google Cloud Desktop OAuth Client ID and Client secret in Settings > Google before connecting Gmail, Google Calendar, or Tasks.
 

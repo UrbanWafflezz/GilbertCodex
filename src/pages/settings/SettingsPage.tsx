@@ -10,6 +10,7 @@ import {
   getGithubState,
   getMissingRequiredGithubOAuthScopes,
   getRequiredGithubOAuthScopes,
+  githubCloudAvailable,
   githubDesktopAvailable,
   listGithubRepositories,
   openGithubDeviceLogin,
@@ -195,6 +196,7 @@ function SettingsPageComponent({
     [activeProvider.label, activeProviderBaseUrl, liveProviderModelError, liveProviderModelCount, liveProviderModelStatus],
   );
   const githubAccountDetail = githubConnection.connected ? formatGithubAccountDetail(githubConnection) : "";
+  const githubUsesCloud = githubCloudAvailable();
 
   useEffect(() => {
     return () => {
@@ -380,7 +382,11 @@ function SettingsPageComponent({
         const nextInterval = result.interval ?? (result.status === "slowDown" ? intervalSeconds + 5 : intervalSeconds);
         setGithubStatus({
           kind: "success",
-          text: result.status === "slowDown" ? "GitHub asked us to slow down. Keep the browser sign-in open." : `Waiting for GitHub authorization for code ${session.userCode}.`,
+          text: result.status === "slowDown"
+            ? "GitHub asked us to slow down. Keep the browser sign-in open."
+            : session.userCode === "BROWSER"
+              ? "Waiting for GitHub browser authorization."
+              : `Waiting for GitHub authorization for code ${session.userCode}.`,
         });
         scheduleGithubDevicePoll(session, clientId, runId, nextInterval);
         return;
@@ -409,14 +415,16 @@ function SettingsPageComponent({
       return;
     }
 
-    const clientId = githubOauthClientId.trim();
+    const clientId = githubUsesCloud ? "cloud" : githubOauthClientId.trim();
 
-    if (!clientId) {
+    if (!githubUsesCloud && !clientId) {
       setGithubStatus({ kind: "error", text: "Paste a GitHub OAuth App Client ID first, or use Create OAuth App in the OAuth card." });
       return;
     }
 
-    saveGithubOAuthClientId(clientId);
+    if (!githubUsesCloud) {
+      saveGithubOAuthClientId(clientId);
+    }
     githubDeviceRunRef.current += 1;
     const runId = githubDeviceRunRef.current;
 
@@ -428,7 +436,7 @@ function SettingsPageComponent({
 
     try {
       const session = await withTimeout(
-        beginGithubDeviceLogin({ clientId }),
+        beginGithubDeviceLogin({ clientId, scope: githubRequestedScope }),
         GITHUB_DEVICE_LOGIN_START_TIMEOUT_MS,
         "GitHub browser login did not start in time. Check your internet connection, confirm Device Flow is enabled on the OAuth App, then try again.",
       );
@@ -439,10 +447,16 @@ function SettingsPageComponent({
 
       setGithubDeviceLogin(session);
       setGithubDevicePolling(true);
-      setGithubStatus({ kind: "success", text: `Your GitHub code is ${session.userCode}. Enter it in the browser to finish signing in.` });
+      const usesDeviceCode = session.userCode !== "BROWSER";
+      setGithubStatus({
+        kind: "success",
+        text: usesDeviceCode
+          ? `Your GitHub code is ${session.userCode}. Enter it in the browser to finish signing in.`
+          : "Complete GitHub sign-in in the browser to finish connecting.",
+      });
       scheduleGithubDevicePoll(session, clientId, runId, session.interval);
 
-      if (navigator.clipboard?.writeText) {
+      if (usesDeviceCode && navigator.clipboard?.writeText) {
         void navigator.clipboard.writeText(session.userCode).then(() => {
           if (mountedRef.current && githubDeviceRunRef.current === runId) {
             setGithubStatus({ kind: "success", text: `Your GitHub code is ${session.userCode}. It was copied for the browser.` });
@@ -456,7 +470,9 @@ function SettingsPageComponent({
         if (mountedRef.current && githubDeviceRunRef.current === runId) {
           setGithubStatus({
             kind: "success",
-            text: `Your GitHub code is ${session.userCode}. Open ${session.verificationUri} and enter it to finish signing in.`,
+            text: usesDeviceCode
+              ? `Your GitHub code is ${session.userCode}. Open ${session.verificationUri} and enter it to finish signing in.`
+              : `Open ${session.verificationUri} to finish GitHub sign-in.`,
           });
         }
       }
@@ -915,6 +931,7 @@ function SettingsPageComponent({
           githubRequestedScope={githubRequestedScope}
           githubStartingLogin={githubStartingLogin}
           githubStatus={githubStatus}
+          githubUsesCloud={githubUsesCloud}
           hasFullGithubAccess={hasFullGithubAccess}
           missingGithubScopes={missingGithubScopes}
           onCancelBrowserLogin={cancelGithubBrowserLogin}

@@ -1,0 +1,19 @@
+{
+  "name": "@gilbert-codex/billing-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Firebase-authenticated Stripe Billing gateway for Gilbert Codex.",
+  "scripts": {
+    "check": "node --check src/firebase.js && node --check src/http.js && node --check src/server.js && node --check src/stripeBilling.js && node --check src/subscriptionPlan.js && npm run test",
+    "test": "node --test tests/*.test.js",
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0",
+    "stripe": "^18.5.0"
+  }
+}

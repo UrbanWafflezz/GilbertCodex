@@ -117,6 +117,36 @@ describe("AssistantWorkTrace", () => {
     expect(html).toContain("aria-expanded=\"true\"");
   });
 
+  it("collapses work details as soon as the public response starts", () => {
+    const message = assistantMessage({
+      content: "Here is the public response.",
+      isStreaming: true,
+      reasoning: "I checked the files and found the answer.",
+      streamTiming: {
+        requestStartedAt: "2026-05-27T12:00:00.000Z",
+      },
+      toolCalls: [
+        {
+          fileChanges: [{ additions: 8, deletions: 2, kind: "update", path: "src/app.ts" }],
+          id: "tool-1",
+          label: "Edit file",
+          status: "complete",
+        },
+      ],
+    });
+    const html = renderToStaticMarkup(createElement(AssistantWorkTrace, {
+      activitySnapshot: createAssistantActivitySnapshot(message),
+      createdAt: message.createdAt,
+      message,
+      responseStarted: true,
+    }));
+
+    expect(html).toContain("Working for");
+    expect(html).toContain("aria-expanded=\"false\"");
+    expect(html).not.toContain("I checked the files");
+    expect(html).not.toContain("src/app.ts");
+  });
+
   it("shows file creation deltas and MCP calls in the expanded work ledger", () => {
     const message = assistantMessage({
       isStreaming: true,

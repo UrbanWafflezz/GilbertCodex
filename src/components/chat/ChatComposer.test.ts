@@ -21,6 +21,7 @@ import {
 } from "./ChatComposer";
 import type { ChatAttachment } from "../../types/chat";
 import type { ComputerGitStatus, LocalWorkspaceSettings } from "../../types/localWorkspace";
+import { NINE_ROUTER_ALWAYS_FREE_MODEL } from "../../lib/models";
 
 const workspaceOff: LocalWorkspaceSettings = {
   enabled: false,
@@ -152,6 +153,7 @@ describe("chat composer media fallback notice", () => {
   it("stays hidden for native OpenAI and Codex subscription image routes", () => {
     expect(shouldShowMediaFallbackNotice([imageAttachment], "openai", "gpt-5.5")).toBe(false);
     expect(shouldShowMediaFallbackNotice([imageAttachment], "9router", "cx/gpt-5.5")).toBe(false);
+    expect(shouldShowMediaFallbackNotice([imageAttachment], "9router", NINE_ROUTER_ALWAYS_FREE_MODEL)).toBe(false);
   });
 
   it("shows only when the selected model needs media fallback", () => {

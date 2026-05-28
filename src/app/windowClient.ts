@@ -1,7 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, type WindowOptions } from "@tauri-apps/api/window";
+import type { WebviewOptions } from "@tauri-apps/api/webview";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { isTauriDesktopRuntime } from "./tauriClient";
+import { getHostPlatform, isMacHostPlatform, type HostPlatform } from "../lib/hostPlatform";
+
+type PlatformWebviewWindowOptions = Pick<WebviewOptions, "acceptFirstMouse"> & Pick<WindowOptions, "tabbingIdentifier">;
+
+const MACOS_WEBVIEW_WINDOW_OPTIONS = {
+  acceptFirstMouse: true,
+  tabbingIdentifier: "gilbert-codex",
+} satisfies PlatformWebviewWindowOptions;
 
 async function withWindow(action: (window: ReturnType<typeof getCurrentWindow>) => Promise<void>) {
   try {
@@ -77,6 +86,7 @@ export async function openChatWindow(chatId: string, title: string) {
     url,
     visible: false,
     width: 1120,
+    ...getPlatformWebviewWindowOptions(),
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -96,4 +106,8 @@ export function createChatRouteUrl(chatId: string) {
 
 function sanitizeWindowLabel(value: string) {
   return value.replace(/[^a-zA-Z0-9-/:_]/g, "-").slice(0, 96) || `${Date.now()}`;
+}
+
+export function getPlatformWebviewWindowOptions(platform: HostPlatform | string | null | undefined = getHostPlatform()): PlatformWebviewWindowOptions {
+  return isMacHostPlatform(platform) ? MACOS_WEBVIEW_WINDOW_OPTIONS : {};
 }

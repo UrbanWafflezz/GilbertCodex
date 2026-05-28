@@ -2,7 +2,7 @@
 
 This document tracks what is known about running Gilbert Codex on Windows, macOS, and Linux.
 
-Last updated: May 25, 2026 for the v0.8.2 build.
+Last updated: May 28, 2026 for the v0.8.5 build.
 
 ## Current Support State
 
@@ -22,6 +22,8 @@ The macOS and Linux port is intentionally marked launch-unverified. The codebase
 - Platform updater release scripts keep those same native bundle settings through `src-tauri/tauri.macos.updater.conf.json` and `src-tauri/tauri.linux.updater.conf.json` instead of merging only the generic updater flag.
 - `npm run app:build` and `npm run app:release` dispatch to the native host's desktop build or updater-release script instead of assuming Windows.
 - The GitHub `Release` workflow builds Windows first, then macOS Apple Silicon/Intel, then Linux x64 so updater metadata is merged without parallel upload races. macOS artifacts use ad-hoc signing when Apple Developer signing/notarization secrets are not configured.
+- Tag releases publish the public website/updater feed to Firebase Storage after the private GitHub release artifacts exist. The installed app checks Firebase Storage instead of a private GitHub URL.
+- Official product builds use the hosted Cloud Run 9Router gateway for subscription routes, so normal users do not need Docker or a local subscription runtime to use Free, Plus trial, or Pro routing.
 - Main and detached chat windows use Tauri window-state persistence so the next launch restores the user's last size, screen position, maximized state, and fullscreen state instead of forcing a fresh maximize.
 - First-launch window defaults are centered, resizable, constrained to the working area, and sized to fit common laptop and snapped-window layouts.
 - The desktop terminal host code supports PowerShell/cmd on Windows and Bash/Zsh/sh on macOS and Linux, with macOS zsh/bash interactive sessions started as login shells so Homebrew and user shell paths behave like Terminal.
@@ -68,6 +70,7 @@ Someone with access to macOS and Linux should verify:
 - GitHub device-flow login, token persistence, repository reads, branch creation, API commits, pull request creation, release helpers, and workflow actions.
 - Discord slash-command bridge startup, ngrok discovery, interaction validation, and response editing.
 - Subscriptions/9Router install, auto-start, account sign-in, Free Auto routing, local/LAN URLs, tunnel toggle, and uninstall.
+- Hosted 9Router routing, Firebase-authenticated billing refresh, Plus trial entitlement, and model picker gates.
 - Desktop notifications and permission prompts.
 - Browser preview panel and local dev-server URL detection.
 - Packaged app launch from the generated macOS or Linux artifact.
@@ -140,7 +143,8 @@ Before calling macOS or Linux officially supported:
 - Packaging artifacts are generated on that OS and launched outside the dev environment.
 - Known limitations are recorded in release notes.
 - Checksums are published for new release artifacts.
-- The README download section is updated from partial source support to official support.
+- Firebase Storage `releases/latest.json` and `releases/manifest.json` are public and point at the current release files.
+- The README and website download sections are updated from private/internal release status to the official public download flow.
 
 ## Reporting Results
 

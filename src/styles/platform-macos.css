@@ -1,0 +1,484 @@
+.desktop-root[data-runtime="desktop"][data-platform="macos"] {
+  --motion-fast: 140ms;
+  --motion-medium: 220ms;
+  --motion-slow: 360ms;
+  --motion-ease: cubic-bezier(0.2, 0.82, 0.2, 1);
+  --motion-ease-pop: cubic-bezier(0.17, 0.92, 0.22, 1);
+  --motion-ease-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --macos-glass-bg: color-mix(in srgb, var(--surface-panel) 70%, transparent);
+  --macos-glass-bg-strong: color-mix(in srgb, var(--surface-raised) 82%, transparent);
+  --macos-glass-menu: color-mix(in srgb, var(--popover-bg) 78%, transparent);
+  --macos-glass-border: color-mix(in srgb, var(--text) 13%, transparent);
+  --macos-glass-highlight: color-mix(in srgb, white 8%, transparent);
+  --macos-glass-hover: color-mix(in srgb, var(--text) 9%, transparent);
+  --macos-glass-shadow: 0 18px 54px color-mix(in srgb, black 24%, transparent);
+  --macos-glass-shadow-soft: 0 10px 30px color-mix(in srgb, black 14%, transparent);
+  --macos-scroll-edge-bg: color-mix(in srgb, var(--chat-page-bg) 82%, transparent);
+  --macos-scroll-edge-strong-bg: color-mix(in srgb, var(--chat-page-bg) 94%, var(--macos-glass-bg-strong) 6%);
+  --macos-content-shadow: 0 8px 26px color-mix(in srgb, black 10%, transparent);
+  --macos-control-shadow-active: inset 0 1px 0 var(--macos-glass-highlight), 0 5px 16px color-mix(in srgb, black 12%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--workspace-bg) 96%, white 4%), var(--workspace-bg)),
+    var(--workspace-bg);
+}
+
+:root[data-theme="light"] .desktop-root[data-runtime="desktop"][data-platform="macos"] {
+  --macos-glass-bg: color-mix(in srgb, white 72%, transparent);
+  --macos-glass-bg-strong: color-mix(in srgb, white 88%, transparent);
+  --macos-glass-menu: color-mix(in srgb, white 84%, transparent);
+  --macos-glass-border: rgba(24, 34, 48, 0.13);
+  --macos-glass-highlight: rgba(255, 255, 255, 0.66);
+  --macos-glass-hover: rgba(24, 34, 48, 0.07);
+  --macos-glass-shadow: 0 18px 48px rgba(36, 52, 72, 0.17);
+  --macos-glass-shadow-soft: 0 10px 28px rgba(36, 52, 72, 0.1);
+  --macos-scroll-edge-bg: rgba(248, 251, 255, 0.78);
+  --macos-scroll-edge-strong-bg: rgba(248, 251, 255, 0.92);
+  --macos-content-shadow: 0 8px 24px rgba(36, 52, 72, 0.08);
+  --macos-control-shadow-active: inset 0 1px 0 rgba(255, 255, 255, 0.72), 0 5px 14px rgba(36, 52, 72, 0.1);
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .app-topbar {
+  border-bottom-color: var(--macos-glass-border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--macos-glass-bg-strong) 86%, white 7%), color-mix(in srgb, var(--macos-glass-bg) 84%, transparent)),
+    var(--macos-glass-bg);
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-left {
+  gap: 7px;
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-center,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-weather,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .app-update-indicator,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-action-group,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-shell,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-control {
+  border: 1px solid var(--macos-glass-border);
+  background:
+    linear-gradient(180deg, var(--macos-glass-highlight), transparent),
+    var(--macos-glass-bg);
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-center {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 11px;
+  box-shadow: var(--macos-glass-shadow-soft) !important;
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .shell-sidebar,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .browser-preview-window,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .coding-sidecar-window,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .terminal-panel {
+  border-color: var(--macos-glass-border);
+  box-shadow: var(--macos-glass-shadow) !important;
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .shell-sidebar {
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, var(--macos-glass-highlight), transparent 42%),
+    var(--macos-glass-bg);
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-frame,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .settings-page {
+  border-color: color-mix(in srgb, var(--line-soft) 84%, transparent);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--chat-page-bg) 96%, var(--surface-panel) 4%);
+  box-shadow: var(--macos-content-shadow) !important;
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-header {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--chat-page-bg) 88%, var(--macos-glass-bg-strong) 12%), color-mix(in srgb, var(--chat-page-bg) 82%, transparent)),
+    color-mix(in srgb, var(--chat-page-bg) 90%, transparent);
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-action-group {
+  min-height: 40px;
+  border-radius: 15px;
+  box-shadow: var(--macos-glass-shadow-soft) !important;
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-tools .icon-button,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-main,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-menu-button,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-tools-trigger,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-options-button,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-tool,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .mode-chip,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .project-toggle,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .local-toggle,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .branch-toggle,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-toggle,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .context-window-chip {
+  border-color: transparent;
+  background: transparent;
+  transform: translateZ(0);
+  transform-origin: center;
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-tools .icon-button:hover,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-tools .icon-button[data-pressed="true"],
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-main:hover:not(:disabled),
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-menu-button:hover:not(:disabled),
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-control[data-open="true"] .project-open-main,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-control[data-open="true"] .project-open-menu-button,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-tools-trigger:hover,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-tools-control[data-open="true"] .workspace-tools-trigger,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-tools-trigger[data-active="true"],
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-options-button:hover,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-menu-anchor[data-open="true"] .conversation-options-button,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-tool:hover,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-tool[data-active="true"],
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .mode-chip:hover,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .mode-chip[data-active="true"] {
+  color: var(--text);
+  background:
+    linear-gradient(180deg, var(--macos-glass-highlight), transparent),
+    var(--macos-glass-hover);
+  box-shadow: var(--macos-control-shadow-active);
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-menu-panel,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .sidebar-item-menu,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-menu,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-tools-menu,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-options-menu,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-popover,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-submenu,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .model-selector-popover,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .search-dialog,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .app-dialog {
+  border-color: var(--macos-glass-border);
+  background:
+    linear-gradient(180deg, var(--macos-glass-highlight), transparent 44%),
+    var(--macos-glass-menu);
+  box-shadow: var(--macos-glass-shadow) !important;
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-shell {
+  border-radius: 24px;
+  box-shadow: var(--macos-glass-shadow) !important;
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .chat-thread-shell::before,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .chat-thread-shell::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 12;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease-soft);
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .chat-thread-shell::before {
+  top: var(--conversation-header-height, 54px);
+  height: 68px;
+  background:
+    linear-gradient(180deg, var(--macos-scroll-edge-strong-bg), var(--macos-scroll-edge-bg) 42%, transparent),
+    linear-gradient(180deg, color-mix(in srgb, var(--macos-glass-highlight) 72%, transparent), transparent 46%);
+  transform: translate3d(0, -4px, 0);
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .chat-thread-shell::after {
+  bottom: 0;
+  height: min(150px, var(--composer-clearance, 244px));
+  background:
+    linear-gradient(0deg, var(--macos-scroll-edge-strong-bg), var(--macos-scroll-edge-bg) 52%, transparent),
+    linear-gradient(0deg, color-mix(in srgb, black 11%, transparent), transparent 52%);
+  transform: translate3d(0, 6px, 0);
+}
+
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .chat-thread-shell[data-scroll-top="false"]::before,
+.desktop-root[data-runtime="desktop"][data-platform="macos"] .chat-thread-shell[data-scroll-bottom="false"]::after {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .app-topbar,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-center,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-weather,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .app-update-indicator,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .shell-sidebar,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-header,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-action-group,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-shell,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-menu-panel,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .sidebar-item-menu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-menu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-tools-menu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-options-menu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-popover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-submenu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .model-selector-popover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .search-dialog,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .app-dialog {
+    -webkit-backdrop-filter: blur(22px) saturate(1.28);
+    backdrop-filter: blur(22px) saturate(1.28);
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .chat-thread-shell::before,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .chat-thread-shell::after {
+    -webkit-backdrop-filter: blur(12px) saturate(1.18);
+    backdrop-filter: blur(12px) saturate(1.18);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-center,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-weather,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .app-update-indicator,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-action-group,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-shell,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-control {
+    transition:
+      border-color var(--motion-fast) var(--motion-ease),
+      background var(--motion-fast) var(--motion-ease),
+      box-shadow var(--motion-fast) var(--motion-ease),
+      transform var(--motion-fast) var(--motion-ease-soft);
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-tools .icon-button,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-main,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-menu-button,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-tools-trigger,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-options-button,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-tool,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .mode-chip,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-toggle,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .local-toggle,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .branch-toggle,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-toggle,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .context-window-chip {
+    transition:
+      color var(--motion-fast) var(--motion-ease),
+      background var(--motion-fast) var(--motion-ease),
+      box-shadow var(--motion-fast) var(--motion-ease),
+      transform var(--motion-fast) var(--motion-ease-soft);
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-center:hover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-weather:hover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .app-update-indicator:hover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-action-group:focus-within,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-control[data-open="true"] {
+    transform: translate3d(0, -1px, 0);
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-tools .icon-button:hover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-main:hover:not(:disabled),
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-menu-button:hover:not(:disabled),
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-tools-trigger:hover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-options-button:hover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-tool:hover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .mode-chip:hover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-toggle:hover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .local-toggle:hover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .branch-toggle:hover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-toggle:hover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .context-window-chip:hover {
+    transform: translate3d(0, -1px, 0) scale(1.01);
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-tools .icon-button:active,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-main:active:not(:disabled),
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-menu-button:active:not(:disabled),
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-tools-trigger:active,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-options-button:active,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-tool:active,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .mode-chip:active,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-toggle:active,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .local-toggle:active,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .branch-toggle:active,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-toggle:active,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .context-window-chip:active {
+    transform: translate3d(0, 0, 0) scale(0.985);
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .shell-sidebar[data-open="true"] {
+    animation: macos-sidebar-reveal 320ms var(--motion-ease-soft) both;
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .shell-sidebar[data-open="false"] {
+    animation: macos-sidebar-dismiss 220ms var(--motion-ease) both;
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-menu-panel,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .sidebar-item-menu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-menu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-tools-menu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-options-menu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-popover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-submenu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .model-selector-popover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .search-dialog,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .app-dialog {
+    animation: macos-glass-materialize 180ms var(--motion-ease-soft) both;
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .side-panel-presence[data-presence="enter"] .right-rail,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .side-panel-presence[data-presence="enter"] .coding-sidecar-panel,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .side-panel-presence[data-presence="enter"] .browser-preview-panel {
+    animation: macos-tool-panel-in 240ms var(--motion-ease-soft) both;
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .side-panel-presence[data-presence="exit"] .right-rail,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .side-panel-presence[data-presence="exit"] .coding-sidecar-panel,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .side-panel-presence[data-presence="exit"] .browser-preview-panel {
+    animation: macos-tool-panel-out 170ms var(--motion-ease) both;
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .terminal-presence[data-presence="enter"] .terminal-panel {
+    animation: macos-terminal-in 240ms var(--motion-ease-soft) both;
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .terminal-presence[data-presence="exit"] .terminal-panel {
+    animation: macos-terminal-out 170ms var(--motion-ease) both;
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .message-block:last-child {
+    animation: macos-content-settle 260ms var(--motion-ease-soft) both;
+  }
+}
+
+@keyframes macos-glass-materialize {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -4px, 0) scale(0.986);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes macos-sidebar-reveal {
+  from {
+    opacity: 0;
+    transform: translate3d(-14px, 0, 0) scale(0.992);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes macos-sidebar-dismiss {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(-12px, 0, 0) scale(0.994);
+  }
+}
+
+@keyframes macos-tool-panel-in {
+  from {
+    opacity: 0;
+    transform: translate3d(12px, 0, 0) scale(0.992);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes macos-tool-panel-out {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(12px, 0, 0) scale(0.994);
+  }
+}
+
+@keyframes macos-terminal-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.992);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes macos-terminal-out {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.994);
+  }
+}
+
+@keyframes macos-content-settle {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 5px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] {
+    --macos-glass-bg: var(--surface-panel);
+    --macos-glass-bg-strong: var(--surface-raised);
+    --macos-glass-menu: var(--popover-bg);
+    --macos-glass-border: color-mix(in srgb, var(--text) 22%, transparent);
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .app-topbar,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-center,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-weather,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .app-update-indicator,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .shell-sidebar,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-header,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-action-group,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-shell,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .topbar-menu-panel,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .sidebar-item-menu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .project-open-menu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .workspace-tools-menu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .conversation-options-menu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-popover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .composer-submenu,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .model-selector-popover,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .search-dialog,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .app-dialog {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .chat-thread-shell::before,
+  .desktop-root[data-runtime="desktop"][data-platform="macos"] .chat-thread-shell::after {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

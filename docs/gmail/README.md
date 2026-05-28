@@ -1,6 +1,6 @@
 # Gmail Plugin Setup
 
-Last updated: May 25, 2026 for the v0.8.2 build.
+Last updated: May 28, 2026 for the v0.8.5 build.
 
 The user flow should stay simple:
 

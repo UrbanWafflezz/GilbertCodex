@@ -1,4 +1,5 @@
 import type { DiscordBridgeSettings } from "../types/discord";
+import { isCloudConnectorEnabled } from "../services/cloudConnectorClient";
 import { getDiscordBridgeStatus, startDiscordBridge, type DiscordBridgeStatus } from "./tauriClient";
 
 export interface DiscordBridgeAutoStartResult {
@@ -28,6 +29,10 @@ export function createDiscordBridgeConfigKey(settings: DiscordBridgeSettings) {
 export function createDiscordBridgeAutoStartKey(settings: DiscordBridgeSettings) {
   if (!settings.enabled || !settings.autoStartBridge || settings.mode !== "interactions") {
     return null;
+  }
+
+  if (isCloudConnectorEnabled("discord")) {
+    return "cloud";
   }
 
   if (!settings.applicationId.trim() || !settings.publicKey.trim()) {
@@ -66,6 +71,15 @@ export async function ensureDiscordBridgeAutoStarted(settings: DiscordBridgeSett
 
 async function runDiscordBridgeAutoStart(settings: DiscordBridgeSettings, configKey: string): Promise<DiscordBridgeAutoStartResult> {
   const currentStatus = await getDiscordBridgeStatus().catch(() => null);
+
+  if (configKey === "cloud") {
+    return {
+      configKey,
+      settings: currentStatus ? mergeDiscordBridgeStatusSettings(settings, currentStatus) : settings,
+      started: false,
+      status: currentStatus,
+    };
+  }
 
   if (currentStatus && isDiscordBridgeRunningForConfig(currentStatus, configKey)) {
     return {

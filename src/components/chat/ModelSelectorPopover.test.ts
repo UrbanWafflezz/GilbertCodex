@@ -19,6 +19,12 @@ import {
 import type { ProviderSettings } from "../../types/settings";
 import { buildSelectorEntries, createModelSelectorGroups, type LiveModelCatalogStatus } from "./ModelSelectorPopover";
 
+const plusBillingPlan = {
+  source: "stripe",
+  status: "active",
+  tier: "plus",
+} as const;
+
 function createProviderSettings(overrides: Partial<ProviderSettings> = {}): ProviderSettings {
   return {
     ...defaultProviderSettings,
@@ -74,7 +80,7 @@ describe("model selector subscription models", () => {
     ...NINE_ROUTER_KIMI_CODING_MODEL_IDS,
   ];
 
-  it("keeps Free Auto and subscription routes selectable while the live catalog is unavailable", () => {
+  it("keeps only Free Auto selectable for free accounts while the live catalog is unavailable", () => {
     const settings = createProviderSettings({
       model: "cx/gpt-5.5",
       provider: "9router",
@@ -85,12 +91,13 @@ describe("model selector subscription models", () => {
       ["error", undefined],
       [undefined, undefined],
     ] as const) {
-      expect(getSubscriptionModelValues(settings, status, liveModels)).toEqual(subscriptionDefaults);
+      expect(getSubscriptionModelValues(settings, status, liveModels)).toEqual([NINE_ROUTER_ALWAYS_FREE_MODEL]);
     }
   });
 
-  it("keeps subscription defaults selectable once the live catalog is ready", () => {
+  it("keeps paid subscription defaults selectable once the live catalog is ready", () => {
     const settings = createProviderSettings({
+      billingPlan: plusBillingPlan,
       model: "cx/gpt-5.5",
       provider: "9router",
     });
@@ -100,6 +107,7 @@ describe("model selector subscription models", () => {
 
   it("merges ready live subscription models with the static defaults", () => {
     const settings = createProviderSettings({
+      billingPlan: plusBillingPlan,
       model: "cx/gpt-5.5",
       provider: "9router",
     });
@@ -144,6 +152,7 @@ describe("model selector subscription models", () => {
 
   it("splits subscription selector groups by the connected account route family", () => {
     const settings = createProviderSettings({
+      billingPlan: plusBillingPlan,
       model: "cx/gpt-5.5",
       provider: "9router",
     });

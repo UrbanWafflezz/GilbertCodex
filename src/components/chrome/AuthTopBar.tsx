@@ -5,6 +5,7 @@ import { runTopBarEditCommand } from "./topBarEditCommands";
 import { TopBarMenus, type TopBarMenuAction, type TopBarMenuDefinition } from "./TopBarMenus";
 import { handleTopBarDoubleClick, handleTopBarMouseDown } from "./topBarWindowInteractions";
 import { WindowControls } from "./WindowControls";
+import { isTauriDesktopRuntime } from "../../app/tauriClient";
 import { formatShortcutForPlatform, getHostPlatform, isMacHostPlatform, type HostPlatform } from "../../lib/hostPlatform";
 
 type AuthMenuId = "file" | "edit" | "view" | "window" | "help";
@@ -12,7 +13,7 @@ type AuthMode = "create" | "login";
 
 interface AuthTopBarProps {
   activeMode: AuthMode;
-  hasAccounts: boolean;
+  desktopRuntime?: boolean;
   hostPlatform?: HostPlatform;
   onModeChange: (mode: AuthMode) => void;
 }
@@ -25,18 +26,20 @@ const menuDefinitions: TopBarMenuDefinition<AuthMenuId>[] = [
   { id: "help", label: "Help" },
 ];
 
-export function AuthTopBar({ activeMode, hasAccounts, hostPlatform, onModeChange }: AuthTopBarProps) {
+export function AuthTopBar({ activeMode, desktopRuntime, hostPlatform, onModeChange }: AuthTopBarProps) {
   const topbarRef = useRef<HTMLElement>(null);
   const [openMenu, setOpenMenu] = useState<AuthMenuId | null>(null);
+  const resolvedDesktopRuntime = desktopRuntime ?? isTauriDesktopRuntime();
   const resolvedHostPlatform = hostPlatform ?? getHostPlatform();
   const isMac = isMacHostPlatform(resolvedHostPlatform);
+  const showInWindowMenus = !resolvedDesktopRuntime || !isMac;
   const shortcut = (value: string) => formatShortcutForPlatform(value, resolvedHostPlatform);
 
   const menus = useMemo<Record<AuthMenuId, TopBarMenuAction[]>>(
     () => ({
       file: [
         { checked: activeMode === "create", label: "Create account", onSelect: () => onModeChange("create") },
-        { checked: activeMode === "login", disabled: !hasAccounts, label: "Sign in", onSelect: () => onModeChange("login") },
+        { checked: activeMode === "login", label: "Sign in", onSelect: () => onModeChange("login") },
         { danger: true, label: isMac ? "Quit Gilbert Codex" : "Exit", separatorBefore: true, shortcut: isMac ? "Command+Q" : undefined, onSelect: quitApp },
       ],
       edit: [
@@ -48,7 +51,7 @@ export function AuthTopBar({ activeMode, hasAccounts, hostPlatform, onModeChange
       ],
       view: [
         { checked: activeMode === "create", label: "Create account", onSelect: () => onModeChange("create") },
-        { checked: activeMode === "login", disabled: !hasAccounts, label: "Sign in", onSelect: () => onModeChange("login") },
+        { checked: activeMode === "login", label: "Sign in", onSelect: () => onModeChange("login") },
       ],
       window: [
         { label: "Minimize", shortcut: isMac ? "Command+M" : undefined, onSelect: minimizeWindow },
@@ -57,15 +60,21 @@ export function AuthTopBar({ activeMode, hasAccounts, hostPlatform, onModeChange
       ],
       help: [{ label: "About Gilbert Codex", onSelect: () => undefined }],
     }),
-    [activeMode, hasAccounts, isMac, onModeChange, shortcut],
+    [activeMode, isMac, onModeChange, shortcut],
   );
 
   useDismissableLayer({
-    active: openMenu !== null,
+    active: showInWindowMenus && openMenu !== null,
     keyboardTarget: "window",
     onDismiss: () => setOpenMenu(null),
     refs: [topbarRef],
   });
+
+  useEffect(() => {
+    if (!showInWindowMenus && openMenu !== null) {
+      setOpenMenu(null);
+    }
+  }, [openMenu, showInWindowMenus]);
 
   useEffect(() => {
     if (!isMac) {
@@ -95,7 +104,16 @@ export function AuthTopBar({ activeMode, hasAccounts, hostPlatform, onModeChange
     <header ref={topbarRef} className="app-topbar auth-topbar" data-tauri-drag-region onDoubleClick={handleTopBarDoubleClick} onMouseDown={handleTopBarMouseDown}>
       <div className="topbar-left">
         {isMac ? <WindowControls hostPlatform={resolvedHostPlatform} /> : null}
-        <TopBarMenus ariaLabel="Application menu" className="auth-topbar-menus" definitions={menuDefinitions} menus={menus} openMenu={openMenu} onOpenMenuChange={setOpenMenu} />
+        {showInWindowMenus ? (
+          <TopBarMenus
+            ariaLabel="Application menu"
+            className="auth-topbar-menus"
+            definitions={menuDefinitions}
+            menus={menus}
+            openMenu={openMenu}
+            onOpenMenuChange={setOpenMenu}
+          />
+        ) : null}
       </div>
       <div className="topbar-center">
         <img className="topbar-logo auth-topbar-logo" src="/gilbert-codex-logo.svg" alt="" aria-hidden="true" draggable={false} />

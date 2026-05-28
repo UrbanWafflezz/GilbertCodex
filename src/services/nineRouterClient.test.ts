@@ -5,6 +5,7 @@ import {
   chooseNineRouterModelForAccount,
   chooseNineRouterModelForConnectedAccounts,
   getNineRouterAccountProviderForModel,
+  getNineRouterCodexRedirectUri,
   loadNineRouterCoreSettings,
   loadNineRouterTunnelStatus,
   setNineRouterTunnelEnabled,
@@ -110,6 +111,11 @@ describe("nineRouterClient model selection", () => {
     expect(shouldShowNineRouterCodexContextSettings([
       { id: "codex-1", provider: "codex", testStatus: "active" },
     ], "cx/gpt-5.5")).toBe(true);
+  });
+
+  it("uses the Codex CLI callback for Codex OAuth", () => {
+    expect(getNineRouterCodexRedirectUri("http://127.0.0.1:20128")).toBe("http://localhost:1455/auth/callback");
+    expect(getNineRouterCodexRedirectUri("https://router.example.com/gilbert")).toBe("http://localhost:1455/auth/callback");
   });
 });
 

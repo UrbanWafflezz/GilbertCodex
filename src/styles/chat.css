@@ -1449,10 +1449,10 @@ button.message-research-chip:focus-visible {
 .image-viewer-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 1000;
   display: grid;
   place-items: center;
-  padding: 28px;
+  padding: clamp(12px, 2.6vw, 32px);
   background: var(--modal-scrim);
   backdrop-filter: blur(10px);
 }
@@ -1460,8 +1460,9 @@ button.message-research-chip:focus-visible {
 .image-viewer {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  width: min(1080px, 100%);
-  height: min(760px, 100%);
+  width: min(1440px, 100%);
+  height: min(900px, 100%);
+  max-height: calc(100dvh - clamp(24px, 5.2vw, 64px));
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
   border-radius: 18px;

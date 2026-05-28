@@ -19,14 +19,14 @@ export interface AuthStateResponse {
   session: AuthSession | null;
 }
 
-export interface CreateLocalAccountInput {
+export interface CreateAuthAccountInput {
   displayName: string;
   email: string;
   password: string;
   username: string;
 }
 
-export interface LoginLocalAccountInput {
+export interface LoginAuthAccountInput {
   login: string;
   password: string;
 }

@@ -1,12 +1,19 @@
-import { BadgeDollarSign, Check, Crown, ExternalLink, LockKeyhole, Sparkles, Users } from "lucide-react";
+import { BadgeDollarSign, Check, Crown, ExternalLink, LockKeyhole, RefreshCcw, Sparkles, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { openExternalUrl } from "../../../app/tauriClient";
 import {
   BILLING_TIER_ORDER,
   BILLING_TIERS,
-  createLocalBillingPlanPreview,
   formatBillingLimit,
   getBillingPlanTier,
+  normalizeBillingPlanSettings,
 } from "../../../lib/subscriptionTiers";
+import {
+  createBillingCheckoutSession,
+  createBillingPortalSession,
+  getBillingStatus,
+  isBillingGatewayConfigured,
+} from "../../../services/billingClient";
 import type { BillingTierId, ProviderSettings } from "../../../types/settings";
 import { SettingsSectionHeading } from "../components/SettingsSectionHeading";
 
@@ -16,36 +23,78 @@ interface BillingPlansSettingsPageProps {
 }
 
 export function BillingPlansSettingsPage({ onSettingsPatch, settings }: BillingPlansSettingsPageProps) {
+  const [busyAction, setBusyAction] = useState<BillingTierId | "portal" | "refresh" | null>(null);
+  const [statusMessage, setStatusMessage] = useState<{ kind: "error" | "success" | "warning"; text: string } | null>(null);
   const currentTier = getBillingPlanTier(settings.billingPlan);
   const currentPlan = BILLING_TIERS[currentTier];
-  const checkoutUrls = settings.billingPlan.checkoutUrls ?? {};
-  const customerPortalUrl = settings.billingPlan.customerPortalUrl;
+  const billingGatewayConfigured = useMemo(() => isBillingGatewayConfigured(), []);
 
-  function previewTier(tier: BillingTierId) {
-    if (tier === "teams") {
+  useEffect(() => {
+    if (!billingGatewayConfigured) {
+      setStatusMessage({ kind: "warning", text: "Stripe billing is not configured for this build." });
       return;
     }
 
-    onSettingsPatch({
-      billingPlan: {
-        ...createLocalBillingPlanPreview(tier),
-        checkoutUrls,
-        customerPortalUrl,
-        stripeCustomerId: settings.billingPlan.stripeCustomerId,
-        stripeSubscriptionId: settings.billingPlan.stripeSubscriptionId,
-      },
-    });
+    void refreshBillingStatus({ silent: true });
+  }, [billingGatewayConfigured]);
+
+  async function refreshBillingStatus(options: { silent?: boolean } = {}) {
+    if (!billingGatewayConfigured) {
+      setStatusMessage({ kind: "warning", text: "Stripe billing is not configured for this build." });
+      return;
+    }
+
+    if (!options.silent) {
+      setBusyAction("refresh");
+    }
+
+    try {
+      const status = await getBillingStatus();
+      onSettingsPatch({
+        billingPlan: normalizeBillingPlanSettings(status.billingPlan),
+      });
+      if (!options.silent) {
+        setStatusMessage({ kind: "success", text: "Billing status refreshed." });
+      }
+    } catch (error) {
+      setStatusMessage({ kind: "error", text: error instanceof Error ? error.message : "Could not refresh billing status." });
+    } finally {
+      if (!options.silent) {
+        setBusyAction(null);
+      }
+    }
   }
 
-  function openCheckout(tier: BillingTierId) {
-    const checkoutUrl = tier === "plus" || tier === "pro" ? checkoutUrls[tier] : undefined;
-
-    if (checkoutUrl) {
-      void openExternalUrl(checkoutUrl);
+  async function openCheckout(tier: BillingTierId) {
+    if (tier !== "plus" && tier !== "pro") {
       return;
     }
 
-    previewTier(tier);
+    setBusyAction(tier);
+    setStatusMessage(null);
+    try {
+      const session = await createBillingCheckoutSession(tier);
+      await openExternalUrl(session.url);
+      setStatusMessage({ kind: "success", text: session.trialDays ? `Stripe Checkout opened with a ${session.trialDays}-day trial.` : "Stripe Checkout opened." });
+    } catch (error) {
+      setStatusMessage({ kind: "error", text: error instanceof Error ? error.message : "Could not start Stripe Checkout." });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function openPortal() {
+    setBusyAction("portal");
+    setStatusMessage(null);
+    try {
+      const session = await createBillingPortalSession();
+      await openExternalUrl(session.url);
+      setStatusMessage({ kind: "success", text: "Stripe Customer Portal opened." });
+    } catch (error) {
+      setStatusMessage({ kind: "error", text: error instanceof Error ? error.message : "Could not open billing management." });
+    } finally {
+      setBusyAction(null);
+    }
   }
 
   return (
@@ -57,7 +106,7 @@ export function BillingPlansSettingsPage({ onSettingsPatch, settings }: BillingP
             <Crown size={19} aria-hidden="true" />
             <div>
               <h2>{currentPlan.name}</h2>
-              <p>{settings.billingPlan.source === "stripe" ? "Stripe synced subscription" : "Local plan preview"}</p>
+              <p>{formatBillingPlanSource(settings.billingPlan.source, settings.billingPlan.status)}</p>
             </div>
           </div>
           <div className="billing-current-metrics">
@@ -72,8 +121,9 @@ export function BillingPlansSettingsPage({ onSettingsPatch, settings }: BillingP
           {BILLING_TIER_ORDER.map((tierId) => {
             const tier = BILLING_TIERS[tierId];
             const selected = tierId === currentTier;
-            const checkoutUrl = tierId === "plus" || tierId === "pro" ? checkoutUrls[tierId] : undefined;
-            const disabled = tierId === "teams";
+            const paidTier = tierId === "plus" || tierId === "pro";
+            const disabled = tierId === "teams" || (paidTier && !billingGatewayConfigured) || busyAction !== null;
+            const buttonLabel = selected ? (tierId === "free" ? "Current plan" : "Manage plan") : busyAction === tierId ? "Opening..." : tier.ctaLabel;
 
             return (
               <article className="settings-card billing-plan-card" data-selected={selected} data-disabled={disabled} key={tier.id}>
@@ -84,7 +134,7 @@ export function BillingPlansSettingsPage({ onSettingsPatch, settings }: BillingP
                   </div>
                   {tier.id === "teams" ? <Users size={19} aria-hidden="true" /> : tier.id === "free" ? <Sparkles size={19} aria-hidden="true" /> : <Crown size={19} aria-hidden="true" />}
                 </div>
-                <strong className="billing-plan-price">{tier.priceLabel}</strong>
+                <strong className="billing-plan-price">{tier.trialLabel ? `${tier.trialLabel}, then ${tier.priceLabel}` : tier.priceLabel}</strong>
                 <p className="billing-plan-description">{tier.description}</p>
                 <ul className="billing-feature-list">
                   {tier.features.map((feature) => (
@@ -103,10 +153,10 @@ export function BillingPlansSettingsPage({ onSettingsPatch, settings }: BillingP
                   className={selected ? "settings-secondary-button" : "settings-primary-button"}
                   disabled={disabled}
                   type="button"
-                  onClick={() => openCheckout(tier.id)}
+                  onClick={() => selected && tier.id !== "free" ? void openPortal() : void openCheckout(tier.id)}
                 >
-                  {checkoutUrl ? <ExternalLink size={16} aria-hidden="true" /> : disabled ? <LockKeyhole size={16} aria-hidden="true" /> : <BadgeDollarSign size={16} aria-hidden="true" />}
-                  {selected ? "Current plan" : tier.ctaLabel}
+                  {selected && tier.id !== "free" ? <ExternalLink size={16} aria-hidden="true" /> : disabled ? <LockKeyhole size={16} aria-hidden="true" /> : <BadgeDollarSign size={16} aria-hidden="true" />}
+                  {buttonLabel}
                 </button>
               </article>
             );
@@ -118,22 +168,25 @@ export function BillingPlansSettingsPage({ onSettingsPatch, settings }: BillingP
             <BadgeDollarSign size={19} aria-hidden="true" />
             <div>
               <h2>Stripe handoff</h2>
-              <p>Checkout URLs and Customer Portal stay disabled until your Stripe backend is connected.</p>
+              <p>Checkout, Customer Portal, and Firestore subscription sync are handled by the billing gateway.</p>
             </div>
           </div>
           <div className="billing-stripe-grid">
             <BillingMetric label="Plus lookup key" value={BILLING_TIERS.plus.stripePriceLookupKey ?? "Not set"} />
             <BillingMetric label="Pro lookup key" value={BILLING_TIERS.pro.stripePriceLookupKey ?? "Not set"} />
             <BillingMetric label="Status source" value={settings.billingPlan.source} />
+            <BillingMetric label="Entitlement" value={formatBillingEntitlement(currentTier, settings.billingPlan.status)} />
           </div>
           <div className="settings-actions-row">
-            <button type="button" disabled={!customerPortalUrl} onClick={() => customerPortalUrl ? void openExternalUrl(customerPortalUrl) : undefined}>
+            <button type="button" disabled={!billingGatewayConfigured || busyAction !== null} onClick={() => void openPortal()}>
               <ExternalLink size={16} aria-hidden="true" />
-              Manage billing
+              {busyAction === "portal" ? "Opening billing" : "Manage billing"}
             </button>
-            <span className="settings-status" data-kind="warning">
-              Firebase/auth sync is intentionally not active yet.
-            </span>
+            <button type="button" disabled={!billingGatewayConfigured || busyAction !== null} onClick={() => void refreshBillingStatus()}>
+              <RefreshCcw size={16} aria-hidden="true" />
+              {busyAction === "refresh" ? "Refreshing" : "Refresh status"}
+            </button>
+            {statusMessage ? <span className="settings-status" data-kind={statusMessage.kind}>{statusMessage.text}</span> : null}
           </div>
         </article>
       </div>
@@ -148,4 +201,24 @@ function BillingMetric({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function formatBillingPlanSource(source: ProviderSettings["billingPlan"]["source"], status: ProviderSettings["billingPlan"]["status"]) {
+  if (source === "stripe") {
+    return status === "active" || status === "trialing" ? "Stripe synced subscription" : `Stripe status: ${status}`;
+  }
+
+  if (source === "admin") {
+    return "Admin granted subscription";
+  }
+
+  return "Free account baseline";
+}
+
+function formatBillingEntitlement(tier: BillingTierId, status: ProviderSettings["billingPlan"]["status"]) {
+  if (tier === "free") {
+    return "Free";
+  }
+
+  return `${BILLING_TIERS[tier].name} (${status})`;
 }

@@ -14,7 +14,9 @@
         "preventOverflow": true,
         "visible": false,
         "resizable": true,
-        "decorations": false
+        "decorations": false,
+        "acceptFirstMouse": true,
+        "tabbingIdentifier": "gilbert-codex"
       }
     ]
   },

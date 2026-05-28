@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Gilbert Codex",
-  "version": "0.8.2",
+  "version": "0.8.5",
   "identifier": "com.gilbert.codex",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -44,13 +44,13 @@
     "category": "DeveloperTool",
     "copyright": "Copyright (c) 2026 Gilbert Codex Contributors",
     "createUpdaterArtifacts": false,
-    "homepage": "https://github.com/UrbanWafflezz/GilbertCodex",
+    "homepage": "https://gilbertcodex.com",
     "targets": "nsis",
     "license": "MIT",
     "licenseFile": "../LICENSE",
     "publisher": "Gilbert Codex Contributors",
     "shortDescription": "GUI-first local desktop agent workspace.",
-    "longDescription": "Gilbert Codex is a local-first desktop agent workspace with multi-provider model streaming, planning mode, source-backed context, project-scoped state, GitHub setup, and Discord bridge setup.",
+    "longDescription": "Gilbert Codex is a local-first desktop agent workspace with cloud subscriptions, managed 9Router model routing, multi-provider model streaming, planning mode, source-backed context, project-scoped state, connected apps, and signed over-the-air updates.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -87,7 +87,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI0RTNDQkJCN0JENTY1NjgKUldSb1pkVjd1OHZqSkp4aGo3RDVsdlRSdHlsRkI3MGFRMXJ3V0NXdzlYejdmdjl0UHB1Vk1vVE8K",
       "endpoints": [
-        "https://github.com/UrbanWafflezz/GilbertCodex/releases/latest/download/latest.json"
+        "https://firebasestorage.googleapis.com/v0/b/gilbertcodex-40428.firebasestorage.app/o/releases%2Flatest.json?alt=media"
       ],
       "windows": {
         "installMode": "basicUi"

@@ -25,6 +25,7 @@ import {
   type ProviderModelMetadata,
 } from "../../lib/models";
 import { formatTokenCount, getFallbackModelContextWindow, type ModelContextWindow, type ModelContextWindowMap } from "../../lib/contextWindow";
+import { filterModelOptionsForBillingTier, getBillingPlanTier } from "../../lib/subscriptionTiers";
 import type { ModelProviderId, ProviderSettings, ThinkingSettings } from "../../types/settings";
 
 export type LiveModelCatalogStatus = "error" | "idle" | "loading" | "ready";
@@ -422,7 +423,10 @@ export function buildSelectorEntries(
       return [];
     }
 
-    const providerOptions = filterEnabledProviderModelOptions(buildProviderModelOptions(provider.id, liveModels, providerModel), providerSettings.disabledModels[provider.id]);
+    const providerOptions = filterModelOptionsForBillingTier(
+      getBillingPlanTier(providerSettings.billingPlan),
+      filterEnabledProviderModelOptions(buildProviderModelOptions(provider.id, liveModels, providerModel), providerSettings.disabledModels[provider.id]),
+    );
 
     return providerOptions.map((option) => {
       const resolvedContextWindow =

@@ -59,7 +59,9 @@ import {
   upsertNineRouterCombo,
 } from "./nineRouterFallbackRouting";
 import { loadNineRouterModels, NINE_ROUTER_DASHBOARD_FALLBACK } from "./nineRouterClient";
+import { isNineRouterNativeBridgeUrl, normalizeNineRouterDashboardUrl, withNineRouterCloudAuthHeaders } from "./nineRouterCloud";
 import { recordManagedPlanUsage } from "./planUsageLimiter";
+import { ProviderRequestError, createProviderRequestError } from "./providerErrors";
 
 const STREAM_FLUSH_MS = 140;
 const MAX_STREAM_REASONING_CHARS = 500_000;
@@ -67,7 +69,7 @@ const MAX_VISIBLE_REASONING_CHARS = 12_000;
 const PROVIDER_RESPONSE_START_TIMEOUT_MS = 120_000;
 const PROVIDER_STREAM_READ_TIMEOUT_MS = 90_000;
 const PROVIDER_STREAM_PROGRESS_TIMEOUT_MS = 120_000;
-const OPENROUTER_APP_REFERER = "https://github.com/UrbanWafflezz/GilbertCodex";
+const OPENROUTER_APP_REFERER = "https://gilbertcodex.com";
 const OPENROUTER_APP_TITLE = "Gilbert Codex";
 const OPENROUTER_APP_CATEGORIES = "programming-app,personal-agent";
 const STREAM_OPTIONS_PROVIDER_IDS = new Set<ModelProviderId>(["deepseek", "groq", "openai", "openrouter", "xai"]);
@@ -98,9 +100,7 @@ interface ProviderChatResponse {
       tool_calls?: unknown[];
     };
   }>;
-  error?: {
-    message?: string;
-  };
+  error?: ProviderErrorPayload["error"];
   usage?: ProviderUsage;
 }
 
@@ -130,9 +130,7 @@ interface ProviderStreamChunk {
       tool_calls?: unknown[];
     };
   }>;
-  error?: {
-    message?: string;
-  };
+  error?: ProviderErrorPayload["error"];
   usage?: ProviderUsage | null;
 }
 
@@ -146,9 +144,7 @@ interface AnthropicMessageResponse {
     thinking?: string;
     type?: string;
   }>;
-  error?: {
-    message?: string;
-  };
+  error?: ProviderErrorPayload["error"];
   usage?: {
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
@@ -167,9 +163,7 @@ interface ProviderContentChunk {
 type ProviderContentOutput = string | ProviderContentChunk[];
 
 interface ResponsesApiResponse {
-  error?: {
-    message?: string;
-  };
+  error?: ProviderErrorPayload["error"];
   output?: Array<{
     arguments?: string;
     call_id?: string;
@@ -203,9 +197,7 @@ interface ResponsesApiResponse {
 
 interface ResponsesStreamEvent {
   delta?: string;
-  error?: {
-    message?: string;
-  };
+  error?: ProviderErrorPayload["error"];
   item?: {
     arguments?: string;
     call_id?: string;
@@ -246,9 +238,7 @@ interface AnthropicStreamChunk {
     thinking?: string;
     type?: string;
   };
-  error?: {
-    message?: string;
-  };
+  error?: ProviderErrorPayload["error"];
   index?: number;
   message?: {
     usage?: {
@@ -301,11 +291,7 @@ interface ProviderModelsResponse {
       max_completion_tokens?: number;
     };
   }>;
-  error?: {
-    code?: string;
-    message?: string;
-    type?: string;
-  };
+  error?: ProviderErrorPayload["error"];
 }
 
 interface ProviderErrorPayload {
@@ -370,6 +356,7 @@ export interface ProviderStructuredOutputOptions {
 interface ProviderRequestOptions {
   allowMediaFallback?: boolean;
   contextWindowTokens?: number;
+  retriedNineRouterFreeAutoRepair?: boolean;
   retriedNineRouterGithubFallback?: boolean;
   signal?: AbortSignal;
   structuredOutput?: ProviderStructuredOutputOptions;
@@ -573,7 +560,7 @@ async function fetchProviderResponse(
   timeoutMs: number,
   options: { stream?: boolean } = {},
 ) {
-  if (providerId === "9router" && isTauriDesktopRuntime()) {
+  if (providerId === "9router" && isTauriDesktopRuntime() && isNineRouterNativeBridgeUrl(url)) {
     if (options.stream) {
       return fetchNineRouterNativeStreamResponse(url, init, signal, timeoutMs);
     }
@@ -581,8 +568,9 @@ async function fetchProviderResponse(
     return fetchNineRouterNativeResponse(url, init, signal, timeoutMs);
   }
 
+  const requestInit = providerId === "9router" ? await withNineRouterCloudAuthHeaders(url, init) : init;
   return fetch(url, {
-    ...init,
+    ...requestInit,
     signal,
   });
 }
@@ -727,21 +715,44 @@ function throwIfSignalAborted(signal: AbortSignal | undefined) {
   throw signal.reason instanceof Error ? signal.reason : new DOMException("The operation was aborted.", "AbortError");
 }
 
-function createProviderFetchError(providerId: ModelProviderId, _providerLabel: string, _url: string, error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-
-  if (providerId === "9router" && /failed to fetch|load failed|networkerror|request failed|connection refused|could not connect/i.test(message)) {
-    return new Error("Could not reach subscriptions. Open Subscriptions, then retry.");
+function createProviderFetchError(providerId: ModelProviderId, providerLabel: string, _url: string, error: unknown) {
+  if (error instanceof ProviderRequestError || (error instanceof Error && error.name === "AbortError")) {
+    return error;
   }
 
-  return error;
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+
+  if (providerId === "9router" && /failed to fetch|load failed|networkerror|request failed|connection refused|could not connect/i.test(message)) {
+    return new ProviderRequestError("Could not reach subscriptions. Open Subscriptions, then retry.", {
+      kind: "network",
+      providerLabel: "Subscriptions",
+      rawMessage: message,
+      retryable: true,
+    });
+  }
+
+  return createProviderRequestError({
+    kind: /\b(timeout|timed out|etimedout)\b/i.test(message) ? "timeout" : "network",
+    message: message || `${providerLabel} request failed before a response was received.`,
+    providerLabel,
+  });
 }
 
 type NineRouterRuntimeStatus = Awaited<ReturnType<typeof ensureNineRouterLocal>>;
 let nineRouterRuntimeReadyPromise: Promise<NineRouterRuntimeStatus> | null = null;
+const NINE_ROUTER_AUTO_ROUTE_REPAIR_CACHE_TTL_MS = 5 * 60_000;
+const nineRouterAutoRouteRepairCache = new Map<string, number>();
+
+export function clearNineRouterAutoRouteRepairCacheForTests() {
+  nineRouterAutoRouteRepairCache.clear();
+}
 
 async function ensureProviderRuntimeReady(settings: ProviderSettings, signal: AbortSignal | undefined): Promise<NineRouterRuntimeStatus | undefined> {
   if (settings.provider !== "9router" || !isTauriDesktopRuntime()) {
+    return undefined;
+  }
+
+  if (!isNineRouterNativeBridgeUrl(getProviderBaseUrl(settings))) {
     return undefined;
   }
 
@@ -759,7 +770,13 @@ async function ensureProviderRuntimeReady(settings: ProviderSettings, signal: Ab
   return status;
 }
 
-async function ensureNineRouterSelectedAutoRoute(settings: ProviderSettings, model: string, runtimeStatus: NineRouterRuntimeStatus | undefined, signal: AbortSignal | undefined) {
+async function ensureNineRouterSelectedAutoRoute(
+  settings: ProviderSettings,
+  model: string,
+  runtimeStatus: NineRouterRuntimeStatus | undefined,
+  signal: AbortSignal | undefined,
+  options: { force?: boolean; required?: boolean } = {},
+) {
   if (settings.provider !== "9router") {
     return;
   }
@@ -770,8 +787,13 @@ async function ensureNineRouterSelectedAutoRoute(settings: ProviderSettings, mod
   }
 
   throwIfSignalAborted(signal);
-  const baseUrl = settings.baseUrls["9router"]?.trim() || runtimeStatus?.baseUrl || getProviderBaseUrl(settings);
-  const dashboardUrl = runtimeStatus?.dashboardUrl || NINE_ROUTER_DASHBOARD_FALLBACK;
+  const baseUrl = runtimeStatus?.baseUrl || getProviderBaseUrl(settings);
+  const dashboardUrl = runtimeStatus?.dashboardUrl || normalizeNineRouterDashboardUrl(baseUrl, NINE_ROUTER_DASHBOARD_FALLBACK);
+  const cacheKey = createNineRouterAutoRouteRepairCacheKey(baseUrl, dashboardUrl, mode);
+
+  if (!options.force && isNineRouterAutoRouteRepairCacheFresh(cacheKey)) {
+    return;
+  }
 
   try {
     const [liveModels, combos] = await Promise.all([
@@ -790,6 +812,7 @@ async function ensureNineRouterSelectedAutoRoute(settings: ProviderSettings, mod
       !installedModels.some(isOpenCodeFreeModel);
 
     if (!needsRepair) {
+      markNineRouterAutoRouteRepairCacheFresh(cacheKey);
       return;
     }
 
@@ -800,8 +823,12 @@ async function ensureNineRouterSelectedAutoRoute(settings: ProviderSettings, mod
 
     await upsertNineRouterCombo(dashboardUrl, comboName, fallbackModels, "fallback");
     throwIfSignalAborted(signal);
+    markNineRouterAutoRouteRepairCacheFresh(cacheKey);
   } catch (error) {
     throwIfSignalAborted(signal);
+    if (options.required) {
+      throw error;
+    }
     console.warn("Could not refresh 9Router Free Auto route before sending; continuing with the selected route.", error);
   }
 }
@@ -820,11 +847,66 @@ function getNineRouterAutoRouteMode(model: string) {
   return null;
 }
 
+function createNineRouterAutoRouteRepairCacheKey(baseUrl: string, dashboardUrl: string, mode: string) {
+  return [baseUrl.trim().replace(/\/+$/, ""), dashboardUrl.trim().replace(/\/+$/, ""), mode].join("|");
+}
+
+function isNineRouterAutoRouteRepairCacheFresh(cacheKey: string) {
+  const repairedAt = nineRouterAutoRouteRepairCache.get(cacheKey);
+  return typeof repairedAt === "number" && Date.now() - repairedAt < NINE_ROUTER_AUTO_ROUTE_REPAIR_CACHE_TTL_MS;
+}
+
+function markNineRouterAutoRouteRepairCacheFresh(cacheKey: string) {
+  nineRouterAutoRouteRepairCache.set(cacheKey, Date.now());
+}
+
 function createProviderHttpError(settings: ProviderSettings, providerLabel: string, model: string, payload: ProviderErrorPayload, response: Response) {
   const providerMessage = payload.error?.message?.trim();
   const nineRouterMessage = settings.provider === "9router" ? formatNineRouterRequestError(model, providerMessage, response.status) : "";
 
-  return new Error(nineRouterMessage || providerMessage || `${providerLabel} request failed with HTTP ${response.status}.`);
+  if (nineRouterMessage) {
+    return new ProviderRequestError(nineRouterMessage, {
+      code: payload.error?.code,
+      kind: response.status === 404 ? "model_unavailable" : "provider",
+      model,
+      providerLabel,
+      rawMessage: providerMessage,
+      status: response.status,
+      type: payload.error?.type,
+    });
+  }
+
+  return createProviderRequestError({
+    code: payload.error?.code,
+    message: providerMessage || `${providerLabel} request failed with HTTP ${response.status}.`,
+    model,
+    providerLabel,
+    retryAfterSeconds: readRetryAfterSeconds(response),
+    status: response.status,
+    type: payload.error?.type,
+  });
+}
+
+function readRetryAfterSeconds(response: Response) {
+  const value = response.headers.get("retry-after");
+
+  if (!value) {
+    return undefined;
+  }
+
+  const seconds = Number.parseFloat(value);
+
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return seconds;
+  }
+
+  const dateMs = Date.parse(value);
+
+  if (!Number.isFinite(dateMs)) {
+    return undefined;
+  }
+
+  return Math.max(1, Math.ceil((dateMs - Date.now()) / 1000));
 }
 
 function shouldRetryNineRouterGithubFallback(settings: ProviderSettings, model: string, payload: ProviderErrorPayload, response: Response, options: ProviderRequestOptions) {
@@ -835,6 +917,15 @@ function shouldRetryNineRouterGithubFallback(settings: ProviderSettings, model: 
   const errorMessage = [payload.error?.code, payload.error?.type, payload.error?.message].filter(Boolean).join(" ").toLowerCase();
 
   return response.status === 400 && /model_not_supported|not available for integrator|requested model is not (?:available|supported)|integrator\s+"vscode-chat"/i.test(errorMessage);
+}
+
+function shouldRetryNineRouterFreeAutoRepair(settings: ProviderSettings, model: string, payload: ProviderErrorPayload, response: Response, options: ProviderRequestOptions) {
+  if (options.retriedNineRouterFreeAutoRepair || settings.provider !== "9router" || !getNineRouterAutoRouteMode(model)) {
+    return false;
+  }
+
+  const errorMessage = [payload.error?.code, payload.error?.type, payload.error?.message].filter(Boolean).join(" ").toLowerCase();
+  return response.status === 404 || /no active credentials for provider|model_not_found|unknown model|not available/.test(errorMessage);
 }
 
 function createNineRouterGithubFallbackSettings(settings: ProviderSettings): ProviderSettings {
@@ -852,6 +943,13 @@ function createNineRouterGithubFallbackOptions(options: ProviderRequestOptions):
   return {
     ...options,
     retriedNineRouterGithubFallback: true,
+  };
+}
+
+function createNineRouterFreeAutoRepairRetryOptions(options: ProviderRequestOptions): ProviderRequestOptions {
+  return {
+    ...options,
+    retriedNineRouterFreeAutoRepair: true,
   };
 }
 
@@ -1131,6 +1229,14 @@ export async function sendProviderMessage(settings: ProviderSettings, messages: 
   );
 
   if (!response.ok) {
+    if (shouldRetryNineRouterFreeAutoRepair(settings, model, payload, response, options)) {
+      await ensureNineRouterSelectedAutoRoute(settings, model, nineRouterRuntimeStatus, options.signal, {
+        force: true,
+        required: true,
+      });
+      return sendProviderMessage(settings, messages, createNineRouterFreeAutoRepairRetryOptions(options));
+    }
+
     if (shouldRetryNineRouterGithubFallback(settings, model, payload, response, options)) {
       return sendProviderMessage(createNineRouterGithubFallbackSettings(settings), messages, createNineRouterGithubFallbackOptions(options));
     }
@@ -1214,6 +1320,14 @@ export async function streamProviderMessage(
 
   if (!response.ok) {
     const payload = (await readJson(response)) as ProviderChatResponse | AnthropicMessageResponse;
+    if (shouldRetryNineRouterFreeAutoRepair(settings, model, payload, response, options)) {
+      await ensureNineRouterSelectedAutoRoute(settings, model, nineRouterRuntimeStatus, options.signal, {
+        force: true,
+        required: true,
+      });
+      return streamProviderMessage(settings, messages, onUpdate, createNineRouterFreeAutoRepairRetryOptions(options));
+    }
+
     if (shouldRetryNineRouterGithubFallback(settings, model, payload, response, options)) {
       return streamProviderMessage(createNineRouterGithubFallbackSettings(settings), messages, onUpdate, createNineRouterGithubFallbackOptions(options));
     }
@@ -1423,7 +1537,7 @@ export async function validateProviderSettings(settings: ProviderSettings) {
   );
 
   if (!response.ok) {
-    throw new Error(payload.error?.message || `${provider.label} models check failed with HTTP ${response.status}.`);
+    throw createProviderHttpError(settings, provider.label, model, payload, response);
   }
 
   const modelExists = settings.provider === "openrouter" && isOpenRouterRouterModel(model) ? true : Boolean(model && payload.data?.some((entry) => entry.id === model));
@@ -1455,7 +1569,7 @@ export async function fetchProviderModels(settings: ProviderSettings, options: P
   );
 
   if (!response.ok) {
-    throw new Error(payload.error?.message || `${provider.label} models check failed with HTTP ${response.status}.`);
+    throw createProviderHttpError(settings, provider.label, settings.model, payload, response);
   }
 
   return normalizeProviderModels(payload, settings.provider);
@@ -2280,6 +2394,17 @@ function parseProviderStreamLine(providerId: ModelProviderId, line: string, useR
   return parseOpenAiCompatibleStreamData(data, providerId);
 }
 
+function createProviderStreamPayloadError(providerId: ModelProviderId, providerError: ProviderErrorPayload["error"]) {
+  const provider = getModelProvider(providerId);
+
+  return createProviderRequestError({
+    code: providerError?.code,
+    message: providerError?.message || `${provider.label} streaming response failed.`,
+    providerLabel: provider.label,
+    type: providerError?.type,
+  });
+}
+
 function parseOpenAiCompatibleStreamData(data: string, providerId: ModelProviderId): ProviderStreamDelta {
   let payload: ProviderStreamChunk;
 
@@ -2290,7 +2415,7 @@ function parseOpenAiCompatibleStreamData(data: string, providerId: ModelProvider
   }
 
   if (payload.error?.message) {
-    throw new Error(payload.error.message);
+    throw createProviderStreamPayloadError(providerId, payload.error);
   }
 
   if (!payload.choices?.length && looksLikeResponsesStreamPayload(payload)) {
@@ -2334,7 +2459,7 @@ function parseResponsesStreamData(data: string, providerId: ModelProviderId): Pr
   }
 
   if (payload.error?.message) {
-    throw new Error(payload.error.message);
+    throw createProviderStreamPayloadError(providerId, payload.error);
   }
 
   const type = payload.type ?? "";
@@ -2374,7 +2499,7 @@ function parseAnthropicStreamData(data: string): ProviderStreamDelta {
   }
 
   if (payload.error?.message) {
-    throw new Error(payload.error.message);
+    throw createProviderStreamPayloadError("anthropic", payload.error);
   }
 
   const delta = payload.delta;

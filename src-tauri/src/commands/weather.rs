@@ -5,8 +5,7 @@ use std::time::Duration;
 const WEATHER_CONNECT_TIMEOUT_SECS: u64 = 5;
 const WEATHER_CLIENT_TIMEOUT_SECS: u64 = 18;
 const MAX_WEATHER_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const WEATHER_USER_AGENT: &str =
-    "GilbertCodex/0.2.3 (https://github.com/UrbanWafflezz/GilbertCodex)";
+const WEATHER_USER_AGENT: &str = "GilbertCodex/0.8.5 (https://gilbertcodex.com)";
 const ALLOWED_WEATHER_HOSTS: &[&str] = &[
     "api.open-meteo.com",
     "geocoding-api.open-meteo.com",

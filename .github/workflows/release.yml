@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release tag to publish, for example v0.8.2.
+        description: Release tag to publish, for example v0.8.5.
         required: true
         type: string
   push:
@@ -17,6 +17,16 @@ permissions:
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  VITE_GILBERT_NINE_ROUTER_MODE: cloud
+  VITE_GILBERT_REQUIRE_CLOUD_SUBSCRIPTIONS: "true"
+  VITE_GILBERT_NINE_ROUTER_DASHBOARD_URL: https://gilbert-nine-router-gateway-4bwbtno2aq-uc.a.run.app
+  VITE_GILBERT_NINE_ROUTER_BASE_URL: https://gilbert-nine-router-gateway-4bwbtno2aq-uc.a.run.app/v1
+  VITE_GILBERT_BILLING_API_URL: https://gilbert-billing-gateway-811485840625.us-central1.run.app
+  VITE_GILBERT_GITHUB_CONNECTOR_URL: https://gilbert-github-connector-4bwbtno2aq-uc.a.run.app
+  VITE_GILBERT_GOOGLE_CONNECTOR_URL: https://gilbert-google-connector-4bwbtno2aq-uc.a.run.app
+  VITE_GILBERT_DISCORD_CONNECTOR_URL: https://gilbert-discord-connector-4bwbtno2aq-uc.a.run.app
 
 jobs:
   windows:
@@ -781,3 +791,69 @@ jobs:
             echo "::error::Could not find Linux .deb or .AppImage artifacts to checksum."
             exit 1
           fi
+
+  firebase-release-feed:
+    name: publish-firebase-release-feed
+    runs-on: ubuntu-22.04
+    needs: linux
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Require Firebase release publisher credentials
+        shell: bash
+        env:
+          GCP_RELEASE_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_RELEASE_SERVICE_ACCOUNT_KEY }}
+        run: |
+          if [[ -z "${GCP_RELEASE_SERVICE_ACCOUNT_KEY:-}" ]]; then
+            echo "::error::Missing GCP_RELEASE_SERVICE_ACCOUNT_KEY. Add a Google service-account JSON key with Storage Object Admin access to the Firebase Storage release bucket before publishing public downloads and the updater feed."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_RELEASE_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Resolve release tag
+        id: release_tag
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "${tag}" != v* ]]; then
+            tag="v${tag}"
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download GitHub release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ steps.release_tag.outputs.tag }}" --dir .release-assets --clobber
+          ls -la .release-assets
+
+      - name: Prepare Firebase Storage release feed
+        shell: bash
+        env:
+          FIREBASE_RELEASE_BUCKET: ${{ vars.FIREBASE_RELEASE_BUCKET || 'gilbertcodex-40428.firebasestorage.app' }}
+        run: |
+          node scripts/prepare-firebase-release.mjs \
+            --assets-dir .release-assets \
+            --out-dir .firebase-release \
+            --tag "${{ steps.release_tag.outputs.tag }}" \
+            --bucket "${FIREBASE_RELEASE_BUCKET}"
+
+      - name: Publish release assets to Firebase Storage
+        shell: bash
+        env:
+          FIREBASE_RELEASE_BUCKET: ${{ vars.FIREBASE_RELEASE_BUCKET || 'gilbertcodex-40428.firebasestorage.app' }}
+        run: |
+          tag="${{ steps.release_tag.outputs.tag }}"
+          gcloud storage cp --cache-control="no-cache" .firebase-release/releases/latest.json "gs://${FIREBASE_RELEASE_BUCKET}/releases/latest.json"
+          gcloud storage cp --cache-control="no-cache" .firebase-release/releases/manifest.json "gs://${FIREBASE_RELEASE_BUCKET}/releases/manifest.json"
+          gcloud storage cp --recursive --cache-control="public,max-age=31536000,immutable" ".firebase-release/releases/${tag}" "gs://${FIREBASE_RELEASE_BUCKET}/releases/"

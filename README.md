@@ -9,9 +9,9 @@
 </p>
 
 <p align="center">
-  <a href="docs/releases/v0.8.2.md">v0.8.2 release notes</a>
+  <a href="docs/releases/v0.8.5.md">v0.8.5 release notes</a>
   |
-  <a href="https://github.com/UrbanWafflezz/GilbertCodex/releases/tag/v0.8.2">Download v0.8.2</a>
+  <a href="https://gilbertcodex.com/#download">Download v0.8.5</a>
   |
   <a href="docs/mcp/README.md">MCP setup</a>
   |
@@ -21,21 +21,21 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/UrbanWafflezz/GilbertCodex/releases/tag/v0.8.2"><img alt="Version 0.8.2" src="https://img.shields.io/badge/version-0.8.2-d8b36c"></a>
-  <a href="https://github.com/UrbanWafflezz/GilbertCodex/actions/workflows/release.yml"><img alt="Release workflow for Windows, macOS, and Linux" src="https://img.shields.io/badge/release-Windows%20%7C%20macOS%20%7C%20Linux-2ea043"></a>
+  <a href="https://gilbertcodex.com/#download"><img alt="Version 0.8.5" src="https://img.shields.io/badge/version-0.8.5-d8b36c"></a>
+  <img alt="Release workflow for Windows, macOS, and Linux" src="https://img.shields.io/badge/release-Windows%20%7C%20macOS%20%7C%20Linux-2ea043">
   <a href="https://modelcontextprotocol.io/"><img alt="MCP ready" src="https://img.shields.io/badge/MCP-ready-7c3aed"></a>
   <a href="https://tauri.app/"><img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24c8db"></a>
   <a href="https://react.dev/"><img alt="React 18" src="https://img.shields.io/badge/React-18-61dafb"></a>
   <a href="LICENSE"><img alt="Code MIT plus protected UI" src="https://img.shields.io/badge/License-Code%20MIT%20%2B%20Protected%20UI-4f46e5"></a>
 </p>
 
-## v0.8.2 Is The Connected Platform Build
+## v0.8.5 Is The Official Product Build
 
-Gilbert Codex v0.8.2 is the build where the v0.8 platform work becomes much more usable day to day. It keeps the MCP, Skills, plugin, connected-app, thinking, tool, and cross-platform release foundation from v0.8.0/v0.8.1, then deepens the real runtime paths: richer Apps and MCP setup, reusable non-model keys, stronger connected-tool evidence, provider cache accounting, and better native command discovery on Windows, macOS, and Linux.
+Gilbert Codex v0.8.5 is the build where the project line splits cleanly into the public community baseline and the private official product. The open-source/community repo can stay frozen as the public alpha line; this private official branch now carries the cloud account system, Firebase-backed user isolation, Stripe subscriptions, 30-day Plus trial, hosted 9Router routing, free-tier enforcement, connected-app gateways, and the release plumbing needed for website downloads and signed desktop updates.
 
-This is still alpha software, but the v0.8.x line is a major line in the sand: Gilbert now has the pieces for connected tools, reusable workflows, plugin-powered capability growth, and cross-platform desktop distribution. v0.8.2 is the build new testers should start from.
+This is still young product software, but v0.8.5 is the first build shaped like the commercial Gilbert Codex app: users sign in, free accounts stay on the free route set, Plus starts with a one-month trial and then bills normally, paid model routes are gated by server-synced subscription state, and the desktop updater reads a public signed feed instead of depending on a private GitHub release URL.
 
-High-impact local actions, destructive operations, credential access, publishing, terminal commands, and outside-scope paths are still guarded by explicit review/permission flows. Provider keys, local accounts, OAuth credentials, logs, databases, private tool overlays, generated build output, and release signing secrets stay out of public Git.
+High-impact local actions, destructive operations, credential access, publishing, terminal commands, and outside-scope paths are still guarded by explicit review/permission flows. Provider keys, local accounts, OAuth credentials, logs, databases, generated build output, Stripe secrets, Firebase service-account credentials, and release signing keys stay out of Git.
 
 Known alpha issue: ChatGPT GPT-5.3 Spark is currently read-only for workspace work. It can inspect files, but write/edit tool calls are not completing reliably on that route yet. Use the other available Codex/ChatGPT, OpenRouter, or local routes for file changes until this is fixed.
 
@@ -43,7 +43,14 @@ Known alpha issue: ChatGPT GPT-5.3 Spark is currently read-only for workspace wo
 
 | Area | v0.8.x upgrade |
 | --- | --- |
-| v0.8.2 platform depth | The app now has a shared native command resolver for packaged macOS/Linux launches, host-aware build and release dispatch, platform updater configs, CI native-path checks, and release jobs for Windows x64, macOS Apple Silicon/Intel, and Linux x64. |
+| Official product line | The private `GilbertCodex-Official` branch is now the product line for cloud billing, hosted routing, connector gateways, production release notes, and website download/update feeds. |
+| Firebase account isolation | Authenticated users are isolated under their own Firestore and Storage paths. Server-owned billing fields cannot be overwritten by the desktop client, and release files are the only public Storage path. |
+| Stripe Billing | The billing gateway creates Stripe Checkout subscription sessions, syncs subscription webhooks into Firestore, opens Customer Portal, and starts Plus with a 30-day trial before normal monthly billing. |
+| Free and paid tiers | Free users keep local models and managed free OpenRouter routes. Plus and Pro unlock paid hosted/provider routes, image generation limits, larger usage budgets, and subscription-backed model catalogs. |
+| Cloud 9Router | The local Docker/source-install subscription runtime is no longer required for normal users. Official builds point at the hosted Cloud Run 9Router gateway with per-user auth, route storage, and rate limits. |
+| Website update feed | Signed Tauri updater artifacts are mirrored from the private GitHub release into Firebase Storage. The desktop app checks the public Firebase `latest.json`, while the website reads the matching release manifest for download buttons. |
+| Cross-platform release | The GitHub Release workflow publishes Windows x64, macOS Apple Silicon/Intel, and Linux x64 artifacts with updater signatures and checksums, then publishes the public Firebase Storage feed on tag releases. |
+| Connected app gateways | GitHub, Google, and Discord connector gateway deployment scripts now support Cloud Run endpoints with secrets kept in Google Secret Manager instead of the desktop bundle. |
 | MCP servers | Apps > MCP supports remote HTTP, localhost HTTP, and command-line stdio servers, with secure bearer tokens, custom secret headers, secret query params, stdio env vars, live setup testing, registry search, cached tool schemas, and chat-callable MCP tools. |
 | Skills | Skills are now app-managed reusable instruction bundles. Gilbert ships premade workflows, imports `SKILL.md` folders, supports custom skills, enables/disables skills, and can activate them by `$trigger` or prompt match. |
 | Apps, plugins, and marketplace | The Apps hub now carries Discover, Installed, MCP, Skills, Create, and Marketplace paths with many more curated plugin listings, manifest previews, setup requirements, installed-state tags, and supported routes into native apps, MCP presets, registry search, or skill import. |
@@ -53,19 +60,18 @@ Known alpha issue: ChatGPT GPT-5.3 Spark is currently read-only for workspace wo
 | Tool reliability | Local computer tools gained stronger file-change evidence, batch write/edit summaries, stale-edit protection, binary handling, approval recovery, tool-output finalization, retry guidance for malformed tool calls, and stricter recovery when a connected-app or deployment answer lacks real tool evidence. |
 | Connected apps | Gmail, Google Calendar, GitHub, Discord, web search, browser preview, terminal, files, local Git, and MCP-backed services now fit into the same app-owned permission and progress model. |
 | Provider usage | Provider requests now track cached input and cache-write tokens where providers report them, estimate cache savings, and attach provider cache metadata for supported OpenAI/Anthropic/xAI routes. |
-| Cross-platform release | The GitHub Release workflow publishes Windows x64, macOS Apple Silicon/Intel, and Linux x64 artifacts with updater signatures, checksums, and `latest.json` update-feed entries. macOS artifacts are ad-hoc signed and unnotarized until Apple Developer signing/notarization secrets are configured. |
 
 ## Download
 
-The v0.8.2 desktop alpha is the current build on [GitHub Releases](https://github.com/UrbanWafflezz/GilbertCodex/releases/tag/v0.8.2).
+The v0.8.5 desktop build is distributed from [GilbertCodex.com](https://gilbertcodex.com/#download). GitHub Actions builds the private official release first, then mirrors the public installer files, checksums, signatures, release manifest, and Tauri `latest.json` feed into Firebase Storage for the website and in-app updater.
 
 | Platform | Release artifacts |
 | --- | --- |
-| Windows x64 | `Gilbert-Codex-0.8.2-x64-setup.exe`, `.sig`, `.sha256` |
-| macOS Apple Silicon | `Gilbert-Codex-0.8.2-macos-aarch64.dmg`, updater archive, `.sig`, `.sha256`; ad-hoc signed until Apple notarization is configured |
-| macOS Intel | `Gilbert-Codex-0.8.2-macos-x64.dmg`, updater archive, `.sig`, `.sha256`; ad-hoc signed until Apple notarization is configured |
-| Linux x64 | `Gilbert-Codex-0.8.2-linux-x64.deb`, `Gilbert-Codex-0.8.2-linux-x64.AppImage`, `.sig`, `.sha256` |
-| Updater feed | `latest.json` with Windows, macOS, and Linux entries |
+| Windows x64 | `Gilbert-Codex-0.8.5-x64-setup.exe`, `.sig`, `.sha256` |
+| macOS Apple Silicon | `Gilbert-Codex-0.8.5-macos-aarch64.dmg`, updater archive, `.sig`, `.sha256`; ad-hoc signed until Apple notarization is configured |
+| macOS Intel | `Gilbert-Codex-0.8.5-macos-x64.dmg`, updater archive, `.sig`, `.sha256`; ad-hoc signed until Apple notarization is configured |
+| Linux x64 | `Gilbert-Codex-0.8.5-linux-x64.deb`, `Gilbert-Codex-0.8.5-linux-x64.AppImage`, `.sig`, `.sha256` |
+| Updater feed | Firebase Storage `releases/latest.json` with Windows, macOS, and Linux entries |
 
 The release workflow builds Windows, macOS arm64, macOS x64, and Linux x64 on GitHub-hosted native runners.
 
@@ -158,7 +164,7 @@ The plugin marketplace is still being polished, but the v0.8.x line moves it out
 
 ## Coming Next
 
-v0.8.2 keeps hardening the extensible platform. The next work is about making that platform smoother, deeper, and more trustworthy in real daily use.
+v0.8.5 finishes the first official product line handoff. The next work is about smoothing the subscription experience, improving website conversion, and continuing real device verification on macOS and Linux.
 
 - Polish the Apps, Skills, and Plugins hub so installed, available, imported, and coming-soon capabilities are easier to scan.
 - Deepen the plugin install path beyond the current native/MCP/skill-import routes.

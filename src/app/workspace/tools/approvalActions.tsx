@@ -5,6 +5,7 @@ import type { AgentRuntimeDecision } from "../../../agentRuntime/codingAgent";
 import type { LocalComputerToolExecutionPolicy, LocalSubagentResult, LocalSubagentTask } from "../../../localWorkspace/localToolRuntimeDisabled";
 import type { ContextCompactionNotice, ContextWindowUsage, ModelContextWindowMap, compactMessagesForContext } from "../../../lib/contextWindow";
 import type { PlanningProviderRequest } from "../../../services/planningClient";
+import { formatProviderErrorForUser } from "../../../services/providerErrors";
 import type { ProviderToolBridgeOptions, ToolBridgeExecutionBatch, ToolCallRequest, ToolDefinition, ToolExecutionContext, ToolMemorySearchRequest, ToolResultMessage } from "../../../toolBridge";
 import type { AppInfo } from "../../../types/app";
 import type { AgentApproval, AgentApprovalDecision, AgentRun } from "../../../types/agentRun";
@@ -23,7 +24,7 @@ import type { ActiveGeneration, ApprovedPlanExecutionContext, AssistantToolRespo
 import type { WorkspaceRuntimeDeps } from "../runtimeTypes";
 
 export async function handleResolveToolApproval(deps: WorkspaceRuntimeDeps, messageId: string, approvalId: string, decision: AgentApprovalDecision) {
-  const { activeChat, agentRunsRef, approvedPlanRequiresMutation, compactProviderMessages, createActiveGeneration, createActiveProjectBoundaryMessage, createApprovedPlanExecutionInstruction, createApprovedPlanExecutionPrompt, createId, createLocalComputerProgress, createLocalWorkspaceContextMessages, createMessage, finishActiveGeneration, getLatestUserPrompt, isAbortError, isChatSending, isRequestInactive, localWorkspaceRef, mergeAgentApprovals, mergeChatArtifacts, notifyRunComplete, notifyRunNeedsAttention, preserveVisibleResponseThinking, rememberSessionApprovalDecision, resolveWorkspaceForChatProject, setActiveChatId, setActiveRoute, setAgentRunCompleted, setAgentRunFailed, setAgentRunWaiting, setChats, setNoticeDialog, sortChatsByUpdatedAt, streamAssistantWithLocalTools, toolSettings, touchProject, updateAgentRun, withLocalComputerProgress } = deps;
+  const { activeChat, activeGenerationsRef, agentRunsRef, approvedPlanRequiresMutation, compactProviderMessages, createActiveGeneration, createActiveProjectBoundaryMessage, createApprovedPlanExecutionInstruction, createApprovedPlanExecutionPrompt, createId, createLocalComputerProgress, createLocalWorkspaceContextMessages, createMessage, finishActiveGeneration, getActiveGenerationByMessage, getLatestUserPrompt, isAbortError, isChatSending, isRequestInactive, localWorkspaceRef, mergeAgentApprovals, mergeChatArtifacts, notifyRunComplete, notifyRunNeedsAttention, pendingChatsRef, preserveVisibleResponseThinking, rememberSessionApprovalDecision, resolveWorkspaceForChatProject, setActiveChatId, setActiveRoute, setAgentRunCompleted, setAgentRunFailed, setAgentRunWaiting, setChats, setNoticeDialog, sortChatsByUpdatedAt, streamAssistantWithLocalTools, toolSettings, touchProject, updateAgentRun, withLocalComputerProgress } = deps;
 
     if (!toolSettings.provider) {
       setNoticeDialog({
@@ -33,17 +34,45 @@ export async function handleResolveToolApproval(deps: WorkspaceRuntimeDeps, mess
       return;
     }
 
-    const currentChat = activeChat;
-
-    if (isChatSending(currentChat.id)) {
-      return;
-    }
+    const currentChat = pendingChatsRef.current.find((chat) =>
+      chat.id === activeChat.id && chat.messages.some((message) => message.id === messageId),
+    ) ?? activeChat;
 
     const assistantMessageIndex = currentChat.messages.findIndex((message) => message.id === messageId && message.role === "assistant");
     const assistantMessage = assistantMessageIndex >= 0 ? currentChat.messages[assistantMessageIndex] : undefined;
     const approval = assistantMessage?.approvals?.find((candidate) => candidate.id === approvalId);
 
     if (!assistantMessage || !approval) {
+      setNoticeDialog({
+        description: "That approval is no longer attached to the current chat state. Try regenerating the action if the card still looks stale.",
+        title: "Approval is stale",
+      });
+      return;
+    }
+
+    if (isChatSending(currentChat.id)) {
+      const activeGeneration = getActiveGenerationByMessage?.(messageId) ?? activeGenerationsRef?.current?.get?.(currentChat.id);
+      const waitingOnThisApproval = assistantMessage.agentRunStatus === "waiting_for_approval" && approval.status === "pending";
+
+      if (waitingOnThisApproval && activeGeneration?.requestId) {
+        finishActiveGeneration(activeGeneration.requestId);
+      } else if (waitingOnThisApproval) {
+        // The approval card itself is the handoff point. Keep going even if the old lock
+        // has already fallen out of the generation registry.
+      } else {
+        setNoticeDialog({
+          description: "The current response is still running. Wait for it to finish preparing the approval, then try again.",
+          title: "Run is still active",
+        });
+        return;
+      }
+    }
+
+    if (approval.status !== "pending") {
+      setNoticeDialog({
+        description: "This approval was already resolved. Start a fresh tool action if it needs to run again.",
+        title: "Approval already resolved",
+      });
       return;
     }
 
@@ -335,7 +364,7 @@ export async function handleResolveToolApproval(deps: WorkspaceRuntimeDeps, mess
         return;
       }
 
-      const errorContent = error instanceof Error ? error.message : "The provider request failed while resuming the approval.";
+      const errorContent = formatProviderErrorForUser(error, "The provider request failed while resuming the approval.");
 
       setChats((currentChats) =>
         sortChatsByUpdatedAt(

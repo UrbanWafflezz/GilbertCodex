@@ -1,7 +1,33 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { appendUsageHistoryRecord, clearUsageHistory, defaultProviderSettings, deleteApiKeyRecord, loadApiKeyVault, loadChats, loadPersistentString, loadProjects, loadProviderSettings, loadUsageHistory, saveChats, savePersistentString, saveProjects, saveProviderSettings, setStorageNamespace, upsertApiKeyRecord } from "./appStorage";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const deviceDatabaseMock = vi.hoisted(() => ({
+  autoFinalizeDeviceDatabaseMigration: vi.fn(),
+  isDeviceDatabaseAvailable: vi.fn(() => false),
+  loadDeviceDatabaseChat: vi.fn(),
+  loadDeviceDatabaseNamespace: vi.fn(async (namespace: string, seeds: Array<{ key: string; value: string }>) => ({
+    databasePath: "mock-device.db",
+    namespace,
+    values: Object.fromEntries(seeds.map((seed) => [seed.key, seed.value])),
+  })),
+  saveDeviceDatabaseValues: vi.fn(),
+}));
+
+vi.mock("./deviceDatabase", () => deviceDatabaseMock);
+
+const cloudStorageMock = vi.hoisted(() => ({
+  loadFirebaseAppStorage: vi.fn(async () => ({ values: {} })),
+  loadFirebaseUserBillingPlan: vi.fn(async () => null),
+  saveFirebaseAppStorageValues: vi.fn(),
+}));
+
+vi.mock("../firebase/cloudAppStorage", () => cloudStorageMock);
+
+import { appendUsageHistoryRecord, clearUsageHistory, defaultProviderSettings, deleteApiKeyRecord, initializeCloudStorage, loadApiKeyVault, loadChatById, loadChats, loadPersistentString, loadProjects, loadProviderSettings, loadUsageHistory, saveChats, savePersistentString, saveProjects, saveProviderSettings, setStorageNamespace, upsertApiKeyRecord } from "./appStorage";
 import { createEmptyChat } from "./chatUtils";
 import type { ChatSummary } from "../types/chat";
+
+const CHATS_KEY = "gilbert-codex.chats.v1";
+const SETTINGS_KEY = "gilbert-codex.provider-settings.v1";
 
 function installMemoryStorage() {
   const store = new Map<string, string>();
@@ -22,13 +48,29 @@ function installMemoryStorage() {
 
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { localStorage },
+    value: {
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
+      localStorage,
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+    },
   });
 }
 
 describe("app storage", () => {
   beforeEach(() => {
     installMemoryStorage();
+    deviceDatabaseMock.autoFinalizeDeviceDatabaseMigration.mockResolvedValue(undefined);
+    deviceDatabaseMock.isDeviceDatabaseAvailable.mockReturnValue(false);
+    deviceDatabaseMock.loadDeviceDatabaseChat.mockReset().mockResolvedValue(null);
+    deviceDatabaseMock.loadDeviceDatabaseNamespace.mockReset().mockImplementation(async (namespace: string, seeds: Array<{ key: string; value: string }>) => ({
+      databasePath: "mock-device.db",
+      namespace,
+      values: Object.fromEntries(seeds.map((seed) => [seed.key, seed.value])),
+    }));
+    deviceDatabaseMock.saveDeviceDatabaseValues.mockReset().mockResolvedValue(undefined);
+    cloudStorageMock.loadFirebaseAppStorage.mockReset().mockResolvedValue({ values: {} });
+    cloudStorageMock.loadFirebaseUserBillingPlan.mockReset().mockResolvedValue(null);
+    cloudStorageMock.saveFirebaseAppStorageValues.mockReset().mockResolvedValue(undefined);
     setStorageNamespace(null);
   });
 
@@ -682,6 +724,80 @@ describe("app storage", () => {
 
     expect(firstAccountSettings.provider).toBe("9router");
     expect(firstAccountSettings.model).toBe("cx/gpt-5.5");
+  });
+
+  it("does not fall back to device chats after cloud storage is initialized", async () => {
+    const cloudChat: ChatSummary = {
+      id: "cloud-chat",
+      messages: [],
+      messagesLoaded: false,
+      project: "Cloud",
+      title: "Cloud shell",
+      updatedAt: "2026-05-27T12:00:00.000Z",
+    };
+    const deviceChat: ChatSummary = {
+      id: "cloud-chat",
+      messages: [
+        {
+          content: "This belongs to the old local account.",
+          createdAt: "2026-05-27T12:00:00.000Z",
+          id: "device-message",
+          role: "user",
+        },
+      ],
+      project: "Old account",
+      title: "Old subscription chat",
+      updatedAt: "2026-05-27T12:00:00.000Z",
+    };
+
+    deviceDatabaseMock.isDeviceDatabaseAvailable.mockReturnValue(true);
+    deviceDatabaseMock.loadDeviceDatabaseChat.mockResolvedValue(JSON.stringify(deviceChat));
+    cloudStorageMock.loadFirebaseAppStorage.mockResolvedValueOnce({
+      values: {
+        [CHATS_KEY]: JSON.stringify([cloudChat]),
+      },
+    });
+
+    await initializeCloudStorage("firebase-user-a");
+
+    const loadedChat = await loadChatById("cloud-chat");
+
+    expect(deviceDatabaseMock.loadDeviceDatabaseChat).not.toHaveBeenCalled();
+    expect(loadedChat).toMatchObject({
+      id: "cloud-chat",
+      messages: [],
+      messagesLoaded: false,
+      project: "Cloud",
+    });
+  });
+
+  it("does not migrate old provider subscription settings into a new cloud account", async () => {
+    deviceDatabaseMock.isDeviceDatabaseAvailable.mockReturnValue(true);
+    deviceDatabaseMock.loadDeviceDatabaseNamespace.mockResolvedValueOnce({
+      databasePath: "mock-device.db",
+      namespace: "user.firebase-user-b",
+      values: {
+        [SETTINGS_KEY]: JSON.stringify({
+          ...defaultProviderSettings,
+          model: "cx/gpt-5.5",
+          provider: "9router",
+          providerModels: {
+            ...defaultProviderSettings.providerModels,
+            "9router": "cx/gpt-5.5",
+          },
+        }),
+      },
+    });
+    cloudStorageMock.loadFirebaseAppStorage.mockResolvedValueOnce({ values: {} });
+
+    await initializeCloudStorage("firebase-user-b");
+
+    const settings = loadProviderSettings();
+    const writtenEntries = cloudStorageMock.saveFirebaseAppStorageValues.mock.calls.flatMap((call) => call[1] ?? []);
+
+    expect(settings.provider).toBe(defaultProviderSettings.provider);
+    expect(settings.model).toBe(defaultProviderSettings.model);
+    expect(writtenEntries.some((entry) => entry.key === SETTINGS_KEY)).toBe(false);
   });
 
   it("does not persist empty draft chats into chat history", () => {

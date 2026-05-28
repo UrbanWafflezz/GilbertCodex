@@ -8,6 +8,7 @@ import {
   getDefaultGoogleOAuthClientSecret,
   getGmailState,
   gmailDesktopAvailable,
+  googleCloudAvailable,
   installGmailPlugin,
   setActiveGmailAccount,
 } from "../../app/gmailClient";
@@ -1227,7 +1228,8 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
   const googleTestingHint = import.meta.env.DEV ? " If Google shows access_denied because the app is in testing, add this Google account as a test user in Google Auth Platform > Audience." : "";
   const googleOAuthClientId = getDefaultGoogleOAuthClientId();
   const googleOAuthClientSecret = getDefaultGoogleOAuthClientSecret();
-  const googleClientReady = Boolean(googleOAuthClientId && googleOAuthClientSecret);
+  const googleHostedAvailable = googleCloudAvailable();
+  const googleClientReady = googleHostedAvailable || Boolean(googleOAuthClientId && googleOAuthClientSecret);
   const gmailAvailable = gmailDesktopAvailable();
   const gmailBusy = gmailActionState !== "idle";
   const gmailMaxAccounts = gmailConnection.maxAccounts || GMAIL_ACCOUNT_LIMIT;
@@ -1243,7 +1245,7 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
   const gmailAccountLabel = gmailAccountRows.length > 0
     ? `${gmailAccountRows.length}/${gmailMaxAccounts} accounts connected${gmailActiveEmail ? ` | Active: ${gmailActiveEmail}` : ""}`
     : gmailInstalled
-      ? "Installed locally. Google account not connected."
+      ? googleHostedAvailable ? "Hosted connector ready. Google account not connected." : "Installed locally. Google account not connected."
       : gmailAvailable && !googleClientReady
         ? "Add Google OAuth setup first"
       : "Install to choose a Google account";
@@ -1262,7 +1264,7 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
   const calendarAccountLabel = calendarAccountRows.length > 0
     ? `${calendarAccountRows.length}/${calendarMaxAccounts} accounts connected${calendarActiveEmail ? ` | Active: ${calendarActiveEmail}` : ""}`
     : calendarInstalled
-      ? "Installed locally. Google account not connected."
+      ? googleHostedAvailable ? "Hosted connector ready. Google account not connected." : "Installed locally. Google account not connected."
       : calendarAvailable && !googleClientReady
         ? "Add Google OAuth setup first"
       : "Install to choose a Google account";
@@ -1721,14 +1723,14 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
       return;
     }
 
-    if (!googleOAuthClientId) {
+    if (!googleHostedAvailable && !googleOAuthClientId) {
       setGmailActionState("idle");
       setGmailStatus({ kind: "warning", text: "Gmail needs Google OAuth setup first. Opening Settings > Google." });
       onOpenGoogleSettings();
       return;
     }
 
-    if (!googleOAuthClientSecret) {
+    if (!googleHostedAvailable && !googleOAuthClientSecret) {
       setGmailActionState("idle");
       setGmailStatus({ kind: "warning", text: "Gmail needs the matching Google desktop Client secret. Opening Settings > Google." });
       onOpenGoogleSettings();
@@ -1736,7 +1738,7 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
     }
 
     setGmailActionState("connect");
-    setGmailStatus({ kind: "warning", text: `Gmail plugin is installed locally. Opening Google sign-in so you can choose the account to connect.${googleTestingHint}` });
+    setGmailStatus({ kind: "warning", text: `${googleHostedAvailable ? "Opening hosted Google sign-in" : "Gmail plugin is installed locally. Opening Google sign-in"} so you can choose the account to connect.${googleHostedAvailable ? "" : googleTestingHint}` });
 
     try {
       const connection = await connectGmailOAuth({
@@ -1838,14 +1840,14 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
       return;
     }
 
-    if (!googleOAuthClientId) {
+    if (!googleHostedAvailable && !googleOAuthClientId) {
       setCalendarActionState("idle");
       setCalendarStatus({ kind: "warning", text: "Google Calendar needs Google OAuth setup first. Opening Settings > Google." });
       onOpenGoogleSettings();
       return;
     }
 
-    if (!googleOAuthClientSecret) {
+    if (!googleHostedAvailable && !googleOAuthClientSecret) {
       setCalendarActionState("idle");
       setCalendarStatus({ kind: "warning", text: "Google Calendar needs the matching Google desktop Client secret. Opening Settings > Google." });
       onOpenGoogleSettings();
@@ -1853,7 +1855,7 @@ export function AppsPage({ onBackToChat, onOpenGithubSettings, onOpenGoogleSetti
     }
 
     setCalendarActionState("connect");
-    setCalendarStatus({ kind: "warning", text: `Google Calendar plugin is installed locally. Opening Google sign-in so you can choose the account to connect.${googleTestingHint}` });
+    setCalendarStatus({ kind: "warning", text: `${googleHostedAvailable ? "Opening hosted Google sign-in" : "Google Calendar plugin is installed locally. Opening Google sign-in"} so you can choose the account to connect.${googleHostedAvailable ? "" : googleTestingHint}` });
 
     try {
       const connection = await connectGoogleCalendarOAuth({

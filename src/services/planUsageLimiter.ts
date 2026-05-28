@@ -4,7 +4,9 @@ import {
   shouldApplyManagedUsageLimits,
   type BillingUsageBucket,
 } from "../lib/subscriptionTiers";
+import { loadPersistentString, savePersistentString } from "../lib/appStorage";
 import type { BillingPlanSettings, ModelProviderId, ProviderSettings } from "../types/settings";
+import { ProviderRequestError } from "./providerErrors";
 
 const USAGE_STORAGE_KEY = "gilbert-codex.billing-usage.v1";
 
@@ -26,14 +28,12 @@ export function recordManagedPlanUsage(settings: ProviderSettings, bucket: Billi
 }
 
 export function recordPlanUsage(plan: BillingPlanSettings | undefined, bucket: BillingUsageBucket, amount = 1, provider?: ModelProviderId) {
-  const storage = getUsageStorage();
-
-  if (!plan || !storage || amount <= 0) {
+  if (!plan || amount <= 0) {
     return;
   }
 
   const tier = getBillingPlanTier(plan);
-  const state = readUsageState(storage);
+  const state = readUsageState();
   const dayLimit = getBillingBucketLimit(tier, bucket, "day");
   const minuteLimit = getBillingBucketLimit(tier, bucket, "minute");
   const nextState = { ...state };
@@ -45,14 +45,14 @@ export function recordPlanUsage(plan: BillingPlanSettings | undefined, bucket: B
   const minuteCount = nextState[bucket]?.minute?.count ?? 0;
 
   if (dayLimit !== null && dayCount > dayLimit) {
-    throw new Error(formatLimitError(bucket, dayLimit, "day", provider));
+    throw createLimitError(bucket, dayLimit, "day", provider);
   }
 
   if (minuteLimit !== null && minuteCount > minuteLimit) {
-    throw new Error(formatLimitError(bucket, minuteLimit, "minute", provider));
+    throw createLimitError(bucket, minuteLimit, "minute", provider);
   }
 
-  writeUsageState(storage, nextState);
+  writeUsageState(nextState);
 }
 
 function incrementBucket(state: UsageState, bucket: BillingUsageBucket, window: UsageWindow, amount: number) {
@@ -81,7 +81,15 @@ function formatLimitError(bucket: BillingUsageBucket, limit: number, window: Usa
           : "web searches";
   const providerText = provider ? ` for ${provider}` : "";
 
-  return `Plan limit reached: ${limit.toLocaleString()} ${label}${providerText} per ${window}.`;
+  return `Plan limit reached for ${label}${providerText}: ${limit.toLocaleString()} per ${window}. Try again ${window === "minute" ? "in a minute" : "tomorrow"}, switch to a local model, or choose a higher plan.`;
+}
+
+function createLimitError(bucket: BillingUsageBucket, limit: number, window: UsageWindow, provider?: ModelProviderId) {
+  return new ProviderRequestError(formatLimitError(bucket, limit, window, provider), {
+    kind: "usage_limit",
+    providerLabel: provider,
+    retryable: window === "minute",
+  });
 }
 
 function createWindowKey(window: UsageWindow) {
@@ -94,27 +102,19 @@ function createWindowKey(window: UsageWindow) {
   return now.toISOString().slice(0, 10);
 }
 
-function readUsageState(storage: Storage): UsageState {
+function readUsageState(): UsageState {
   try {
-    const value = storage.getItem(USAGE_STORAGE_KEY);
+    const value = loadPersistentString(USAGE_STORAGE_KEY);
     return value ? JSON.parse(value) as UsageState : {};
   } catch {
     return {};
   }
 }
 
-function writeUsageState(storage: Storage, state: UsageState) {
+function writeUsageState(state: UsageState) {
   try {
-    storage.setItem(USAGE_STORAGE_KEY, JSON.stringify(state));
+    savePersistentString(USAGE_STORAGE_KEY, JSON.stringify(state));
   } catch {
-    // Ignore storage failures so a browser privacy setting does not break local inference.
-  }
-}
-
-function getUsageStorage() {
-  try {
-    return globalThis.localStorage;
-  } catch {
-    return undefined;
+    // Ignore storage failures so a transient cloud write issue does not break local inference.
   }
 }

@@ -400,14 +400,14 @@ export const ShellSidebar = memo(function ShellSidebar({
       </div>
 
       <div className="sidebar-footer">
-        <section className="sidebar-account-card" aria-label="Local account">
+        <section className="sidebar-account-card" aria-label="Cloud account">
           <div className="sidebar-account">
             <div className="sidebar-account-avatar" aria-hidden="true">
               {getUserInitials(authUser)}
             </div>
             <div className="sidebar-account-copy">
               <strong>{authUser.displayName}</strong>
-              <span>@{authUser.username} - local</span>
+              <span>@{authUser.username} - cloud</span>
             </div>
             <button className="sidebar-account-signout" type="button" aria-label="Sign out" title="Sign out" onClick={onLogout}>
               <LogOut size={16} aria-hidden="true" />

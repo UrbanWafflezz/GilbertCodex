@@ -157,6 +157,13 @@ pub struct NineRouterOAuthCallbackStartResponse {
     pub redirect_uri: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NineRouterOAuthCallbackStartRequest {
+    pub path: Option<String>,
+    pub port: Option<u16>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NineRouterOAuthCallbackResponse {
@@ -288,8 +295,17 @@ pub async fn nine_router_local_stop(
     let state = state.inner().clone();
 
     tauri::async_runtime::spawn_blocking(move || {
-        write_preferences(&app, &NineRouterLocalPreferences { auto_start: false })?;
-        stop_nine_router_blocking(&app, &state)
+        let preference_result =
+            write_preferences(&app, &NineRouterLocalPreferences { auto_start: false });
+        let stop_result = stop_nine_router_blocking(&app, &state);
+
+        match (preference_result, stop_result) {
+            (_, Ok(status)) => Ok(status),
+            (Err(preference_error), Err(stop_error)) => {
+                Err(format!("{preference_error}; {stop_error}"))
+            }
+            (Ok(()), Err(stop_error)) => Err(stop_error),
+        }
     })
     .await
     .map_err(|error| format!("9Router Local stop task failed: {error}"))?
@@ -473,10 +489,11 @@ fn collect_nine_router_response_headers(
 #[tauri::command]
 pub async fn nine_router_oauth_callback_start(
     state: tauri::State<'_, NineRouterLocalState>,
+    request: Option<NineRouterOAuthCallbackStartRequest>,
 ) -> Result<NineRouterOAuthCallbackStartResponse, String> {
     let state = state.inner().clone();
 
-    tauri::async_runtime::spawn_blocking(move || start_oauth_callback_listener(&state))
+    tauri::async_runtime::spawn_blocking(move || start_oauth_callback_listener(&state, request))
         .await
         .map_err(|error| format!("9Router OAuth callback startup failed: {error}"))?
 }
@@ -495,10 +512,14 @@ pub async fn nine_router_oauth_callback_finish(
 
 fn start_oauth_callback_listener(
     state: &NineRouterLocalState,
+    request: Option<NineRouterOAuthCallbackStartRequest>,
 ) -> Result<NineRouterOAuthCallbackStartResponse, String> {
     cleanup_oauth_callback_sessions(state);
 
-    let listener = TcpListener::bind(("127.0.0.1", 0))
+    let requested_port = request.as_ref().and_then(|value| value.port).unwrap_or(0);
+    let callback_path =
+        normalize_oauth_callback_path(request.as_ref().and_then(|value| value.path.as_deref()));
+    let listener = TcpListener::bind(("127.0.0.1", requested_port))
         .map_err(|error| format!("Could not open local OAuth callback listener: {error}"))?;
     listener
         .set_nonblocking(true)
@@ -531,8 +552,15 @@ fn start_oauth_callback_listener(
 
     Ok(NineRouterOAuthCallbackStartResponse {
         id,
-        redirect_uri: format!("http://localhost:{port}/callback"),
+        redirect_uri: format!("http://localhost:{port}{callback_path}"),
     })
+}
+
+fn normalize_oauth_callback_path(path: Option<&str>) -> &'static str {
+    match path {
+        Some("/auth/callback") => "/auth/callback",
+        _ => "/callback",
+    }
 }
 
 fn finish_oauth_callback_listener(
@@ -597,15 +625,18 @@ fn run_oauth_callback_listener(
     while Instant::now() < deadline {
         match listener.accept() {
             Ok((mut stream, _)) => {
-                let callback =
-                    read_oauth_callback_from_stream(&mut stream).unwrap_or_else(|error| {
-                        NineRouterOAuthCallbackResponse {
-                            code: None,
-                            error: Some(error),
-                            error_description: None,
-                            state: None,
-                        }
-                    });
+                let callback = match read_oauth_callback_from_stream(&mut stream) {
+                    Ok(callback) => callback,
+                    Err(error) if is_transient_oauth_callback_read_error(&error) => {
+                        continue;
+                    }
+                    Err(error) => NineRouterOAuthCallbackResponse {
+                        code: None,
+                        error: Some(error),
+                        error_description: None,
+                        state: None,
+                    },
+                };
                 let success = callback.error.is_none();
                 let message = if success {
                     "Sign-in finished. You can close this window."
@@ -655,11 +686,18 @@ fn read_oauth_callback_from_stream(
 ) -> Result<NineRouterOAuthCallbackResponse, String> {
     let mut buffer = [0_u8; 8192];
     stream
+        .set_nonblocking(false)
+        .map_err(|error| format!("Could not configure callback socket blocking mode: {error}"))?;
+    stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .map_err(|error| format!("Could not configure callback socket: {error}"))?;
     let bytes_read = stream
         .read(&mut buffer)
         .map_err(|error| format!("Could not read callback request: {error}"))?;
+    if bytes_read == 0 {
+        return Err("OAuth callback connection closed before sending a request.".to_string());
+    }
+
     let request = String::from_utf8_lossy(&buffer[..bytes_read]);
     let request_line = request
         .lines()
@@ -706,6 +744,18 @@ fn read_oauth_callback_from_stream(
         error_description,
         state,
     })
+}
+
+fn is_transient_oauth_callback_read_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+
+    error.contains("os error 10035")
+        || error.contains("os error 10060")
+        || error.contains("WouldBlock")
+        || normalized.contains("connection closed before sending")
+        || normalized.contains("failed to respond")
+        || normalized.contains("operation would block")
+        || normalized.contains("timed out")
 }
 
 fn write_oauth_callback_page(

@@ -1,338 +1,198 @@
-import { invoke } from "@tauri-apps/api/core";
-import type { AuthSession, AuthStateResponse, CreateLocalAccountInput, LoginLocalAccountInput } from "../types/auth";
-import { isTauriDesktopRuntime } from "./tauriClient";
+import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updateProfile, type User } from "firebase/auth";
+import { doc, getDoc, runTransaction, serverTimestamp, setDoc } from "firebase/firestore";
+import { getGilbertFirebaseAuth, getGilbertFirestore } from "../firebase";
+import type { AuthSession, AuthStateResponse, AuthUser, CreateAuthAccountInput, LoginAuthAccountInput } from "../types/auth";
 
-const AUTH_DB_KEY = "gilbert-codex.local-auth-db.v1";
-const AUTH_DATABASE_GENERATION = 2;
-const PASSWORD_ALGORITHM = "pbkdf2-sha256";
-const PASSWORD_ITERATIONS = 210_000;
-const PASSWORD_KEY_BITS = 256;
-
-interface AuthUserRecord {
+interface CloudUserProfile {
   createdAt: number;
   displayName: string;
   email: string;
   id: string;
   lastLoginAt?: number;
-  passwordHash: string;
-  passwordHashAlgorithm: string;
-  passwordIterations: number;
-  passwordSalt: string;
   updatedAt: number;
   username: string;
 }
 
-interface AuthSessionRecord {
-  createdAt: number;
-  sessionToken: string;
-  userId: string;
-}
-
-interface BrowserAuthDatabase {
-  currentSession: AuthSessionRecord | null;
-  databaseGeneration: number;
-  users: AuthUserRecord[];
-}
-
-interface AuthLoginChallenge {
-  displayName: string;
-  passwordHashAlgorithm: string;
-  passwordIterations: number;
-  passwordSalt: string;
-  username: string;
-}
+const USERNAME_COLLECTION = "usernames";
 
 export async function getAuthState(): Promise<AuthStateResponse> {
-  if (isTauriDesktopRuntime()) {
-    return invoke<AuthStateResponse>("auth_get_state");
-  }
+  const auth = getGilbertFirebaseAuth();
+  const user = auth.currentUser ?? await waitForFirebaseAuthUser();
 
-  return getBrowserAuthState();
-}
-
-export async function createLocalAccount(input: CreateLocalAccountInput): Promise<AuthSession> {
-  const passwordSalt = createRandomBase64(18);
-  const passwordHash = await derivePasswordHash(input.password, passwordSalt, PASSWORD_ITERATIONS, PASSWORD_ALGORITHM);
-  const request = {
-    displayName: input.displayName.trim(),
-    email: input.email.trim(),
-    passwordHash,
-    passwordHashAlgorithm: PASSWORD_ALGORITHM,
-    passwordIterations: PASSWORD_ITERATIONS,
-    passwordSalt,
-    username: input.username.trim(),
+  return {
+    hasAccounts: true,
+    session: user ? await createSessionFromFirebaseUser(user) : null,
   };
-
-  if (isTauriDesktopRuntime()) {
-    return invoke<AuthSession>("auth_create_account", { request });
-  }
-
-  return createBrowserAccount(request);
 }
 
-export async function loginLocalAccount(input: LoginLocalAccountInput): Promise<AuthSession> {
+export async function createAuthAccount(input: CreateAuthAccountInput): Promise<AuthSession> {
+  const displayName = normalizeDisplayName(input.displayName);
+  const username = normalizeUsername(input.username);
+  const email = normalizeEmail(input.email);
+  const auth = getGilbertFirebaseAuth();
+  let createdUser: User | null = null;
+
+  try {
+    const credential = await createUserWithEmailAndPassword(auth, email, input.password);
+    createdUser = credential.user;
+    await updateProfile(createdUser, { displayName });
+    await reserveUsername(createdUser, username, email);
+    return createSessionFromFirebaseUser(createdUser, { displayName, username });
+  } catch (error) {
+    if (createdUser) {
+      await deleteUser(createdUser).catch(() => undefined);
+    }
+    throw normalizeFirebaseAuthError(error, "Could not create your cloud account.");
+  }
+}
+
+export async function loginAuthAccount(input: LoginAuthAccountInput): Promise<AuthSession> {
   const login = input.login.trim();
-  const challenge = await getLoginChallenge(login);
-  const passwordHash = await derivePasswordHash(input.password, challenge.passwordSalt, challenge.passwordIterations, challenge.passwordHashAlgorithm);
-
-  if (isTauriDesktopRuntime()) {
-    return invoke<AuthSession>("auth_login", {
-      request: {
-        login,
-        passwordHash,
-      },
+  const email = await resolveLoginEmail(login);
+  const credential = await signInWithEmailAndPassword(getGilbertFirebaseAuth(), email, input.password)
+    .catch((error) => {
+      throw normalizeFirebaseAuthError(error, "Could not sign in to your cloud account.");
     });
-  }
 
-  return loginBrowserAccount(login, passwordHash);
+  return createSessionFromFirebaseUser(credential.user);
 }
 
-export async function logoutLocalAccount(): Promise<void> {
-  if (isTauriDesktopRuntime()) {
-    await invoke<void>("auth_logout");
-    return;
-  }
-
-  const database = loadBrowserDatabase();
-  database.currentSession = null;
-  saveBrowserDatabase(database);
+export async function logoutAuthAccount(): Promise<void> {
+  await signOut(getGilbertFirebaseAuth());
 }
 
-async function getLoginChallenge(login: string): Promise<AuthLoginChallenge> {
-  if (isTauriDesktopRuntime()) {
-    return invoke<AuthLoginChallenge>("auth_get_login_challenge", {
-      request: {
-        login,
+async function waitForFirebaseAuthUser() {
+  return new Promise<User | null>((resolve, reject) => {
+    const unsubscribe = onAuthStateChanged(
+      getGilbertFirebaseAuth(),
+      (user) => {
+        unsubscribe();
+        resolve(user);
       },
-    });
-  }
+      (error) => {
+        unsubscribe();
+        reject(error);
+      },
+    );
+  });
+}
 
-  const database = loadBrowserDatabase();
-  const user = findBrowserUser(database, login);
-
-  if (!user) {
-    throw new Error("No local account matches that username or email.");
-  }
+async function createSessionFromFirebaseUser(user: User, profileOverride?: { displayName?: string; username?: string }): Promise<AuthSession> {
+  const profile = await upsertUserProfile(user, profileOverride);
 
   return {
-    displayName: user.displayName,
-    passwordHashAlgorithm: user.passwordHashAlgorithm,
-    passwordIterations: user.passwordIterations,
-    passwordSalt: user.passwordSalt,
-    username: user.username,
+    createdAt: Date.now(),
+    sessionToken: await user.getIdToken(),
+    user: profile,
   };
 }
 
-async function derivePasswordHash(password: string, saltBase64: string, iterations: number, algorithm: string) {
-  if (algorithm !== PASSWORD_ALGORITHM) {
-    throw new Error("Unsupported local password hashing algorithm.");
-  }
-
-  if (!globalThis.crypto?.subtle) {
-    throw new Error("Secure local password hashing is not available in this runtime.");
-  }
-
-  const key = await globalThis.crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await globalThis.crypto.subtle.deriveBits(
-    {
-      hash: "SHA-256",
-      iterations,
-      name: "PBKDF2",
-      salt: decodeBase64(saltBase64),
-    },
-    key,
-    PASSWORD_KEY_BITS,
-  );
-
-  return encodeBase64(new Uint8Array(bits));
-}
-
-function createBrowserAccount(request: Omit<AuthUserRecord, "createdAt" | "id" | "lastLoginAt" | "updatedAt">) {
-  const database = loadBrowserDatabase();
-  const username = normalizeUsername(request.username);
-  const email = normalizeEmail(request.email);
-  const displayName = normalizeDisplayName(request.displayName);
-
-  if (database.users.some((user) => user.username.toLowerCase() === username.toLowerCase())) {
-    throw new Error("That username is already used by another local account.");
-  }
-
-  if (database.users.some((user) => user.email.toLowerCase() === email.toLowerCase())) {
-    throw new Error("That email is already used by another local account.");
-  }
-
+async function upsertUserProfile(user: User, profileOverride?: { displayName?: string; username?: string }): Promise<AuthUser> {
+  const db = getGilbertFirestore();
+  const userRef = doc(db, "users", user.uid);
+  const snapshot = await getDoc(userRef);
+  const existing = snapshot.exists() ? normalizeCloudUserProfile(snapshot.data(), user) : null;
   const now = Date.now();
-  const user: AuthUserRecord = {
-    ...request,
-    createdAt: now,
-    displayName,
-    email,
-    id: `user-${createRandomId()}`,
+  const profile: CloudUserProfile = {
+    createdAt: existing?.createdAt ?? readUserCreatedAt(user) ?? now,
+    displayName: normalizeDisplayName(profileOverride?.displayName ?? existing?.displayName ?? user.displayName ?? user.email?.split("@")[0] ?? "Gilbert User"),
+    email: normalizeEmail(user.email ?? existing?.email ?? ""),
+    id: user.uid,
     lastLoginAt: now,
     updatedAt: now,
-    username,
+    username: normalizeUsername(profileOverride?.username ?? existing?.username ?? user.email?.split("@")[0] ?? user.uid),
   };
-  const session = createBrowserSession(user, now);
 
-  database.users.push(user);
-  database.currentSession = {
-    createdAt: session.createdAt,
-    sessionToken: session.sessionToken,
-    userId: user.id,
-  };
-  saveBrowserDatabase(database);
-
-  return session;
-}
-
-function loginBrowserAccount(login: string, passwordHash: string) {
-  const database = loadBrowserDatabase();
-  const userIndex = database.users.findIndex((user) => loginMatchesUser(user, login));
-
-  if (userIndex < 0) {
-    throw new Error("No local account matches that username or email.");
-  }
-
-  if (database.users[userIndex].passwordHash !== passwordHash) {
-    throw new Error("The password did not match this local account.");
-  }
-
-  const now = Date.now();
-  database.users[userIndex] = {
-    ...database.users[userIndex],
+  const profileWrite: Record<string, unknown> = {
+    ...profile,
+    authProvider: "firebase",
     lastLoginAt: now,
-    updatedAt: now,
+    serverUpdatedAt: serverTimestamp(),
   };
 
-  const session = createBrowserSession(database.users[userIndex], now);
-  database.currentSession = {
-    createdAt: session.createdAt,
-    sessionToken: session.sessionToken,
-    userId: database.users[userIndex].id,
-  };
-  saveBrowserDatabase(database);
-
-  return session;
-}
-
-function getBrowserAuthState(): AuthStateResponse {
-  const database = loadBrowserDatabase();
-  const session = database.currentSession ? createSessionFromDatabase(database, database.currentSession) : null;
-
-  return {
-    hasAccounts: database.users.length > 0,
-    session,
-  };
-}
-
-function createBrowserSession(user: AuthUserRecord, createdAt: number): AuthSession {
-  return {
-    createdAt,
-    sessionToken: `session-${createRandomId()}`,
-    user: publicUser(user),
-  };
-}
-
-function createSessionFromDatabase(database: BrowserAuthDatabase, session: AuthSessionRecord): AuthSession | null {
-  const user = database.users.find((record) => record.id === session.userId);
-
-  if (!user) {
-    return null;
+  if (!existing) {
+    profileWrite.billingPlan = {
+      source: "firebase",
+      status: "active",
+      tier: "free",
+      updatedAt: now,
+    };
   }
 
-  return {
-    createdAt: session.createdAt,
-    sessionToken: session.sessionToken,
-    user: publicUser(user),
-  };
+  await setDoc(userRef, profileWrite, { merge: true });
+
+  return profile;
 }
 
-function publicUser(user: AuthUserRecord) {
-  return {
-    createdAt: user.createdAt,
-    displayName: user.displayName,
-    email: user.email,
-    id: user.id,
-    lastLoginAt: user.lastLoginAt,
-    updatedAt: user.updatedAt,
-    username: user.username,
-  };
-}
+async function reserveUsername(user: User, username: string, email: string) {
+  const db = getGilbertFirestore();
+  const usernameRef = doc(db, USERNAME_COLLECTION, username);
 
-function loadBrowserDatabase(): BrowserAuthDatabase {
-  try {
-    const storedValue = window.localStorage.getItem(AUTH_DB_KEY);
-    const parsed = storedValue ? (JSON.parse(storedValue) as Partial<BrowserAuthDatabase>) : null;
+  await runTransaction(db, async (transaction) => {
+    const usernameSnapshot = await transaction.get(usernameRef);
 
-    if (!parsed || !Array.isArray(parsed.users)) {
-      return createEmptyBrowserDatabase();
+    if (usernameSnapshot.exists() && usernameSnapshot.data().uid !== user.uid) {
+      throw new Error("That username is already used by another Gilbert Codex account.");
     }
 
-    const normalized = normalizeBrowserDatabase(parsed);
-    if (normalized.repaired) {
-            persistBrowserDatabaseRepair(normalized.database);
-    }
+    transaction.set(usernameRef, {
+      createdAt: serverTimestamp(),
+      email,
+      uid: user.uid,
+      username,
+    });
+  });
+}
 
-    return normalized.database;
-  } catch {
-    return createEmptyBrowserDatabase();
+async function resolveLoginEmail(login: string) {
+  if (!login.trim()) {
+    throw new Error("Enter your email or username.");
   }
-}
 
-function saveBrowserDatabase(database: BrowserAuthDatabase) {
-  window.localStorage.setItem(AUTH_DB_KEY, JSON.stringify(database));
-}
-
-function persistBrowserDatabaseRepair(database: BrowserAuthDatabase) {
-  try {
-    saveBrowserDatabase(database);
-  } catch {
-    // Auth reads should not discard otherwise valid accounts just because
-    // browser preview storage is temporarily unavailable or quota-limited.
+  if (login.includes("@")) {
+    return normalizeEmail(login);
   }
+
+  const username = normalizeUsername(login);
+  const snapshot = await getDoc(doc(getGilbertFirestore(), USERNAME_COLLECTION, username));
+  const email = snapshot.exists() && typeof snapshot.data().email === "string" ? snapshot.data().email : "";
+
+  if (!email) {
+    throw new Error("No Gilbert Codex account matches that username.");
+  }
+
+  return normalizeEmail(email);
 }
 
-function createEmptyBrowserDatabase(): BrowserAuthDatabase {
+function normalizeCloudUserProfile(value: Record<string, unknown>, user: User): AuthUser {
+  const now = Date.now();
+
   return {
-    currentSession: null,
-    databaseGeneration: AUTH_DATABASE_GENERATION,
-    users: [],
+    createdAt: normalizeRequiredTimestamp(value.createdAt, readUserCreatedAt(user) ?? now),
+    displayName: normalizeDisplayName(typeof value.displayName === "string" ? value.displayName : user.displayName ?? "Gilbert User"),
+    email: normalizeEmail(typeof value.email === "string" ? value.email : user.email ?? ""),
+    id: user.uid,
+    lastLoginAt: normalizeTimestamp(value.lastLoginAt, undefined),
+    updatedAt: normalizeRequiredTimestamp(value.updatedAt, now),
+    username: normalizeUsername(typeof value.username === "string" ? value.username : user.email?.split("@")[0] ?? user.uid),
   };
 }
 
-function normalizeBrowserDatabase(parsed: Partial<BrowserAuthDatabase>) {
-  const users = parsed.users?.filter(isBrowserUserRecord) ?? [];
-  let repaired = users.length !== (parsed.users?.length ?? 0);
-  let currentSession = isBrowserSessionRecord(parsed.currentSession) ? parsed.currentSession : null;
-
-  if (parsed.databaseGeneration !== AUTH_DATABASE_GENERATION) {
-    repaired = true;
-  }
-
-  const currentSessionUserId = currentSession?.userId;
-  if (currentSessionUserId && !users.some((user) => user.id === currentSessionUserId)) {
-    currentSession = null;
-    repaired = true;
-  }
-
-  return {
-    database: {
-      currentSession,
-      databaseGeneration: AUTH_DATABASE_GENERATION,
-      users,
-    },
-    repaired,
-  };
+function readUserCreatedAt(user: User) {
+  const createdAt = user.metadata.creationTime ? Date.parse(user.metadata.creationTime) : Number.NaN;
+  return Number.isFinite(createdAt) ? createdAt : undefined;
 }
 
-function findBrowserUser(database: BrowserAuthDatabase, login: string) {
-  return database.users.find((user) => loginMatchesUser(user, login));
+function normalizeTimestamp(value: unknown, fallback: number | undefined) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  return fallback ?? undefined;
 }
 
-function loginMatchesUser(user: AuthUserRecord, login: string) {
-  const normalizedLogin = login.trim().toLowerCase();
-
-  return user.username.toLowerCase() === normalizedLogin || user.email.toLowerCase() === normalizedLogin;
+function normalizeRequiredTimestamp(value: unknown, fallback: number) {
+  return normalizeTimestamp(value, fallback) ?? fallback;
 }
 
 function normalizeDisplayName(value: string) {
@@ -342,11 +202,7 @@ function normalizeDisplayName(value: string) {
     throw new Error("Enter a display name with at least 2 characters.");
   }
 
-  if (displayName.length > 80) {
-    throw new Error("Keep the display name under 80 characters.");
-  }
-
-  return displayName;
+  return displayName.slice(0, 80);
 }
 
 function normalizeUsername(value: string) {
@@ -370,78 +226,35 @@ function normalizeUsername(value: string) {
 function normalizeEmail(value: string) {
   const email = value.trim().toLowerCase();
 
-  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error("Enter a valid email address for this local account.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Enter a valid email address.");
   }
 
   return email;
 }
 
-function isBrowserUserRecord(value: unknown): value is AuthUserRecord {
-  if (typeof value !== "object" || !value) {
-    return false;
+function normalizeFirebaseAuthError(error: unknown, fallback: string) {
+  if (error instanceof Error && !("code" in error)) {
+    return error;
   }
 
-  const user = value as Partial<AuthUserRecord>;
+  const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
 
-  return (
-    typeof user.id === "string" &&
-    typeof user.displayName === "string" &&
-    typeof user.email === "string" &&
-    typeof user.username === "string" &&
-    typeof user.passwordHash === "string" &&
-    typeof user.passwordSalt === "string"
-  );
-}
-
-function isBrowserSessionRecord(value: unknown): value is AuthSessionRecord {
-  if (typeof value !== "object" || !value) {
-    return false;
+  if (code.includes("email-already-in-use")) {
+    return new Error("That email is already registered. Sign in instead.");
   }
 
-  const session = value as Partial<AuthSessionRecord>;
-
-  return (
-    typeof session.createdAt === "number" &&
-    Number.isFinite(session.createdAt) &&
-    typeof session.sessionToken === "string" &&
-    session.sessionToken.trim().length > 0 &&
-    typeof session.userId === "string" &&
-    session.userId.trim().length > 0
-  );
-}
-
-function createRandomId() {
-  if (globalThis.crypto?.randomUUID) {
-    return globalThis.crypto.randomUUID();
+  if (code.includes("invalid-credential") || code.includes("wrong-password") || code.includes("user-not-found")) {
+    return new Error("The email, username, or password did not match a Gilbert Codex account.");
   }
 
-  return `${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
-}
-
-function createRandomBase64(byteLength: number) {
-  const bytes = new Uint8Array(byteLength);
-  globalThis.crypto.getRandomValues(bytes);
-  return encodeBase64(bytes);
-}
-
-function encodeBase64(bytes: Uint8Array) {
-  let binary = "";
-
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
+  if (code.includes("weak-password")) {
+    return new Error("Use a stronger password before creating the account.");
   }
 
-  return btoa(binary);
-}
-
-function decodeBase64(value: string) {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
+  if (error instanceof Error && error.message.trim()) {
+    return error;
   }
 
-  return bytes;
+  return new Error(fallback);
 }

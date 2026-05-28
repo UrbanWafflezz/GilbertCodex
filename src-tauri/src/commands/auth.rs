@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 const AUTH_DATABASE_FILE: &str = "local-auth-db.json";
 const AUTH_DATABASE_STORAGE_KEY: &str = "local-auth-db.v1";
+const CLOUD_ACCOUNT_SCOPE_STORAGE_KEY: &str = "firebase-active-account.v1";
 const AUTH_DATABASE_GENERATION: u32 = 2;
 const PASSWORD_ALGORITHM: &str = "pbkdf2-sha256";
 const MIN_PASSWORD_ITERATIONS: u32 = 100_000;
@@ -117,6 +118,20 @@ pub struct AuthLoginChallenge {
 pub struct AuthLoginRequest {
     pub login: String,
     pub password_hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthCloudAccountScopeRequest {
+    pub user_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthCloudAccountScopeResponse {
+    pub configured: bool,
+    pub namespace: Option<String>,
+    pub user_id: Option<String>,
 }
 
 #[tauri::command]
@@ -280,7 +295,40 @@ pub fn auth_logout(
     save_database(&app, &database)
 }
 
+#[tauri::command]
+pub fn auth_get_cloud_account_scope(
+    app: tauri::AppHandle,
+) -> Result<AuthCloudAccountScopeResponse, String> {
+    let configured_scope = read_configured_cloud_account_scope(&app)?;
+    Ok(create_cloud_account_scope_response(configured_scope))
+}
+
+#[tauri::command]
+pub fn auth_set_cloud_account_scope(
+    app: tauri::AppHandle,
+    request: AuthCloudAccountScopeRequest,
+) -> Result<AuthCloudAccountScopeResponse, String> {
+    let user_id = normalize_cloud_user_id(request.user_id.as_deref())?;
+    let raw_value = user_id.as_deref().unwrap_or("");
+
+    storage::write_value(
+        &app,
+        SYSTEM_NAMESPACE,
+        CLOUD_ACCOUNT_SCOPE_STORAGE_KEY,
+        raw_value,
+    )?;
+
+    Ok(create_cloud_account_scope_response(Some(user_id)))
+}
+
 pub fn current_user_storage_namespace(app: &tauri::AppHandle) -> Result<String, String> {
+    if let Some(configured_scope) = read_configured_cloud_account_scope(app)? {
+        let user_id = configured_scope
+            .ok_or_else(|| "Sign in before opening account-scoped local data.".to_string())?;
+
+        return storage::user_namespace(&user_id);
+    }
+
     let database = load_database(app)?;
     let session = database
         .current_session
@@ -293,6 +341,52 @@ pub fn current_user_storage_namespace(app: &tauri::AppHandle) -> Result<String, 
         .ok_or_else(|| "The signed-in local account is no longer available.".to_string())?;
 
     storage::user_namespace(&user.id)
+}
+
+fn create_cloud_account_scope_response(
+    configured_scope: Option<Option<String>>,
+) -> AuthCloudAccountScopeResponse {
+    let user_id = configured_scope.as_ref().and_then(|scope| scope.clone());
+    let namespace = user_id
+        .as_ref()
+        .and_then(|id| storage::user_namespace(id).ok());
+
+    AuthCloudAccountScopeResponse {
+        configured: configured_scope.is_some(),
+        namespace,
+        user_id,
+    }
+}
+
+fn read_configured_cloud_account_scope(
+    app: &tauri::AppHandle,
+) -> Result<Option<Option<String>>, String> {
+    storage::read_value(app, SYSTEM_NAMESPACE, CLOUD_ACCOUNT_SCOPE_STORAGE_KEY)?
+        .map(|value| normalize_cloud_user_id(Some(&value)))
+        .transpose()
+}
+
+fn normalize_cloud_user_id(value: Option<&str>) -> Result<Option<String>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    if trimmed.len() > 128 {
+        return Err("Cloud account id is too long.".to_string());
+    }
+
+    if !trimmed.chars().all(|character| {
+        character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':')
+    }) {
+        return Err("Cloud account id contains unsupported characters.".to_string());
+    }
+
+    Ok(Some(trimmed.to_string()))
 }
 
 impl From<&AuthUserRecord> for AuthUser {

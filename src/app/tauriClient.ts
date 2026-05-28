@@ -5,6 +5,14 @@ import type { DiscordBridgeResponseStyle, DiscordTunnelProvider } from "../types
 import type { ProjectOpenTargetId } from "../types/projectOpen";
 import { getHostPlatform } from "../lib/hostPlatform";
 import { unregisterBackgroundTerminalSession } from "../lib/terminalSessions";
+import {
+  cloudConnectorRequest,
+  disconnectCloudConnector,
+  getCloudConnectorAccount,
+  isCloudConnectorEnabled,
+  startCloudConnectorOAuth,
+  waitForCloudConnectorOAuth,
+} from "../services/cloudConnectorClient";
 import type {
   TerminalCreateSessionRequest,
   TerminalCreateSessionResponse,
@@ -33,6 +41,23 @@ const DISCORD_INTERACTION_EVENT = "discord-interaction";
 const DISCORD_BRIDGE_STATUS_EVENT = "discord-bridge-status";
 const DESKTOP_NOTIFICATION_ACTIVATED_EVENT = "desktop-notification-activated";
 const MOBILE_BRIDGE_UPDATED_EVENT = "mobile-bridge-updated";
+const APP_MENU_COMMAND_EVENT = "app-menu-command";
+
+export type AppMenuCommand =
+  | "new-chat"
+  | "search-chats"
+  | "settings"
+  | "show-chat"
+  | "show-apps"
+  | "show-tasks"
+  | "show-radar"
+  | "toggle-sidebar"
+  | "toggle-terminal"
+  | "appearance-system"
+  | "appearance-dark"
+  | "appearance-light"
+  | "check-updates"
+  | "show-about";
 
 export type DesktopNotificationKind = "completion" | "permission" | "question";
 
@@ -345,11 +370,22 @@ export interface NineRouterOAuthCallbackStartResponse {
   redirectUri: string;
 }
 
+export interface NineRouterOAuthCallbackStartRequest {
+  path?: "/auth/callback" | "/callback";
+  port?: number;
+}
+
 export interface NineRouterOAuthCallbackResponse {
   code?: string | null;
   error?: string | null;
   errorDescription?: string | null;
   state?: string | null;
+}
+
+export interface NativeAuthAccountScopeResponse {
+  configured: boolean;
+  namespace?: string | null;
+  userId?: string | null;
 }
 
 export interface MobileBridgeStartRequest {
@@ -393,6 +429,28 @@ export async function getAppInfo(): Promise<AppInfo> {
   }
 }
 
+export async function getNativeAuthAccountScope(): Promise<NativeAuthAccountScopeResponse> {
+  if (!isTauriDesktopRuntime()) {
+    return { configured: false, namespace: null, userId: null };
+  }
+
+  return invoke<NativeAuthAccountScopeResponse>("auth_get_cloud_account_scope");
+}
+
+export async function setNativeAuthAccountScope(userId: string | null): Promise<NativeAuthAccountScopeResponse> {
+  if (!isTauriDesktopRuntime()) {
+    return {
+      configured: true,
+      namespace: userId ? `user.${userId}` : null,
+      userId,
+    };
+  }
+
+  return invoke<NativeAuthAccountScopeResponse>("auth_set_cloud_account_scope", {
+    request: { userId },
+  });
+}
+
 export async function openExternalUrl(url: string): Promise<void> {
   if (!isTauriDesktopRuntime()) {
     window.open(url, "_blank", "noopener,noreferrer");
@@ -429,6 +487,16 @@ export async function listenForDesktopNotificationActivations(onActivation: (act
 
   return await listen<NativeDesktopNotificationActivation>(DESKTOP_NOTIFICATION_ACTIVATED_EVENT, (event) => {
     onActivation(event.payload);
+  });
+}
+
+export async function listenForAppMenuCommands(onCommand: (command: AppMenuCommand) => void): Promise<UnlistenFn> {
+  if (!isTauriDesktopRuntime()) {
+    return () => undefined;
+  }
+
+  return await listen<AppMenuCommand>(APP_MENU_COMMAND_EVENT, (event) => {
+    onCommand(event.payload);
   });
 }
 
@@ -559,12 +627,20 @@ export async function nineRouterLocalStream(request: NineRouterHttpRequest, onEv
   return invoke<void>("nine_router_local_stream", { request, onEvent: onEventChannel });
 }
 
-export async function startNineRouterOAuthCallback(): Promise<NineRouterOAuthCallbackStartResponse> {
+export async function startNineRouterOAuthCallback(request?: NineRouterOAuthCallbackStartRequest): Promise<NineRouterOAuthCallbackStartResponse> {
   if (!isTauriDesktopRuntime()) {
     throw new Error("Subscription account sign-in is available in the desktop app.");
   }
 
-  return invoke<NineRouterOAuthCallbackStartResponse>("nine_router_oauth_callback_start");
+  await clearStaleNineRouterOAuthCallback(request);
+
+  try {
+    return await invoke<NineRouterOAuthCallbackStartResponse>("nine_router_oauth_callback_start", {
+      request: request ?? null,
+    });
+  } catch (error) {
+    throw normalizeTauriInvokeError(error, "Could not start the subscription account sign-in callback.");
+  }
 }
 
 export async function finishNineRouterOAuthCallback(id: string, timeoutMs = 300_000): Promise<NineRouterOAuthCallbackResponse> {
@@ -572,9 +648,48 @@ export async function finishNineRouterOAuthCallback(id: string, timeoutMs = 300_
     throw new Error("Subscription account sign-in is available in the desktop app.");
   }
 
-  return invoke<NineRouterOAuthCallbackResponse>("nine_router_oauth_callback_finish", {
-    request: { id, timeoutMs },
-  });
+  try {
+    return await invoke<NineRouterOAuthCallbackResponse>("nine_router_oauth_callback_finish", {
+      request: { id, timeoutMs },
+    });
+  } catch (error) {
+    throw normalizeTauriInvokeError(error, "Could not finish the subscription account sign-in callback.");
+  }
+}
+
+async function clearStaleNineRouterOAuthCallback(request?: NineRouterOAuthCallbackStartRequest) {
+  if (!request?.port || !request.path) {
+    return;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), 750);
+
+  try {
+    const url = new URL(`http://127.0.0.1:${request.port}${request.path}`);
+    url.searchParams.set("error", "gilbert_retry_reset");
+    url.searchParams.set("error_description", "Restarting Codex sign-in.");
+    await fetch(url.toString(), { signal: controller.signal });
+    await new Promise((resolve) => {
+      globalThis.setTimeout(resolve, 250);
+    });
+  } catch {
+    // No previous listener is normal. This only clears a stuck retry listener.
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
+}
+
+function normalizeTauriInvokeError(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return new Error(error);
+  }
+
+  return new Error(fallback);
 }
 
 export async function startMobileBridge(request?: MobileBridgeStartRequest): Promise<MobileBridgeStatus> {
@@ -874,6 +989,10 @@ export async function reinstallWorkspaceDependencies(): Promise<WorkspaceDepende
 }
 
 export async function getDiscordBridgeStatus(): Promise<DiscordBridgeStatus> {
+  if (isDiscordCloudAvailable()) {
+    return createCloudDiscordStatus(await getCloudConnectorAccount<CloudDiscordAccount>("discord"));
+  }
+
   if (!isTauriDesktopRuntime()) {
     return {
       message: "Open the desktop app to run the Discord bridge.",
@@ -885,6 +1004,12 @@ export async function getDiscordBridgeStatus(): Promise<DiscordBridgeStatus> {
 }
 
 export async function startDiscordBridge(request: DiscordBridgeStartRequest): Promise<DiscordBridgeStatus> {
+  if (isDiscordCloudAvailable()) {
+    const session = await startCloudConnectorOAuth("discord");
+    await openExternalUrl(session.authorizationUrl);
+    return createCloudDiscordStatus(await waitForCloudConnectorOAuth<CloudDiscordAccount>("discord", session));
+  }
+
   if (!isTauriDesktopRuntime()) {
     throw new Error("Open the desktop app to start the Discord bridge.");
   }
@@ -893,6 +1018,10 @@ export async function startDiscordBridge(request: DiscordBridgeStartRequest): Pr
 }
 
 export async function stopDiscordBridge(): Promise<DiscordBridgeStatus> {
+  if (isDiscordCloudAvailable()) {
+    return createCloudDiscordStatus(await disconnectCloudConnector<CloudDiscordAccount>("discord"));
+  }
+
   if (!isTauriDesktopRuntime()) {
     return {
       message: "The Discord bridge only runs in the desktop app.",
@@ -904,6 +1033,15 @@ export async function stopDiscordBridge(): Promise<DiscordBridgeStatus> {
 }
 
 export async function sendDiscordInteractionResponse(request: { applicationId: string; content: string; token: string }): Promise<void> {
+  if (isDiscordCloudAvailable()) {
+    await cloudConnectorRequest("discord", "/discord/interactions/respond", {
+      body: JSON.stringify(request),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    return;
+  }
+
   if (!isTauriDesktopRuntime()) {
     throw new Error("Discord interaction responses are only available in the desktop app.");
   }
@@ -912,6 +1050,15 @@ export async function sendDiscordInteractionResponse(request: { applicationId: s
 }
 
 export async function sendDiscordChannelMessage(request: { botToken: string; channelId: string; content: string }): Promise<void> {
+  if (isDiscordCloudAvailable()) {
+    await cloudConnectorRequest("discord", "/discord/channel-message", {
+      body: JSON.stringify({ channelId: request.channelId, content: request.content }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    return;
+  }
+
   if (!isTauriDesktopRuntime()) {
     throw new Error("Discord channel messages are only available in the desktop app.");
   }
@@ -933,6 +1080,14 @@ export async function registerDiscordSlashCommand(request: {
   commandName?: string;
   guildId?: string;
 }): Promise<DiscordSlashCommandRegisterResponse> {
+  if (isDiscordCloudAvailable()) {
+    return cloudConnectorRequest<DiscordSlashCommandRegisterResponse>("discord", "/discord/register-command", {
+      body: JSON.stringify(request),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  }
+
   if (!isTauriDesktopRuntime()) {
     throw new Error("Registering Discord slash commands is only available in the desktop app.");
   }
@@ -941,6 +1096,38 @@ export async function registerDiscordSlashCommand(request: {
 }
 
 export async function listenForDiscordInteractions(onInteraction: (interaction: DiscordInteractionEvent) => void) {
+  if (isDiscordCloudAvailable()) {
+    let disposed = false;
+    let timeoutId: number | null = null;
+
+    const poll = async () => {
+      if (disposed) {
+        return;
+      }
+
+      try {
+        const response = await cloudConnectorRequest<{ events?: DiscordInteractionEvent[] }>("discord", "/discord/events/poll");
+        for (const interaction of response.events ?? []) {
+          onInteraction(interaction);
+        }
+      } catch (error) {
+        console.warn("Could not poll hosted Discord interactions", error);
+      } finally {
+        if (!disposed) {
+          timeoutId = window.setTimeout(poll, 2000);
+        }
+      }
+    };
+
+    void poll();
+    return () => {
+      disposed = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }
+
   if (!isTauriDesktopRuntime()) {
     return () => undefined;
   }
@@ -959,6 +1146,40 @@ export async function listenForDiscordBridgeStatus(onStatus: (status: DiscordBri
   return await listen<DiscordBridgeStatus>(DISCORD_BRIDGE_STATUS_EVENT, (event) => {
     onStatus(event.payload);
   });
+}
+
+interface CloudDiscordAccount {
+  connected?: boolean;
+  guildId?: string;
+  interactionsEndpointUrl?: string;
+  label?: string;
+  user?: {
+    globalName?: string;
+    id?: string;
+    username?: string;
+  };
+}
+
+function isDiscordCloudAvailable() {
+  return isCloudConnectorEnabled("discord");
+}
+
+function createCloudDiscordStatus(account: CloudDiscordAccount): DiscordBridgeStatus {
+  const connected = account.connected === true;
+  const publicUrl = account.interactionsEndpointUrl || null;
+  const label = account.label || account.user?.globalName || account.user?.username || "Discord";
+
+  return {
+    configKey: connected ? `cloud:${account.guildId || account.user?.id || "discord"}` : null,
+    localUrl: null,
+    message: connected
+      ? `Hosted Discord connector is connected as ${label}.`
+      : "Hosted Discord connector is ready. Sign in with Discord to enable slash commands.",
+    port: null,
+    publicUrl,
+    running: connected,
+    tunnelProvider: null,
+  };
 }
 
 function createWorkspaceDependencyPreviewDiagnostic(message: string): WorkspaceDependencyDiagnostic {

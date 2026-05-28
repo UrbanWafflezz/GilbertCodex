@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 
-import { initializeDeviceStorage, setStorageNamespace } from "../lib/appStorage";
+import { initializeCloudStorage, setStorageNamespace } from "../lib/appStorage";
 import { scheduleDelayedIdleTask } from "../lib/idleTask";
 import { AuthPage } from "../pages/AuthPage";
+import { isConfiguredNineRouterCloudEnabled, isNineRouterCloudRequired } from "../services/nineRouterCloud";
 import type { AuthSession } from "../types/auth";
-import { getAuthState, logoutLocalAccount } from "./authClient";
+import { getAuthState, logoutAuthAccount } from "./authClient";
 import { AppStartupScreen } from "./bootstrap/AppStartupScreen";
 import { useExternalLinkRouting } from "./bootstrap/useExternalLinkRouting";
 import {
   ensureNineRouterLocal,
   getAppInfo,
+  getNativeAuthAccountScope,
   getNineRouterLocalStatus,
   installNineRouterLocal,
   isTauriDesktopRuntime,
+  setNativeAuthAccountScope,
   setNineRouterLocalAutoStart,
   stopDiscordBridge,
   stopNineRouterLocal,
@@ -27,7 +30,6 @@ export function App() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authBootstrapped, setAuthBootstrapped] = useState(false);
-  const [authHasAccounts, setAuthHasAccounts] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const nineRouterAppBootstrapKeyRef = useRef<string | null>(null);
 
@@ -45,13 +47,15 @@ export function App() {
           return;
         }
         if (state.session) {
-          await initializeDeviceStorage(state.session.user.id);
+          await syncNativeAuthAccountScope(state.session.user.id);
+          await initializeCloudStorage(state.session.user.id);
           if (cancelled) {
             return;
           }
+        } else {
+          await syncNativeAuthAccountScope(null);
         }
         setAuthSession(state.session);
-        setAuthHasAccounts(state.hasAccounts);
       } catch (error) {
         if (!cancelled) {
           console.error("Failed to load auth state", error);
@@ -73,7 +77,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!authSession || !isTauriDesktopRuntime()) {
+    if (!authSession || !isTauriDesktopRuntime() || isConfiguredNineRouterCloudEnabled() || isNineRouterCloudRequired()) {
       nineRouterAppBootstrapKeyRef.current = null;
       return;
     }
@@ -96,12 +100,12 @@ export function App() {
     if (isTauriDesktopRuntime()) {
       await stopNineRouterLocal().catch(() => undefined);
       await stopDiscordBridge().catch(() => undefined);
-      await logoutLocalAccount();
     }
 
+    await logoutAuthAccount();
+    await syncNativeAuthAccountScope(null).catch(() => undefined);
     setStorageNamespace(null);
     setAuthSession(null);
-    setAuthHasAccounts(true);
   }
 
   if (!authBootstrapped || authLoading) {
@@ -112,17 +116,32 @@ export function App() {
     return (
       <AuthPage
         initialError={authError}
-        hasAccounts={authHasAccounts}
         onAuthenticated={async (session) => {
-          await initializeDeviceStorage(session.user.id);
+          await syncNativeAuthAccountScope(session.user.id);
+          await initializeCloudStorage(session.user.id);
           setAuthSession(session);
-          setAuthHasAccounts(true);
         }}
       />
     );
   }
 
   return <WorkspaceApp authSession={authSession} onLogout={handleLogout} />;
+}
+
+async function syncNativeAuthAccountScope(userId: string | null) {
+  if (!isTauriDesktopRuntime()) {
+    return;
+  }
+
+  const currentScope = await getNativeAuthAccountScope().catch(() => null);
+  const currentUserId = currentScope?.configured ? currentScope.userId ?? null : null;
+
+  if (!currentScope?.configured || currentUserId !== userId) {
+    await stopNineRouterLocal().catch(() => undefined);
+    await stopDiscordBridge().catch(() => undefined);
+  }
+
+  await setNativeAuthAccountScope(userId);
 }
 
 async function bootstrapNineRouterForAppStart(userId: string) {

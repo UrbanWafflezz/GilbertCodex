@@ -23,9 +23,10 @@ import {
   normalizeNineRouterDiscoveredModelId,
 } from "../lib/models";
 import { headersToRecord, normalizeNativeRequestBody, normalizeNativeRequestMethod } from "./nativeHttp";
+import { getConfiguredNineRouterDashboardUrl, isNineRouterNativeBridgeUrl, withNineRouterCloudAuthHeaders } from "./nineRouterCloud";
 
 export const NINE_ROUTER_PROVIDER_ID = "9router" as const;
-export const NINE_ROUTER_DASHBOARD_FALLBACK = "http://127.0.0.1:20128";
+export const NINE_ROUTER_DASHBOARD_FALLBACK = getConfiguredNineRouterDashboardUrl("http://127.0.0.1:20128");
 export const NINE_ROUTER_CODEX_REDIRECT_URI = "http://localhost:1455/auth/callback";
 export const NINE_ROUTER_CODEX_PROXY_APP_PORT = "20128";
 export const NINE_ROUTER_CODEX_POLL_INTERVAL_MS = 1_500;
@@ -370,6 +371,11 @@ export async function connectNineRouterAccount(provider: NineRouterAccountProvid
   await connectAuthorizationCodeProvider(provider, dashboardUrl, options);
 }
 
+export function getNineRouterCodexRedirectUri(dashboardUrl = NINE_ROUTER_DASHBOARD_FALLBACK) {
+  void dashboardUrl;
+  return NINE_ROUTER_CODEX_REDIRECT_URI;
+}
+
 export function chooseNineRouterModel(savedModel: string, models: string[]) {
   const normalizedSavedModel = savedModel.trim();
 
@@ -602,11 +608,17 @@ export async function patchNineRouterJson<T>(url: string, body: unknown) {
 }
 
 async function connectCodexAccount(dashboardUrl: string, options: NineRouterConnectOptions) {
+  if (!isNineRouterNativeBridgeUrl(dashboardUrl)) {
+    await connectCodexAccountWithDesktopCallback(dashboardUrl, options);
+    return;
+  }
+
   await stopCodexOAuthProxy(dashboardUrl);
+  const redirectUri = getNineRouterCodexRedirectUri(dashboardUrl);
 
   try {
     const authUrl = createNineRouterUrl(dashboardUrl, "/api/oauth/codex/authorize", {
-      redirect_uri: NINE_ROUTER_CODEX_REDIRECT_URI,
+      redirect_uri: redirectUri,
     });
     const authData = await fetchNineRouterJson<NineRouterAuthorizeResponse>(authUrl);
 
@@ -617,7 +629,7 @@ async function connectCodexAccount(dashboardUrl: string, options: NineRouterConn
     const proxyUrl = createNineRouterUrl(dashboardUrl, "/api/oauth/codex/start-proxy", {
       app_port: NINE_ROUTER_CODEX_PROXY_APP_PORT,
       code_verifier: authData.codeVerifier,
-      redirect_uri: NINE_ROUTER_CODEX_REDIRECT_URI,
+      redirect_uri: redirectUri,
       state: authData.state,
     });
     const proxy = await fetchNineRouterJson<NineRouterCodexProxyResponse>(proxyUrl);
@@ -631,6 +643,49 @@ async function connectCodexAccount(dashboardUrl: string, options: NineRouterConn
     await waitForCodexConnection(dashboardUrl, authData.state, options);
   } finally {
     void stopCodexOAuthProxy(dashboardUrl);
+  }
+}
+
+async function connectCodexAccountWithDesktopCallback(dashboardUrl: string, options: NineRouterConnectOptions) {
+  const callback = await startNineRouterOAuthCallback({ path: "/auth/callback", port: 1455 });
+  const redirectUri = callback.redirectUri;
+  const authData = await fetchNineRouterJson<NineRouterAuthorizeResponse>(createNineRouterUrl(dashboardUrl, "/api/oauth/codex/authorize", {
+    redirect_uri: redirectUri,
+  }));
+
+  if (!authData.authUrl || !authData.state || !authData.codeVerifier) {
+    throw new Error("Subscriptions did not return a complete Codex sign-in request.");
+  }
+
+  options.onStatus?.({ kind: "warning", text: "Finish the OpenAI sign-in in your browser. Gilbert will pick it up automatically." });
+  await openExternalUrl(authData.authUrl);
+  const callbackData = await finishNineRouterOAuthCallback(callback.id, 300_000);
+
+  if (!isConnectActive(options)) {
+    return;
+  }
+
+  if (callbackData.error) {
+    throw new Error(callbackData.errorDescription || callbackData.error);
+  }
+
+  if (!callbackData.code) {
+    throw new Error("OpenAI did not return an authorization code.");
+  }
+
+  if (callbackData.state && callbackData.state !== authData.state) {
+    throw new Error("OpenAI sign-in returned an unexpected state. Restart Codex sign-in and try again.");
+  }
+
+  const exchange = await postNineRouterJson<NineRouterExchangeResponse>(joinLocalUrl(dashboardUrl, "/api/oauth/codex/exchange"), {
+    code: callbackData.code,
+    codeVerifier: authData.codeVerifier,
+    redirectUri,
+    state: authData.state,
+  });
+
+  if (!exchange.success) {
+    throw new Error(exchange.errorDescription || exchange.error || "Codex sign-in did not complete.");
   }
 }
 
@@ -787,15 +842,16 @@ function delay(ms: number) {
 
 async function fetchWithTimeout(url: string, init: RequestInit) {
   const controller = new AbortController();
-  const timeoutId = globalThis.setTimeout(() => controller.abort(), 10_000);
+  const timeoutMs = isNineRouterNativeBridgeUrl(url) ? 10_000 : 60_000;
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    if (isTauriDesktopRuntime()) {
+    if (isTauriDesktopRuntime() && isNineRouterNativeBridgeUrl(url)) {
       const nativeResponse = await nineRouterLocalHttp({
         body: normalizeNativeRequestBody(init.body, "Subscriptions bridge"),
         headers: headersToRecord(init.headers),
         method: normalizeNativeRequestMethod(init.method, "Subscriptions bridge"),
-        timeoutMs: 10_000,
+        timeoutMs,
         url,
       });
 
@@ -805,13 +861,14 @@ async function fetchWithTimeout(url: string, init: RequestInit) {
       });
     }
 
+    const requestInit = await withNineRouterCloudAuthHeaders(url, init);
     return await fetch(url, {
-      ...init,
+      ...requestInit,
       signal: controller.signal,
     });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`Subscriptions did not answer ${url} within 10 seconds.`);
+      throw new Error(`Subscriptions did not answer ${url} within ${Math.round(timeoutMs / 1000)} seconds.`);
     }
 
     const message = error instanceof Error ? error.message : String(error);

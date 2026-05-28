@@ -3,10 +3,28 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     menu::MenuBuilder,
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Manager, Runtime, WindowEvent,
+    Emitter, Manager, Runtime, WindowEvent,
 };
 
+#[cfg(target_os = "macos")]
+use tauri::menu::{MenuItemBuilder, SubmenuBuilder};
+
 const MAIN_WINDOW_LABEL: &str = "main";
+const APP_MENU_COMMAND_EVENT: &str = "app-menu-command";
+const MENU_NEW_CHAT_ID: &str = "app-new-chat";
+const MENU_SEARCH_CHATS_ID: &str = "app-search-chats";
+const MENU_SETTINGS_ID: &str = "app-settings";
+const MENU_SHOW_CHAT_ID: &str = "app-show-chat";
+const MENU_SHOW_APPS_ID: &str = "app-show-apps";
+const MENU_SHOW_TASKS_ID: &str = "app-show-tasks";
+const MENU_SHOW_RADAR_ID: &str = "app-show-radar";
+const MENU_TOGGLE_SIDEBAR_ID: &str = "app-toggle-sidebar";
+const MENU_TOGGLE_TERMINAL_ID: &str = "app-toggle-terminal";
+const MENU_APPEARANCE_SYSTEM_ID: &str = "app-appearance-system";
+const MENU_APPEARANCE_DARK_ID: &str = "app-appearance-dark";
+const MENU_APPEARANCE_LIGHT_ID: &str = "app-appearance-light";
+const MENU_CHECK_UPDATES_ID: &str = "app-check-updates";
+const MENU_SHOW_ABOUT_ID: &str = "app-show-about";
 const TRAY_ID: &str = "gilbert-codex-tray";
 const TRAY_OPEN_ID: &str = "tray-open";
 const TRAY_QUIT_ID: &str = "tray-quit";
@@ -65,10 +83,16 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
                 }
             }
 
+            setup_app_menu(app)?;
             setup_tray(app)?;
             show_main_window(app.handle());
 
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            if let Some(command) = app_menu_command_for_id(event.id().as_ref()) {
+                let _ = app.emit(APP_MENU_COMMAND_EVENT, command);
+            }
         })
         .on_window_event(|window, event| {
             if window.label() != MAIN_WINDOW_LABEL {
@@ -93,10 +117,12 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             commands::agent_runs::agent_run_save,
             commands::agent_runs::agent_runs_list,
             commands::auth::auth_create_account,
+            commands::auth::auth_get_cloud_account_scope,
             commands::auth::auth_get_login_challenge,
             commands::auth::auth_get_state,
             commands::auth::auth_login,
             commands::auth::auth_logout,
+            commands::auth::auth_set_cloud_account_scope,
             commands::app_info::get_app_info,
             commands::app_info::app_quit,
             commands::browser::browser_automation,
@@ -258,12 +284,141 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
         ])
 }
 
+fn app_menu_command_for_id(id: &str) -> Option<&'static str> {
+    match id {
+        MENU_NEW_CHAT_ID => Some("new-chat"),
+        MENU_SEARCH_CHATS_ID => Some("search-chats"),
+        MENU_SETTINGS_ID => Some("settings"),
+        MENU_SHOW_CHAT_ID => Some("show-chat"),
+        MENU_SHOW_APPS_ID => Some("show-apps"),
+        MENU_SHOW_TASKS_ID => Some("show-tasks"),
+        MENU_SHOW_RADAR_ID => Some("show-radar"),
+        MENU_TOGGLE_SIDEBAR_ID => Some("toggle-sidebar"),
+        MENU_TOGGLE_TERMINAL_ID => Some("toggle-terminal"),
+        MENU_APPEARANCE_SYSTEM_ID => Some("appearance-system"),
+        MENU_APPEARANCE_DARK_ID => Some("appearance-dark"),
+        MENU_APPEARANCE_LIGHT_ID => Some("appearance-light"),
+        MENU_CHECK_UPDATES_ID => Some("check-updates"),
+        MENU_SHOW_ABOUT_ID => Some("show-about"),
+        _ => None,
+    }
+}
+
 pub(crate) fn request_app_exit<R: Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(state) = app.try_state::<AppLifecycleState>() {
         state.request_exit();
     }
 
     app.exit(0);
+}
+
+#[cfg(target_os = "macos")]
+fn setup_app_menu(app: &mut tauri::App) -> tauri::Result<()> {
+    let handle = app.handle();
+    let about = menu_item(handle, MENU_SHOW_ABOUT_ID, "About Gilbert Codex", None)?;
+    let new_chat = menu_item(handle, MENU_NEW_CHAT_ID, "New Chat", Some("CmdOrCtrl+N"))?;
+    let search_chats = menu_item(
+        handle,
+        MENU_SEARCH_CHATS_ID,
+        "Search Chats",
+        Some("CmdOrCtrl+K"),
+    )?;
+    let settings = menu_item(handle, MENU_SETTINGS_ID, "Settings", Some("CmdOrCtrl+,"))?;
+    let show_chat = menu_item(handle, MENU_SHOW_CHAT_ID, "Chat", None)?;
+    let show_apps = menu_item(handle, MENU_SHOW_APPS_ID, "Apps", None)?;
+    let show_tasks = menu_item(handle, MENU_SHOW_TASKS_ID, "Tasks", None)?;
+    let show_radar = menu_item(handle, MENU_SHOW_RADAR_ID, "Radar", None)?;
+    let toggle_sidebar = menu_item(
+        handle,
+        MENU_TOGGLE_SIDEBAR_ID,
+        "Show Sidebar",
+        Some("CmdOrCtrl+B"),
+    )?;
+    let toggle_terminal = menu_item(handle, MENU_TOGGLE_TERMINAL_ID, "Terminal", None)?;
+    let appearance_system = menu_item(handle, MENU_APPEARANCE_SYSTEM_ID, "System Theme", None)?;
+    let appearance_dark = menu_item(handle, MENU_APPEARANCE_DARK_ID, "Dark Theme", None)?;
+    let appearance_light = menu_item(handle, MENU_APPEARANCE_LIGHT_ID, "Light Theme", None)?;
+    let check_updates = menu_item(handle, MENU_CHECK_UPDATES_ID, "Check for Updates", None)?;
+
+    let app_menu = SubmenuBuilder::new(handle, "Gilbert Codex")
+        .item(&about)
+        .separator()
+        .item(&settings)
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+    let file_menu = SubmenuBuilder::new(handle, "File")
+        .item(&new_chat)
+        .item(&search_chats)
+        .build()?;
+    let edit_menu = SubmenuBuilder::new(handle, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .separator()
+        .select_all()
+        .build()?;
+    let view_menu = SubmenuBuilder::new(handle, "View")
+        .item(&toggle_sidebar)
+        .item(&toggle_terminal)
+        .separator()
+        .item(&show_chat)
+        .item(&show_apps)
+        .item(&show_tasks)
+        .item(&show_radar)
+        .separator()
+        .item(&appearance_system)
+        .item(&appearance_dark)
+        .item(&appearance_light)
+        .build()?;
+    let window_menu = SubmenuBuilder::new(handle, "Window")
+        .minimize()
+        .fullscreen()
+        .close_window()
+        .build()?;
+    let help_menu = SubmenuBuilder::new(handle, "Help")
+        .item(&check_updates)
+        .build()?;
+    let menu = MenuBuilder::new(handle)
+        .item(&app_menu)
+        .item(&file_menu)
+        .item(&edit_menu)
+        .item(&view_menu)
+        .item(&window_menu)
+        .item(&help_menu)
+        .build()?;
+
+    app.set_menu(menu)?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn setup_app_menu(_app: &mut tauri::App) -> tauri::Result<()> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn menu_item<R: Runtime, M: Manager<R>>(
+    manager: &M,
+    id: &str,
+    text: &str,
+    accelerator: Option<&str>,
+) -> tauri::Result<tauri::menu::MenuItem<R>> {
+    let mut item = MenuItemBuilder::with_id(id, text);
+    if let Some(accelerator) = accelerator {
+        item = item.accelerator(accelerator);
+    }
+
+    item.build(manager)
 }
 
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
@@ -307,5 +462,71 @@ fn show_main_window<R: Runtime>(app: &tauri::AppHandle<R>) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_native_app_menu_ids_to_frontend_commands() {
+        assert_eq!(app_menu_command_for_id(MENU_NEW_CHAT_ID), Some("new-chat"));
+        assert_eq!(
+            app_menu_command_for_id(MENU_SEARCH_CHATS_ID),
+            Some("search-chats")
+        );
+        assert_eq!(app_menu_command_for_id(MENU_SETTINGS_ID), Some("settings"));
+        assert_eq!(
+            app_menu_command_for_id(MENU_SHOW_CHAT_ID),
+            Some("show-chat")
+        );
+        assert_eq!(
+            app_menu_command_for_id(MENU_SHOW_APPS_ID),
+            Some("show-apps")
+        );
+        assert_eq!(
+            app_menu_command_for_id(MENU_SHOW_TASKS_ID),
+            Some("show-tasks")
+        );
+        assert_eq!(
+            app_menu_command_for_id(MENU_SHOW_RADAR_ID),
+            Some("show-radar")
+        );
+        assert_eq!(
+            app_menu_command_for_id(MENU_TOGGLE_SIDEBAR_ID),
+            Some("toggle-sidebar")
+        );
+        assert_eq!(
+            app_menu_command_for_id(MENU_TOGGLE_TERMINAL_ID),
+            Some("toggle-terminal")
+        );
+        assert_eq!(
+            app_menu_command_for_id(MENU_APPEARANCE_SYSTEM_ID),
+            Some("appearance-system")
+        );
+        assert_eq!(
+            app_menu_command_for_id(MENU_APPEARANCE_DARK_ID),
+            Some("appearance-dark")
+        );
+        assert_eq!(
+            app_menu_command_for_id(MENU_APPEARANCE_LIGHT_ID),
+            Some("appearance-light")
+        );
+        assert_eq!(
+            app_menu_command_for_id(MENU_CHECK_UPDATES_ID),
+            Some("check-updates")
+        );
+        assert_eq!(
+            app_menu_command_for_id(MENU_SHOW_ABOUT_ID),
+            Some("show-about")
+        );
+    }
+
+    #[test]
+    fn leaves_tray_menu_events_to_the_tray_handler() {
+        assert_eq!(app_menu_command_for_id(TRAY_OPEN_ID), None);
+        assert_eq!(app_menu_command_for_id(TRAY_QUIT_ID), None);
+        assert_eq!(app_menu_command_for_id("unknown-menu-item"), None);
     }
 }

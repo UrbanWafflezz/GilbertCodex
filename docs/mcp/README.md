@@ -1,6 +1,6 @@
 # MCP Support
 
-Last updated: May 25, 2026 for the v0.8.2 build.
+Last updated: May 28, 2026 for the v0.8.5 build.
 
 Gilbert Codex supports Model Context Protocol servers through the Apps page.
 

@@ -27,8 +27,9 @@ export function AssistantWorkTrace({ activitySnapshot, createdAt, message, onRes
   const [nowMs, setNowMs] = useState(() => Date.now());
   const hasRunDetails = Boolean(message && hasAssistantRunDetails(message, responseStarted));
   const hasWorkDetails = hasVisibleReasoning || hasRunDetails;
-  const [expanded, setExpanded] = useState(() => Boolean(live || hasVisibleReasoning));
+  const [expanded, setExpanded] = useState(() => Boolean(!responseStarted && (live || hasVisibleReasoning)));
   const hadWorkDetailsRef = useRef(hasWorkDetails);
+  const responseStartedRef = useRef(responseStarted);
   const timing = useMemo(() => createAssistantWorkTiming(message, createdAt, live, nowMs), [createdAt, live, message, nowMs]);
 
   useEffect(() => {
@@ -42,11 +43,23 @@ export function AssistantWorkTrace({ activitySnapshot, createdAt, message, onRes
 
   useEffect(() => {
     if (hasWorkDetails && !hadWorkDetailsRef.current) {
-      setExpanded(true);
+      setExpanded(!responseStarted);
     }
 
     hadWorkDetailsRef.current = hasWorkDetails;
-  }, [hasWorkDetails]);
+  }, [hasWorkDetails, responseStarted]);
+
+  useEffect(() => {
+    const responseStartedChanged = responseStarted !== responseStartedRef.current;
+
+    if (responseStartedChanged && responseStarted) {
+      setExpanded(false);
+    } else if (responseStartedChanged && !responseStarted && (live || hasVisibleReasoning)) {
+      setExpanded(true);
+    }
+
+    responseStartedRef.current = responseStarted;
+  }, [hasVisibleReasoning, live, responseStarted]);
 
   if (!timing.canRender && !hasWorkDetails) {
     return null;

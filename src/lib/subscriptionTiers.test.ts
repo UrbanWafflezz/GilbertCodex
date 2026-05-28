@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  BILLING_TIERS,
   createLocalBillingPlanPreview,
   filterModelOptionsForBillingTier,
   getBillingPlanAccessDecision,
+  getBillingPlanTier,
   normalizeBillingPlanSettings,
 } from "./subscriptionTiers";
 import {
@@ -23,6 +25,13 @@ describe("subscription tiers", () => {
   it("unlocks hosted provider and paid model routes for paid tiers", () => {
     expect(getBillingPlanAccessDecision("plus", "openai", "gpt-5.5").allowed).toBe(true);
     expect(getBillingPlanAccessDecision("pro", "openrouter", "~anthropic/claude-sonnet-latest").allowed).toBe(true);
+  });
+
+  it("advertises the Plus free trial without changing Pro pricing", () => {
+    expect(BILLING_TIERS.plus.trialLabel).toBe("1 month free");
+    expect(BILLING_TIERS.plus.ctaLabel).toBe("Start Plus trial");
+    expect(BILLING_TIERS.plus.features).toContain("1 month free, then $20/mo");
+    expect(BILLING_TIERS.pro.trialLabel).toBeUndefined();
   });
 
   it("filters model picker options for the active tier", () => {
@@ -73,5 +82,13 @@ describe("subscription tiers", () => {
       status: "active",
       tier: "plus",
     });
+  });
+
+  it("only treats active Stripe or admin paid plans as paid entitlements", () => {
+    expect(getBillingPlanTier({ source: "stripe", status: "active", tier: "plus" })).toBe("plus");
+    expect(getBillingPlanTier({ source: "stripe", status: "trialing", tier: "pro" })).toBe("pro");
+    expect(getBillingPlanTier({ source: "admin", status: "active", tier: "plus" })).toBe("plus");
+    expect(getBillingPlanTier({ source: "stripe", status: "past_due", tier: "plus" })).toBe("free");
+    expect(getBillingPlanTier({ source: "local-preview", status: "active", tier: "pro" })).toBe("free");
   });
 });

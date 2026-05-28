@@ -26,6 +26,22 @@ const THREAD_BOTTOM_THRESHOLD_PX = 96;
 const INITIAL_THREAD_RENDER_MESSAGE_COUNT = 40;
 const THREAD_HISTORY_RENDER_INCREMENT = 80;
 
+interface ThreadScrollMetrics {
+  clientHeight: number;
+  scrollHeight: number;
+  scrollTop: number;
+}
+
+interface ThreadScrollEdgeState {
+  atBottom: boolean;
+  atTop: boolean;
+}
+
+const INITIAL_THREAD_SCROLL_EDGE_STATE: ThreadScrollEdgeState = {
+  atBottom: true,
+  atTop: true,
+};
+
 interface ChatThreadProps {
   active?: boolean;
   appInfo: AppInfo;
@@ -71,6 +87,7 @@ function ChatThreadComponent({
   const [historyRenderCounts, setHistoryRenderCounts] = useState<ReadonlyMap<string, number>>(
     () => new Map([[chat.id, getInitialHistoryRenderCount(chat.messages.length)]]),
   );
+  const [threadScrollEdges, setThreadScrollEdges] = useState<ThreadScrollEdgeState>(INITIAL_THREAD_SCROLL_EDGE_STATE);
   const latestUserMessageKey = getLatestUserMessageKey(chat);
   const scrollAnchorMessage = getScrollAnchorMessage(chat);
   const renderedMessageCount = Math.min(
@@ -124,7 +141,7 @@ function ChatThreadComponent({
     observer.observe(content);
 
     return () => observer.disconnect();
-  }, [active, chat.id]);
+  }, [active, chat.id, historyHydrated]);
 
   useEffect(() => {
     if (!active) {
@@ -133,6 +150,7 @@ function ChatThreadComponent({
 
     latestUserMessageKeyRef.current = null;
     lastThreadScrollTopRef.current = 0;
+    setThreadScrollEdges(INITIAL_THREAD_SCROLL_EDGE_STATE);
     setThreadBottomState(true);
     scrollToThreadBottom();
   }, [active, chat.id]);
@@ -153,6 +171,14 @@ function ChatThreadComponent({
     return scheduleIdleTask(() => {
       increaseRenderedHistory(chat.id, THREAD_HISTORY_RENDER_INCREMENT);
     }, 1_800);
+  }, [active, chat.id, historyHydrated, renderedMessageCount]);
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+
+    updateThreadScrollEdges();
   }, [active, chat.id, historyHydrated, renderedMessageCount]);
 
   useEffect(() => {
@@ -275,6 +301,7 @@ function ChatThreadComponent({
     const atBottom = isThreadNearBottom(thread);
     lastThreadScrollTopRef.current = currentScrollTop;
     shouldStickToBottomRef.current = atBottom;
+    updateThreadScrollEdges(thread);
 
     if (!atBottom) {
       cancelPendingThreadBottomScroll();
@@ -294,6 +321,20 @@ function ChatThreadComponent({
 
     lastThreadScrollTopRef.current = thread.scrollTop;
     setThreadBottomState(isThreadNearBottom(thread));
+    updateThreadScrollEdges(thread);
+  }
+
+  function updateThreadScrollEdges(currentThread = threadRef.current) {
+    const thread = currentThread;
+
+    if (!thread) {
+      return;
+    }
+
+    const nextEdges = getThreadScrollEdgeState(thread, historyHydrated);
+    setThreadScrollEdges((currentEdges) =>
+      currentEdges.atTop === nextEdges.atTop && currentEdges.atBottom === nextEdges.atBottom ? currentEdges : nextEdges,
+    );
   }
 
   function cancelPendingThreadBottomScroll() {
@@ -370,7 +411,7 @@ function ChatThreadComponent({
 
   if (loading || chat.messagesLoaded === false) {
     return (
-      <div className="chat-thread-shell">
+      <div className="chat-thread-shell" data-scroll-bottom="true" data-scroll-top="true">
         <div ref={threadRef} className="chat-thread" onScroll={handleThreadScroll}>
           <div ref={threadContentRef} className="chat-thread-content">
             <div className="chat-loading-state" role="status" aria-live="polite">
@@ -385,7 +426,7 @@ function ChatThreadComponent({
 
   if (chat.messages.length === 0) {
     return (
-      <div className="chat-thread-shell">
+      <div className="chat-thread-shell" data-scroll-bottom="true" data-scroll-top="true">
         <div ref={threadRef} className="chat-thread" onScroll={handleThreadScroll}>
           <div ref={threadContentRef} className="chat-thread-content">
             <MessageBlock role="assistant">
@@ -398,7 +439,7 @@ function ChatThreadComponent({
   }
 
   return (
-    <div className="chat-thread-shell">
+    <div className="chat-thread-shell" data-scroll-bottom={threadScrollEdges.atBottom ? "true" : "false"} data-scroll-top={threadScrollEdges.atTop ? "true" : "false"}>
       <div ref={threadRef} className="chat-thread" onScroll={handleThreadScroll}>
         <div ref={threadContentRef} className="chat-thread-content">
           {visibleMessages.map((message, visibleMessageIndex) => {
@@ -1065,7 +1106,14 @@ function getLatestUserMessageKey(chat: ChatSummary) {
   return null;
 }
 
-function isThreadNearBottom(thread: HTMLDivElement) {
+export function getThreadScrollEdgeState(thread: ThreadScrollMetrics, historyHydrated: boolean): ThreadScrollEdgeState {
+  return {
+    atBottom: isThreadNearBottom(thread),
+    atTop: historyHydrated && thread.scrollTop <= 2,
+  };
+}
+
+function isThreadNearBottom(thread: ThreadScrollMetrics) {
   const distanceFromBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
   return distanceFromBottom <= THREAD_BOTTOM_THRESHOLD_PX;
 }

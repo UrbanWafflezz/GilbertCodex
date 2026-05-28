@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelLeft } from "lucide-react";
 import { closeWindow, maximizeWindow, minimizeWindow, quitApp } from "../../app/windowClient";
+import { listenForAppMenuCommands, type AppMenuCommand } from "../../app/tauriClient";
 import { IconButton } from "../common/IconButton";
 import { AppUpdateIndicator, useAppUpdateController } from "./AppUpdateIndicator";
 import { runTopBarEditCommand } from "./topBarEditCommands";
@@ -33,6 +34,18 @@ interface AppTopBarProps {
   terminalOpen: boolean;
 }
 
+interface AppMenuCommandActions {
+  locationServicesEnabled: boolean;
+  onAppearanceModeChange: (mode: AppearanceMode) => void;
+  onCheckForUpdates: () => void;
+  onNewChat: () => void;
+  onOpenSearch: () => void;
+  onRouteChange: (route: PrimaryRoute) => void;
+  onShowAbout: () => void;
+  onToggleSidebar: () => void;
+  onToggleTerminal: () => void;
+}
+
 type MenuId = "file" | "edit" | "view" | "window" | "help";
 
 const menuDefinitions: TopBarMenuDefinition<MenuId>[] = [
@@ -42,6 +55,55 @@ const menuDefinitions: TopBarMenuDefinition<MenuId>[] = [
   { id: "window", label: "Window" },
   { id: "help", label: "Help" },
 ];
+
+export function dispatchAppMenuCommand(command: AppMenuCommand, actions: AppMenuCommandActions) {
+  switch (command) {
+    case "new-chat":
+      actions.onNewChat();
+      break;
+    case "search-chats":
+      actions.onOpenSearch();
+      break;
+    case "settings":
+      actions.onRouteChange("settings");
+      break;
+    case "show-chat":
+      actions.onRouteChange("chat");
+      break;
+    case "show-apps":
+      actions.onRouteChange("apps");
+      break;
+    case "show-tasks":
+      actions.onRouteChange("tasks");
+      break;
+    case "show-radar":
+      if (actions.locationServicesEnabled) {
+        actions.onRouteChange("radar");
+      }
+      break;
+    case "toggle-sidebar":
+      actions.onToggleSidebar();
+      break;
+    case "toggle-terminal":
+      actions.onToggleTerminal();
+      break;
+    case "appearance-system":
+      actions.onAppearanceModeChange("system");
+      break;
+    case "appearance-dark":
+      actions.onAppearanceModeChange("dark");
+      break;
+    case "appearance-light":
+      actions.onAppearanceModeChange("light");
+      break;
+    case "check-updates":
+      actions.onCheckForUpdates();
+      break;
+    case "show-about":
+      actions.onShowAbout();
+      break;
+  }
+}
 
 export function AppTopBar({
   activeRoute,
@@ -65,8 +127,35 @@ export function AppTopBar({
   const [openMenu, setOpenMenu] = useState<MenuId | null>(null);
   const updateController = useAppUpdateController(desktopRuntime);
   const isMac = isMacHostPlatform(hostPlatform);
+  const showInWindowMenus = !desktopRuntime || !isMac;
   const shortcut = useCallback((value: string) => formatShortcutForPlatform(value, hostPlatform), [hostPlatform]);
   const preloadRoute = useCallback((route: PrimaryRoute) => () => onPreloadRoute?.(route), [onPreloadRoute]);
+  const handleAppMenuCommand = useCallback(
+    (command: AppMenuCommand) => {
+      dispatchAppMenuCommand(command, {
+        locationServicesEnabled,
+        onAppearanceModeChange,
+        onCheckForUpdates: updateController.checkNow,
+        onNewChat,
+        onOpenSearch,
+        onRouteChange,
+        onShowAbout,
+        onToggleSidebar,
+        onToggleTerminal,
+      });
+    },
+    [
+      locationServicesEnabled,
+      onAppearanceModeChange,
+      onNewChat,
+      onOpenSearch,
+      onRouteChange,
+      onShowAbout,
+      onToggleSidebar,
+      onToggleTerminal,
+      updateController.checkNow,
+    ],
+  );
 
   const menus = useMemo<Record<MenuId, TopBarMenuAction[]>>(
     () => ({
@@ -136,11 +225,44 @@ export function AppTopBar({
   );
 
   useDismissableLayer({
-    active: openMenu !== null,
+    active: showInWindowMenus && openMenu !== null,
     keyboardTarget: "window",
     onDismiss: () => setOpenMenu(null),
     refs: [topbarRef],
   });
+
+  useEffect(() => {
+    if (!showInWindowMenus && openMenu !== null) {
+      setOpenMenu(null);
+    }
+  }, [openMenu, showInWindowMenus]);
+
+  useEffect(() => {
+    if (!desktopRuntime || !isMac) {
+      return;
+    }
+
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    void listenForAppMenuCommands((command) => {
+      if (!disposed) {
+        handleAppMenuCommand(command);
+      }
+    }).then((nextUnlisten) => {
+      if (disposed) {
+        nextUnlisten();
+        return;
+      }
+
+      unlisten = nextUnlisten;
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [desktopRuntime, handleAppMenuCommand, isMac]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -186,7 +308,9 @@ export function AppTopBar({
       <div className="topbar-left">
         {isMac ? <WindowControls hostPlatform={hostPlatform} /> : null}
         <IconButton ariaLabel="Toggle sidebar" icon={PanelLeft} pressed={sidebarOpen} onClick={onToggleSidebar} />
-        <TopBarMenus ariaLabel="Application menu" definitions={menuDefinitions} menus={menus} openMenu={openMenu} onOpenMenuChange={setOpenMenu} />
+        {showInWindowMenus ? (
+          <TopBarMenus ariaLabel="Application menu" definitions={menuDefinitions} menus={menus} openMenu={openMenu} onOpenMenuChange={setOpenMenu} />
+        ) : null}
       </div>
       <div className="topbar-center">
         <img className="topbar-logo" src="/gilbert-codex-logo.svg" alt="" aria-hidden="true" draggable={false} />

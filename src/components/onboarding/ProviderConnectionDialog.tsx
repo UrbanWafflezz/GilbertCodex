@@ -18,6 +18,7 @@ import {
   type NineRouterConnection,
   type NineRouterStatusMessage,
 } from "../../services/nineRouterClient";
+import { getConfiguredNineRouterBaseUrl, getConfiguredNineRouterDashboardUrl, isConfiguredNineRouterCloudEnabled, isNineRouterCloudRequired, isNineRouterNativeBridgeUrl } from "../../services/nineRouterCloud";
 import { getDefaultBaseUrlForProvider, OPENROUTER_AUTO_MODEL, OPENROUTER_FREE_AUTO_MODEL } from "../../lib/models";
 import { scheduleIdleTask } from "../../lib/idleTask";
 import type { ModelProviderId, ProviderSettings } from "../../types/settings";
@@ -57,7 +58,15 @@ export function ProviderConnectionDialog({
   const [models, setModels] = useState<string[]>([]);
   const [runtimeStatus, setRuntimeStatus] = useState<NineRouterLocalStatus | null>(null);
   const [statusMessage, setStatusMessage] = useState<NineRouterStatusMessage | null>(null);
-  const nineRouterBaseUrl = settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim() || runtimeStatus?.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID);
+  const configuredCloudSubscriptions = isConfiguredNineRouterCloudEnabled();
+  const cloudSubscriptionsRequired = isNineRouterCloudRequired();
+  const savedNineRouterBaseUrl = settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim() || "";
+  const nineRouterBaseUrl = configuredCloudSubscriptions
+    ? getConfiguredNineRouterBaseUrl(savedNineRouterBaseUrl || runtimeStatus?.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID))
+    : savedNineRouterBaseUrl || runtimeStatus?.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID);
+  const cloudSubscriptionsEnabled = configuredCloudSubscriptions || (!cloudSubscriptionsRequired && !isNineRouterNativeBridgeUrl(nineRouterBaseUrl));
+  const cloudSubscriptionsUnavailable = cloudSubscriptionsRequired && !configuredCloudSubscriptions;
+  const nineRouterDashboardUrl = cloudSubscriptionsEnabled ? getConfiguredNineRouterDashboardUrl(nineRouterBaseUrl) : runtimeStatus?.dashboardUrl || NINE_ROUTER_DASHBOARD_FALLBACK;
   const savedNineRouterModel = settings.providerModels[NINE_ROUTER_PROVIDER_ID]?.trim() || "";
   const openRouterHasKey = Boolean((settings.apiKeys.openrouter || settings.openRouterApiKey || "").trim());
   const openRouterFallbackModel = openRouterHasKey ? OPENROUTER_AUTO_MODEL : OPENROUTER_FREE_AUTO_MODEL;
@@ -101,7 +110,21 @@ export function ProviderConnectionDialog({
     setBusy((current) => current ?? "refresh");
 
     try {
-      const nextStatus = options.start ? await ensureNineRouterLocal() : await getNineRouterLocalStatus();
+      if (cloudSubscriptionsUnavailable) {
+        setRuntimeStatus(null);
+        setConnections([]);
+        setModels([]);
+        if (!options.quiet) {
+          setStatusMessage({ kind: "warning", text: "Cloud subscription routing is required, but this build does not have a cloud router URL configured." });
+        }
+        return;
+      }
+
+      const nextStatus = cloudSubscriptionsEnabled
+        ? createCloudNineRouterStatus(nineRouterDashboardUrl, nineRouterBaseUrl)
+        : options.start
+          ? await ensureNineRouterLocal()
+          : await getNineRouterLocalStatus();
 
       if (!mountedRef.current || accountConnectRunRef.current !== runId) {
         return;
@@ -119,8 +142,8 @@ export function ProviderConnectionDialog({
       }
 
       const [nextConnections, nextModels] = await Promise.all([
-        loadNineRouterConnections(nextStatus.dashboardUrl || NINE_ROUTER_DASHBOARD_FALLBACK),
-        loadNineRouterModels(settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim() || nextStatus.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID)),
+        loadNineRouterConnections(cloudSubscriptionsEnabled ? nineRouterDashboardUrl : nextStatus.dashboardUrl || NINE_ROUTER_DASHBOARD_FALLBACK),
+        loadNineRouterModels(cloudSubscriptionsEnabled ? nineRouterBaseUrl : settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim() || nextStatus.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID)),
       ]);
 
       if (!mountedRef.current || accountConnectRunRef.current !== runId) {
@@ -155,7 +178,7 @@ export function ProviderConnectionDialog({
     try {
       let nextStatus = runtimeStatus;
       if (!nextStatus?.running) {
-        nextStatus = await ensureNineRouterLocal();
+        nextStatus = cloudSubscriptionsEnabled ? createCloudNineRouterStatus(nineRouterDashboardUrl, nineRouterBaseUrl) : await ensureNineRouterLocal();
         if (!mountedRef.current || accountConnectRunRef.current !== runId) {
           return;
         }
@@ -166,7 +189,7 @@ export function ProviderConnectionDialog({
         throw new Error(nextStatus.message || `Set up subscriptions before connecting ${provider.name}.`);
       }
 
-      await connectNineRouterAccount(provider, nextStatus.dashboardUrl || NINE_ROUTER_DASHBOARD_FALLBACK, {
+      await connectNineRouterAccount(provider, cloudSubscriptionsEnabled ? nineRouterDashboardUrl : nextStatus.dashboardUrl || NINE_ROUTER_DASHBOARD_FALLBACK, {
         isActive: () => mountedRef.current && accountConnectRunRef.current === runId,
         onStatus: setStatusMessage,
       });
@@ -176,8 +199,8 @@ export function ProviderConnectionDialog({
       }
 
       const [nextConnections, nextModels] = await Promise.all([
-        loadNineRouterConnections(nextStatus.dashboardUrl || NINE_ROUTER_DASHBOARD_FALLBACK),
-        loadNineRouterModels(settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim() || nextStatus.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID)),
+        loadNineRouterConnections(cloudSubscriptionsEnabled ? nineRouterDashboardUrl : nextStatus.dashboardUrl || NINE_ROUTER_DASHBOARD_FALLBACK),
+        loadNineRouterModels(cloudSubscriptionsEnabled ? nineRouterBaseUrl : settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim() || nextStatus.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID)),
       ]);
       const preferredConnection = choosePreferredConnection(nextConnections.filter((connection) => connection.provider === provider.id));
       const nextModel = chooseNineRouterModelForAccount(provider.id, savedNineRouterModel, nextModels);
@@ -205,7 +228,7 @@ export function ProviderConnectionDialog({
       });
     } catch (error) {
       if (mountedRef.current && accountConnectRunRef.current === runId) {
-        setStatusMessage({ kind: "error", text: error instanceof Error ? error.message : `Could not connect ${provider.name}.` });
+        setStatusMessage({ kind: "error", text: readProviderConnectError(error, `Could not connect ${provider.name}.`) });
       }
     } finally {
       if (mountedRef.current && accountConnectRunRef.current === runId) {
@@ -223,7 +246,7 @@ export function ProviderConnectionDialog({
       let nextStatus = runtimeStatus;
 
       if (!nextStatus?.running) {
-        nextStatus = await ensureNineRouterLocal();
+        nextStatus = cloudSubscriptionsEnabled ? createCloudNineRouterStatus(nineRouterDashboardUrl, nineRouterBaseUrl) : await ensureNineRouterLocal();
         if (!mountedRef.current) {
           return;
         }
@@ -268,18 +291,20 @@ export function ProviderConnectionDialog({
     onClose();
   }
 
-  const runtimeReady = Boolean(runtimeStatus?.running);
-  const runtimeInstalled = Boolean(runtimeStatus?.installed);
+  const runtimeReady = cloudSubscriptionsEnabled || Boolean(runtimeStatus?.running);
+  const runtimeInstalled = cloudSubscriptionsEnabled || Boolean(runtimeStatus?.installed);
   const desktopRuntime = isTauriDesktopRuntime();
-  const runtimeChecking = desktopRuntime && !runtimeStatus;
-  const subscriptionSetupNeeded = isTauriDesktopRuntime() && Boolean(runtimeStatus) && !runtimeInstalled;
+  const runtimeChecking = !cloudSubscriptionsEnabled && !cloudSubscriptionsUnavailable && desktopRuntime && !runtimeStatus;
+  const subscriptionSetupNeeded = !cloudSubscriptionsEnabled && !cloudSubscriptionsUnavailable && isTauriDesktopRuntime() && Boolean(runtimeStatus) && !runtimeInstalled;
   const showAccountPanel = runtimeReady || connectedAccountCount > 0;
   const useSubscriptionsAsPrimaryAction = runtimeReady && (activeConnectionCount > 0 || models.length > 0);
-  const primaryActionLabel = subscriptionSetupNeeded ? "Set up subscriptions" : useSubscriptionsAsPrimaryAction ? "Use subscriptions" : openRouterHasKey ? "Use OpenRouter Auto" : "Use Free Fallback";
+  const primaryActionLabel = subscriptionSetupNeeded || cloudSubscriptionsUnavailable ? "Set up subscriptions" : useSubscriptionsAsPrimaryAction ? "Use subscriptions" : openRouterHasKey ? "Use OpenRouter Auto" : "Use Free Fallback";
   const primaryBusyLabel = busy === "activate-subscriptions" ? "Using subscriptions" : busy === "fallback" ? "Switching" : busy === "refresh" ? "Checking" : primaryActionLabel;
-  const dialogTitle = subscriptionSetupNeeded ? "Choose how Gilbert connects" : "Connect an AI provider";
-  const dialogDescription = subscriptionSetupNeeded
-    ? "Subscriptions need one local setup step before account sign-in. You can install them now, use provider keys, or keep going with OpenRouter."
+  const dialogTitle = subscriptionSetupNeeded || cloudSubscriptionsUnavailable ? "Choose how Gilbert connects" : "Connect an AI provider";
+  const dialogDescription = cloudSubscriptionsUnavailable
+    ? "Cloud subscriptions are required for this build, but the cloud router URL is not configured yet. Provider keys and OpenRouter fallback remain available."
+    : subscriptionSetupNeeded
+      ? "Subscriptions need one setup step before account sign-in. You can set them up now, use provider keys, or keep going with OpenRouter."
     : "Use subscriptions first, fall back cleanly. Sign in with the provider accounts you already pay for; Gilbert keeps OpenRouter ready when nothing is connected.";
   const displayStatusMessage = statusMessage
     ? {
@@ -289,7 +314,7 @@ export function ProviderConnectionDialog({
     : null;
 
   function handlePrimaryAction() {
-    if (subscriptionSetupNeeded) {
+    if (subscriptionSetupNeeded || cloudSubscriptionsUnavailable) {
       onOpenNineRouterSettings();
       return;
     }
@@ -395,6 +420,7 @@ export function ProviderConnectionDialog({
         ) : (
           <SubscriptionSetupPanel
             busy={busy}
+            cloudSubscriptionsUnavailable={cloudSubscriptionsUnavailable}
             connectedAccountCount={connectedAccountCount}
             onCheckAgain={() => refreshNineRouterState({ start: true })}
             onOpenNineRouterSettings={onOpenNineRouterSettings}
@@ -411,8 +437,35 @@ export function ProviderConnectionDialog({
   );
 }
 
+function readProviderConnectError(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  return fallback;
+}
+
+function createCloudNineRouterStatus(dashboardUrl: string, baseUrl: string): NineRouterLocalStatus {
+  return {
+    autoStartEnabled: true,
+    baseUrl,
+    built: true,
+    dashboardUrl,
+    installed: true,
+    launchSupported: false,
+    launched: true,
+    message: "Cloud subscription routing is ready.",
+    running: true,
+  };
+}
+
 function SubscriptionSetupPanel({
   busy,
+  cloudSubscriptionsUnavailable,
   connectedAccountCount,
   onCheckAgain,
   onOpenNineRouterSettings,
@@ -423,6 +476,7 @@ function SubscriptionSetupPanel({
   subscriptionSetupNeeded,
 }: {
   busy: ProviderConnectionBusy;
+  cloudSubscriptionsUnavailable: boolean;
   connectedAccountCount: number;
   onCheckAgain: () => void;
   onOpenNineRouterSettings: () => void;
@@ -432,21 +486,25 @@ function SubscriptionSetupPanel({
   runtimeInstalled: boolean;
   subscriptionSetupNeeded: boolean;
 }) {
-  const headline = runtimeChecking
+  const headline = cloudSubscriptionsUnavailable
+    ? "Cloud subscriptions need configuration"
+    : runtimeChecking
     ? "Checking subscription setup"
     : subscriptionSetupNeeded
       ? "Install subscriptions before account sign-in"
       : runtimeInstalled
         ? "Subscriptions are starting"
         : "Subscriptions need the desktop app";
-  const detail = runtimeChecking
+  const detail = cloudSubscriptionsUnavailable
+    ? "This official build uses cloud subscription routing. Add the Cloud Run router URL to the build before account sign-in."
+    : runtimeChecking
     ? "Gilbert is checking this device before showing subscription sign-in options."
     : subscriptionSetupNeeded
       ? "After setup, this dialog will show Codex, Copilot, Claude, Gemini, and other subscription accounts you can connect."
       : runtimeInstalled
         ? "The local subscription runtime is installed and should be ready in a moment."
         : "Subscription account sign-in is available after local setup. API-key and OpenRouter routes are still available.";
-  const installStepState = runtimeInstalled ? "done" : runtimeChecking ? "active" : "next";
+  const installStepState = cloudSubscriptionsUnavailable ? "active" : runtimeInstalled ? "done" : runtimeChecking ? "active" : "next";
   const signInStepState = runtimeInstalled ? "next" : "locked";
 
   return (
@@ -456,13 +514,13 @@ function SubscriptionSetupPanel({
           <h4>{headline}</h4>
           <span>{detail}</span>
         </div>
-        <em>{runtimeChecking ? "Checking" : runtimeInstalled ? "Installed" : connectedAccountCount > 0 ? `${connectedAccountCount} saved` : "Not installed"}</em>
+        <em>{cloudSubscriptionsUnavailable ? "Cloud URL needed" : runtimeChecking ? "Checking" : runtimeInstalled ? "Installed" : connectedAccountCount > 0 ? `${connectedAccountCount} saved` : "Not installed"}</em>
       </div>
 
       <div className="provider-subscription-step-grid" aria-label="Subscription setup steps">
         <div className="provider-subscription-step" data-state={installStepState}>
-          <strong>1. Install</strong>
-          <span>Add the local subscription runtime once.</span>
+          <strong>1. Cloud router</strong>
+          <span>{cloudSubscriptionsUnavailable ? "Configure the Cloud Run subscription router URL." : "Add subscription routing once."}</span>
         </div>
         <div className="provider-subscription-step" data-state={signInStepState}>
           <strong>2. Sign in</strong>

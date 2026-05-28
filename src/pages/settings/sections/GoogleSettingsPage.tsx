@@ -1,5 +1,6 @@
 import { BookOpen, CalendarDays, Copy, ExternalLink, Eye, EyeOff, KeyRound, Mail, ShieldCheck, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { googleCloudAvailable } from "../../../app/gmailClient";
 import { clearGoogleOAuthSettings, loadGoogleOAuthSettings, saveGoogleOAuthSettings, type GoogleOAuthSettings } from "../../../lib/appStorage";
 import { GMAIL_CORE_OAUTH_SCOPES, GOOGLE_CALENDAR_CORE_OAUTH_SCOPES } from "../../../lib/googleOAuthScopes";
 import { SettingsSectionHeading } from "../components/SettingsSectionHeading";
@@ -26,11 +27,12 @@ export function GoogleSettingsPage() {
   const [savedSettings, setSavedSettings] = useState<GoogleOAuthSettings>(() => loadGoogleOAuthSettings());
   const [showSecret, setShowSecret] = useState(false);
   const [status, setStatus] = useState<SettingsStatusMessage | null>(null);
+  const hostedGoogle = googleCloudAvailable();
   const hasUserClientId = Boolean(savedSettings.clientId.trim());
   const hasClientSecret = Boolean(draft.clientSecret.trim() || savedSettings.clientSecret.trim());
   const readiness = [
-    { label: "Client ID", detail: hasUserClientId ? "Ready for Google sign-in" : "Paste a desktop OAuth client ID", ready: hasUserClientId },
-    { label: "Client secret", detail: hasClientSecret ? "Saved locally for token exchange" : "Required for this desktop flow", ready: hasClientSecret },
+    { label: "Client ID", detail: hostedGoogle ? "Hosted Google OAuth configured" : hasUserClientId ? "Ready for Google sign-in" : "Paste a desktop OAuth client ID", ready: hostedGoogle || hasUserClientId },
+    { label: "Client secret", detail: hostedGoogle ? "Stored in Google Cloud Secret Manager" : hasClientSecret ? "Saved locally for token exchange" : "Required for this desktop flow", ready: hostedGoogle || hasClientSecret },
     { label: "APIs", detail: "Enable Gmail, Calendar, and Tasks in Google Cloud", ready: true },
     { label: "Test user", detail: "Needed while the Google app is in Testing", ready: true },
   ];
@@ -87,7 +89,7 @@ export function GoogleSettingsPage() {
 
   return (
     <>
-      <SettingsSectionHeading detail="Bring your own Google OAuth client for Gmail, Google Calendar, and Tasks." icon={KeyRound} title="Google" />
+      <SettingsSectionHeading detail={hostedGoogle ? "Hosted Google OAuth for Gmail, Google Calendar, and Tasks." : "Bring your own Google OAuth client for Gmail, Google Calendar, and Tasks."} icon={KeyRound} title="Google" />
 
       <div className="google-settings-layout">
         <article className="settings-card google-oauth-card">
@@ -95,15 +97,23 @@ export function GoogleSettingsPage() {
             <KeyRound size={19} aria-hidden="true" />
             <div>
               <h2>OAuth client</h2>
-              <p>Use a Google Cloud Desktop app client so this machine can open browser sign-in and refresh tokens after restart.</p>
+              <p>{hostedGoogle ? "This build uses Gilbert's hosted Google connector. Users sign in without pasting OAuth credentials." : "Use a Google Cloud Desktop app client so this machine can open browser sign-in and refresh tokens after restart."}</p>
             </div>
           </div>
 
+          {hostedGoogle ? (
+            <div className="github-scope-summary">
+              <ShieldCheck size={16} aria-hidden="true" />
+              <span>Hosted OAuth</span>
+              <code>Cloud Run</code>
+            </div>
+          ) : null}
+
           <label className="settings-field">
             <span>Desktop Client ID</span>
-            <input autoComplete="off" placeholder="1234567890-abc.apps.googleusercontent.com" value={draft.clientId} onChange={(event) => patchDraft({ clientId: event.target.value })} />
-            <small className="settings-field-note" data-kind={hasUserClientId ? "ready" : "error"}>
-              {hasUserClientId ? "Using the Client ID saved on this page." : "Required before Gmail or Calendar can open Google sign-in."}
+            <input autoComplete="off" disabled={hostedGoogle} placeholder="1234567890-abc.apps.googleusercontent.com" value={hostedGoogle ? "" : draft.clientId} onChange={(event) => patchDraft({ clientId: event.target.value })} />
+            <small className="settings-field-note" data-kind={hostedGoogle || hasUserClientId ? "ready" : "error"}>
+              {hostedGoogle ? "No local Client ID required." : hasUserClientId ? "Using the Client ID saved on this page." : "Required before Gmail or Calendar can open Google sign-in."}
             </small>
           </label>
 
@@ -112,21 +122,22 @@ export function GoogleSettingsPage() {
             <div className="settings-secret-row">
               <input
                 autoComplete="off"
+                disabled={hostedGoogle}
                 placeholder="Paste the matching desktop client secret"
                 type={showSecret ? "text" : "password"}
-                value={draft.clientSecret}
+                value={hostedGoogle ? "" : draft.clientSecret}
                 onChange={(event) => patchDraft({ clientSecret: event.target.value })}
               />
               <button type="button" aria-label={showSecret ? "Hide Google OAuth client secret" : "Show Google OAuth client secret"} onClick={() => setShowSecret((visible) => !visible)}>
                 {showSecret ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
               </button>
             </div>
-            <small className="settings-field-note" data-kind={hasClientSecret ? "ready" : "error"}>
-              Stored locally. Desktop storage protects this field with the app secure-storage layer before writing it to the local database.
+            <small className="settings-field-note" data-kind={hostedGoogle || hasClientSecret ? "ready" : "error"}>
+              {hostedGoogle ? "Stored only on the hosted connector service." : "Stored locally. Desktop storage protects this field with the app secure-storage layer before writing it to the local database."}
             </small>
           </label>
 
-          <div className="settings-actions-row google-action-row">
+          {!hostedGoogle ? <div className="settings-actions-row google-action-row">
             <button className="settings-primary-button" type="button" onClick={saveSettings}>
               <ShieldCheck size={16} aria-hidden="true" />
               Save Google setup
@@ -139,7 +150,7 @@ export function GoogleSettingsPage() {
               <ExternalLink size={15} aria-hidden="true" />
               Open Google Auth
             </a>
-          </div>
+          </div> : null}
 
           {status ? (
             <div className="settings-status-banner" data-kind={status.kind}>

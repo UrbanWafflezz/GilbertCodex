@@ -1,4 +1,5 @@
 import type { ModelProviderId, ProviderModelVisibilityMap, ProviderSecretMap, SubscriptionCodexContextWindow, SubscriptionOptimizationSettings } from "../types/settings";
+import { getConfiguredNineRouterBaseUrl, isConfiguredNineRouterCloudEnabled, isNineRouterNativeBridgeUrl } from "../services/nineRouterCloud";
 
 export const OPENROUTER_FREE_AUTO_MODEL = "openrouter/free";
 export const OPENROUTER_AUTO_MODEL = "openrouter/auto";
@@ -65,9 +66,12 @@ export const NINE_ROUTER_CODEX_EXTENDED_CONTEXT_TOKENS = 1_000_000;
 export const NINE_ROUTER_SMART_SAVER_MODEL = "gilbert-smart-saver";
 export const NINE_ROUTER_ALWAYS_FREE_MODEL = "gilbert-always-free";
 export const NINE_ROUTER_OPEN_CODE_FREE_MODEL_IDS = [
-  "oc/big-pickle",
-  "oc/nemotron-3-super-free",
   "oc/deepseek-v4-flash-free",
+  "oc/minimax-m2.5-free",
+  "oc/qwen3.6-plus-free",
+  "oc/mimo-v2.5-free",
+  "oc/nemotron-3-super-free",
+  "oc/big-pickle",
 ] as const;
 export const NINE_ROUTER_GITHUB_COPILOT_MODEL_IDS = [
   "gh/gpt-5-mini",
@@ -362,8 +366,10 @@ export const MODEL_CATALOG_CATEGORIES: ModelCatalogCategory[] = [
   },
 ];
 
+const DEFAULT_NINE_ROUTER_BASE_URL = getConfiguredNineRouterBaseUrl("http://127.0.0.1:20128/v1");
+
 const DEFAULT_PROVIDER_BASE_URLS: Required<Record<ModelProviderId, string>> = {
-  "9router": "http://127.0.0.1:20128/v1",
+  "9router": DEFAULT_NINE_ROUTER_BASE_URL,
   anthropic: "https://api.anthropic.com/v1",
   deepseek: "https://api.deepseek.com",
   google: "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -1205,6 +1211,11 @@ export function getDefaultBaseUrlForProvider(provider: ModelProviderId) {
 
 export function normalizeProviderBaseUrl(provider: ModelProviderId, baseUrl: string | undefined) {
   const fallbackUrl = getDefaultBaseUrlForProvider(provider);
+  const rawBaseUrl = baseUrl?.trim() || "";
+  if (provider === "9router" && isConfiguredNineRouterCloudEnabled() && (!rawBaseUrl || isNineRouterNativeBridgeUrl(rawBaseUrl))) {
+    return getConfiguredNineRouterBaseUrl(fallbackUrl);
+  }
+
   const normalizedUrl = (baseUrl?.trim() || fallbackUrl).replace(/\/+$/, "");
 
   if (provider === "google" && normalizedUrl === "https://generativelanguage.googleapis.com/v1beta") {
@@ -1797,6 +1808,10 @@ function supportsOpenAiNativeImageInput(normalizedModel: string) {
 }
 
 function supportsNineRouterNativeImageInput(normalizedModel: string) {
+  if (normalizedModel === NINE_ROUTER_ALWAYS_FREE_MODEL || normalizedModel === NINE_ROUTER_SMART_SAVER_MODEL || normalizedModel.startsWith("oc/")) {
+    return true;
+  }
+
   return normalizedModel.startsWith("cx/") && supportsOpenAiNativeImageInput(normalizedModel.slice(3));
 }
 

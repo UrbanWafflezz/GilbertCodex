@@ -5,6 +5,7 @@ import type { AgentRuntimeDecision } from "../../../agentRuntime/codingAgent";
 import type { LocalComputerToolExecutionPolicy, LocalSubagentResult, LocalSubagentTask } from "../../../localWorkspace/localToolRuntimeDisabled";
 import type { ContextCompactionNotice, ContextWindowUsage, ModelContextWindowMap, compactMessagesForContext } from "../../../lib/contextWindow";
 import type { PlanningProviderRequest } from "../../../services/planningClient";
+import { formatProviderErrorForUser } from "../../../services/providerErrors";
 import type { ProviderToolBridgeOptions, ToolBridgeExecutionBatch, ToolCallRequest, ToolDefinition, ToolExecutionContext, ToolMemorySearchRequest, ToolResultMessage } from "../../../toolBridge";
 import type { AppInfo } from "../../../types/app";
 import type { AgentApproval, AgentApprovalDecision, AgentRun } from "../../../types/agentRun";
@@ -200,7 +201,7 @@ export async function steerActiveResponse(deps: WorkspaceRuntimeDeps, {
         return;
       }
 
-      const errorContent = error instanceof Error ? error.message : "The steered response failed.";
+      const errorContent = formatProviderErrorForUser(error, "The steered response failed.");
 
       updateGeneratedMessage(
         currentChat.id,

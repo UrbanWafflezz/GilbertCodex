@@ -222,7 +222,7 @@ export function AppUpdateIndicator({ controller }: AppUpdateIndicatorProps) {
       </button>
 
       <DialogShell
-        description="Review the update before Gilbert Codex downloads it and hands off to the Windows installer."
+        description="Review the update before Gilbert Codex downloads the signed package and hands off to the platform installer."
         icon={Download}
         onClose={() => setConfirmationOpen(false)}
         open={confirmationOpen}
@@ -263,11 +263,11 @@ export function AppUpdateIndicator({ controller }: AppUpdateIndicatorProps) {
             ) : null}
             <div>
               <dt>Installer</dt>
-              <dd>After download, the Windows installer opens and Gilbert Codex closes.</dd>
+              <dd>After download, the platform installer opens and Gilbert Codex closes.</dd>
             </div>
             <div>
               <dt>Relaunch</dt>
-              <dd>The installer can reopen the app from its finish page when Windows allows it.</dd>
+              <dd>The installer can reopen the app from its finish page when the operating system allows it.</dd>
             </div>
           </dl>
 
@@ -334,7 +334,7 @@ function getUpdateTitle(controller: AppUpdateController) {
   }
 
   if (controller.stage === "installing") {
-    return "Opening the Windows installer. Gilbert Codex will close while the installer takes over.";
+    return "Opening the platform installer. Gilbert Codex will close while the installer takes over.";
   }
 
   return getUpdateLabel(controller);

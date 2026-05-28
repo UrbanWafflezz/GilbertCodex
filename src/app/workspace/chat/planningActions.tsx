@@ -5,6 +5,7 @@ import type { AgentRuntimeDecision } from "../../../agentRuntime/codingAgent";
 import type { LocalComputerToolExecutionPolicy, LocalSubagentResult, LocalSubagentTask } from "../../../localWorkspace/localToolRuntimeDisabled";
 import type { ContextCompactionNotice, ContextWindowUsage, ModelContextWindowMap, compactMessagesForContext } from "../../../lib/contextWindow";
 import type { PlanningProviderRequest } from "../../../services/planningClient";
+import { formatProviderErrorForUser } from "../../../services/providerErrors";
 import type { ProviderToolBridgeOptions, ToolBridgeExecutionBatch, ToolCallRequest, ToolDefinition, ToolExecutionContext, ToolMemorySearchRequest, ToolResultMessage } from "../../../toolBridge";
 import type { AppInfo } from "../../../types/app";
 import type { AgentApproval, AgentApprovalDecision, AgentRun } from "../../../types/agentRun";
@@ -272,7 +273,7 @@ export async function handleSubmitPlanningInput(deps: WorkspaceRuntimeDeps, mess
         return;
       }
 
-      const errorContent = error instanceof Error ? error.message : "The planning request failed.";
+      const errorContent = formatProviderErrorForUser(error, "The planning request failed.");
 
       setChats((currentChats) =>
         sortChatsByUpdatedAt(
@@ -515,7 +516,7 @@ export async function handleRequestPlanRevision(deps: WorkspaceRuntimeDeps, mess
         return;
       }
 
-      const errorContent = error instanceof Error ? error.message : "The plan revision request failed.";
+      const errorContent = formatProviderErrorForUser(error, "The plan revision request failed.");
 
       setChats((currentChats) =>
         sortChatsByUpdatedAt(

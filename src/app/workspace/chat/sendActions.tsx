@@ -3,6 +3,7 @@ import type { MutableRefObject, SetStateAction } from "react";
 import type { ContextCompactionNotice } from "../../../lib/contextWindow";
 import type { PlanningProviderRequest } from "../../../services/planningClient";
 import type { ProviderUsage } from "../../../services/modelProviderClient";
+import { formatProviderErrorForUser } from "../../../services/providerErrors";
 import type { PlanResearchEvidence } from "../../../services/planResearchClient";
 import type { AgentApproval, AgentApprovalDecision, AgentRun } from "../../../types/agentRun";
 import type { ChatArtifact, ChatAttachment, ChatComposerDraft, ChatMessage, ChatPlanningInputRequest, ChatProgressItem, ChatResearchReference, ChatSendInput, ChatSource, ChatSummary, ChatToolCall, ChatWebSearch, ChatWorkTraceItem } from "../../../types/chat";
@@ -931,7 +932,7 @@ export async function startSendMessage(deps: SendActionsDeps, input: ChatSendInp
         return;
       }
 
-      const errorContent = error instanceof Error ? error.message : "The provider request failed.";
+      const errorContent = formatProviderErrorForUser(error, "The provider request failed.");
 
       if (!assistantMessage || !agentRun) {
         const failedUserMessage = userMessage ?? {

@@ -18,7 +18,6 @@ import { ensureNineRouterLocal, getNineRouterLocalStatus } from "../../../app/ta
 import { ConfirmDialog } from "../../../components/dialogs/AppDialog";
 import {
   clearUsageHistory,
-  getDeviceDatabasePath,
   loadUsageHistory,
 } from "../../../lib/appStorage";
 import { getDefaultBaseUrlForProvider, getModelProvider, NINE_ROUTER_ALWAYS_FREE_MODEL } from "../../../lib/models";
@@ -49,6 +48,14 @@ import {
   type NineRouterCombo,
   upsertNineRouterCombo,
 } from "../../../services/nineRouterFallbackRouting";
+import {
+  getConfiguredNineRouterBaseUrl,
+  getConfiguredNineRouterDashboardUrl,
+  isConfiguredNineRouterCloudEnabled,
+  isNineRouterCloudRequired,
+  isNineRouterNativeBridgeUrl,
+  normalizeNineRouterDashboardUrl,
+} from "../../../services/nineRouterCloud";
 import type { ModelProviderId, ProviderSettings, SubscriptionCodexContextWindow, SubscriptionFallbackMode, SubscriptionTokenSaverLevel } from "../../../types/settings";
 import type { ProviderUsageRecord } from "../../../types/usage";
 import { SettingsSectionHeading } from "../components/SettingsSectionHeading";
@@ -170,7 +177,6 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
     message: "Waiting for local runtime",
     status: "idle",
   });
-  const databasePath = getDeviceDatabasePath();
 
   useEffect(() => {
     refreshLocalHistory();
@@ -225,6 +231,10 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
   const tokenSaverLevel = subscriptionOptimization.tokenSaverLevel;
   const codexContextWindow = subscriptionOptimization.codexContextWindow;
   const tokenSaverEnabled = tokenSaverLevel !== "off";
+  const configuredCloudSubscriptions = isConfiguredNineRouterCloudEnabled();
+  const cloudSubscriptionsRequired = isNineRouterCloudRequired();
+  const cloudSubscriptionsEnabled = configuredCloudSubscriptions || (!cloudSubscriptionsRequired && !isNineRouterNativeBridgeUrl(getNineRouterBaseUrl(settings)));
+  const cloudSubscriptionsUnavailable = cloudSubscriptionsRequired && !configuredCloudSubscriptions;
   const tokenSaverDetail = TOKEN_SAVER_LEVEL_OPTIONS.find((option) => option.level === tokenSaverLevel)?.detail ?? TOKEN_SAVER_LEVEL_OPTIONS[1].detail;
   const tokenSaverHelperLabel = tokenSaverHelper.status === "ready" ? tokenSaverHelper.rtkEnabled === false ? "Off" : "On" : tokenSaverEnabled ? "On after setup" : "Off";
   const tokenSaverPill = tokenSaverBusy ? "Syncing" : tokenSaverEnabled ? "Saving" : "Manual";
@@ -368,19 +378,28 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
     setOptimizerStatus(null);
 
     try {
-      const localStatus = await getNineRouterLocalStatus().catch(() => null);
-      if (localStatus && !localStatus.installed) {
-        setOptimizerStatus({ kind: "warning", text: `${formatFallbackModeLabel(effectiveMode)} is queued. Open Subscriptions once to install account routing, then refresh Usage.` });
+      if (cloudSubscriptionsUnavailable) {
+        setOptimizerStatus({ kind: "warning", text: `${formatFallbackModeLabel(effectiveMode)} is queued. Cloud subscription routing is required, but this build does not have a cloud router URL configured.` });
         return;
       }
 
-      const readyStatus = localStatus?.running ? localStatus : await ensureNineRouterLocal();
-      if (!readyStatus.running) {
-        throw new Error(readyStatus.message || "Open Subscriptions before creating savings routes.");
-      }
+      let baseUrl = getNineRouterBaseUrl(settings);
+      let dashboardUrl = getNineRouterDashboardUrl(settings);
+      if (!cloudSubscriptionsEnabled) {
+        const localStatus = await getNineRouterLocalStatus().catch(() => null);
+        if (localStatus && !localStatus.installed) {
+          setOptimizerStatus({ kind: "warning", text: `${formatFallbackModeLabel(effectiveMode)} is queued. Open Subscriptions once to install account routing, then refresh Usage.` });
+          return;
+        }
 
-      const baseUrl = settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim() || readyStatus.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID);
-      const dashboardUrl = readyStatus.dashboardUrl || getNineRouterDashboardUrl(settings);
+        const readyStatus = localStatus?.running ? localStatus : await ensureNineRouterLocal();
+        if (!readyStatus.running) {
+          throw new Error(readyStatus.message || "Open Subscriptions before creating savings routes.");
+        }
+
+        baseUrl = settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim() || readyStatus.baseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID);
+        dashboardUrl = readyStatus.dashboardUrl || dashboardUrl;
+      }
       const liveModels = await loadNineRouterModels(baseUrl);
       const selectedModel = chooseNineRouterModel(savedSubscriptionModel, liveModels);
       const models = buildNineRouterFallbackModels(effectiveMode, selectedModel, liveModels);
@@ -427,8 +446,23 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
     }
 
     try {
-      const localStatus = await getNineRouterLocalStatus().catch(() => null);
-      if (!localStatus?.running) {
+      if (cloudSubscriptionsUnavailable) {
+        setTokenSaverHelper({
+          message: level === "off" ? "Off" : "On after cloud setup",
+          rtkEnabled: level !== "off",
+          status: "idle",
+        });
+        if (!options.quiet) {
+          setTokenSaverStatus({
+            kind: level === "off" ? "success" : "warning",
+            text: level === "off" ? "Token saver is off." : "Token saver is queued until cloud subscription routing is configured.",
+          });
+        }
+        return;
+      }
+
+      const localStatus = cloudSubscriptionsEnabled ? null : await getNineRouterLocalStatus().catch(() => null);
+      if (!cloudSubscriptionsEnabled && !localStatus?.running) {
         setTokenSaverHelper({
           message: level === "off" ? "Off" : "On after setup",
           rtkEnabled: level !== "off",
@@ -448,7 +482,7 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
         message: "Syncing",
         status: "loading",
       }));
-      const dashboardUrl = localStatus.dashboardUrl || getNineRouterDashboardUrl(settings);
+      const dashboardUrl = cloudSubscriptionsEnabled ? getNineRouterDashboardUrl(settings) : localStatus?.dashboardUrl || getNineRouterDashboardUrl(settings);
       const payload = await patchNineRouterJson<NineRouterSettingsPayload>(joinLocalUrl(dashboardUrl, "/api/settings"), {
         rtkEnabled: level !== "off",
       });
@@ -565,7 +599,7 @@ export function UsageSettingsPage({ onSettingsChange, settings }: UsageSettingsP
             <UsageMetric icon={Route} label="Requests" value={formatNumber(summary.totals.requests)} detail={`${formatNumber(summary.totals.providerCount)} provider${summary.totals.providerCount === 1 ? "" : "s"}`} />
             <UsageMetric icon={Layers3} label="Tokens" value={formatCompactTokens(summary.totals.totalTokens)} detail={formatTokenDetail(summary.totals.inputTokens, summary.totals.outputTokens, summary.totals.cachedInputTokens)} />
             <UsageMetric icon={Coins} label="Estimated cost" value={formatUsd(summary.totals.costUsd)} detail={formatCostDetail(summary.totals.catalogCostRecords, summary.totals.unknownCostRecords, summary.totals.cacheSavingsUsd)} />
-            <UsageMetric icon={Database} label="Database" value={databasePath ? "SQLite" : "Local"} detail={databasePath ?? "Synced when desktop database is ready"} />
+            <UsageMetric icon={Database} label="Database" value="Firebase" detail="Firestore-backed cloud usage and billing counters" />
           </div>
         </article>
 
@@ -1617,12 +1651,17 @@ function formatNineRouterPeriod(period: NineRouterUsagePeriod) {
 }
 
 function getNineRouterDashboardUrl(settings: ProviderSettings) {
-  const savedBaseUrl = settings.baseUrls["9router"]?.trim() || NINE_ROUTER_DASHBOARD_FALLBACK;
-  return savedBaseUrl.replace(/\/v1\/?$/i, "");
+  const savedBaseUrl = settings.baseUrls["9router"]?.trim();
+  return isConfiguredNineRouterCloudEnabled()
+    ? getConfiguredNineRouterDashboardUrl(savedBaseUrl || NINE_ROUTER_DASHBOARD_FALLBACK)
+    : normalizeNineRouterDashboardUrl(savedBaseUrl || NINE_ROUTER_DASHBOARD_FALLBACK, NINE_ROUTER_DASHBOARD_FALLBACK);
 }
 
 function getNineRouterBaseUrl(settings: ProviderSettings) {
-  return settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim() || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID);
+  const savedBaseUrl = settings.baseUrls[NINE_ROUTER_PROVIDER_ID]?.trim();
+  return isConfiguredNineRouterCloudEnabled()
+    ? getConfiguredNineRouterBaseUrl(savedBaseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID))
+    : savedBaseUrl || getDefaultBaseUrlForProvider(NINE_ROUTER_PROVIDER_ID);
 }
 
 function formatFallbackModeLabel(mode: SubscriptionFallbackMode) {

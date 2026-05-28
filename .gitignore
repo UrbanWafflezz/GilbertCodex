@@ -48,6 +48,8 @@ src-tauri/.tauri/
 .codex-output/
 .codex-logs/
 .codex-security-scans/
+.firebase-release/
+.release-assets/
 
 # Local secrets
 .env

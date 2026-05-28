@@ -41,7 +41,7 @@ describe("9Router fallback routing", () => {
     expect(hasUnusableNineRouterFallbackModels(["oc/gpt-5.4-mini"], [])).toBe(true);
     expect(hasUnusableNineRouterFallbackModels(["oc/gpt-5.4-mini"], ["oc/gpt-5.4-mini"])).toBe(true);
     expect(hasUnusableNineRouterFallbackModels(["oc/deepseek-v4-flash-free"], [])).toBe(false);
-    expect(hasUnusableNineRouterFallbackModels(["oc/qwen3.6-plus-free"], ["oc/qwen3.6-plus-free"])).toBe(true);
+    expect(hasUnusableNineRouterFallbackModels(["oc/qwen3.6-plus-free"], ["oc/qwen3.6-plus-free"])).toBe(false);
   });
 
   it("reports OpenCode defaults even when 9Router has not listed no-auth models yet", () => {

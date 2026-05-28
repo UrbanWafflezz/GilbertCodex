@@ -18,6 +18,7 @@
 @import "./theme.css";
 @import "./motion.css";
 @import "./elevation.css";
+@import "./platform-macos.css";
 
 * {
   scrollbar-width: none;

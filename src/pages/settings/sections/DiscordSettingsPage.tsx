@@ -20,6 +20,7 @@ import {
   type DiscordBridgeSettings,
   type DiscordTunnelProvider,
 } from "../../../types/discord";
+import { isCloudConnectorEnabled } from "../../../services/cloudConnectorClient";
 import { SettingsSectionHeading } from "../components/SettingsSectionHeading";
 import type { SettingsStatusMessage } from "../types";
 
@@ -34,7 +35,7 @@ const DISCORD_DOC_LINKS = [
   { href: "https://docs.discord.com/developers/events/gateway", label: "Gateway intents" },
   { href: "https://docs.discord.com/developers/resources/webhook", label: "Incoming webhooks" },
   { href: "https://ngrok.com/docs/getting-started", label: "ngrok quickstart" },
-  { href: "https://github.com/UrbanWafflezz/GilbertCodex/blob/main/docs/discord/README.md", label: "Repo setup guide" },
+  { href: "https://gilbertcodex.com/help", label: "Setup guide" },
 ] as const;
 
 interface DiscordSettingsPageProps {
@@ -48,9 +49,13 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
   const [runtimeStatus, setRuntimeStatus] = useState<SettingsStatusMessage | null>(null);
   const [showSecrets, setShowSecrets] = useState(false);
   const [copyStatus, setCopyStatus] = useState<SettingsStatusMessage | null>(null);
-  const readiness = createReadiness(settings);
-  const activeModeReady = readiness.find((item) => item.mode === settings.mode)?.ready ?? false;
   const desktopBridgeAvailable = isTauriDesktopRuntime();
+  const discordCloudAvailable = isCloudConnectorEnabled("discord");
+  const bridgeRuntimeAvailable = desktopBridgeAvailable || discordCloudAvailable;
+  const readiness = discordCloudAvailable
+    ? [{ detail: "Hosted Discord OAuth and signed interaction receiver are configured for this build.", label: "Hosted connector", mode: "interactions" as DiscordBridgeMode, ready: true }]
+    : createReadiness(settings);
+  const activeModeReady = readiness.find((item) => item.mode === settings.mode)?.ready ?? false;
   const liveInteractionsEndpointUrl = bridgeStatus?.publicUrl || settings.publicInteractionsUrl || settings.interactionsEndpointUrl;
 
   useEffect(() => {
@@ -125,9 +130,9 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
 
   async function startBridgeRuntime() {
     setCopyStatus(null);
-    setRuntimeStatus({ kind: "warning", text: "Starting the local Discord receiver and tunnel..." });
+    setRuntimeStatus({ kind: "warning", text: discordCloudAvailable ? "Opening hosted Discord sign-in..." : "Starting the local Discord receiver and tunnel..." });
 
-    if (!settings.applicationId.trim() || !settings.publicKey.trim()) {
+    if (!discordCloudAvailable && (!settings.applicationId.trim() || !settings.publicKey.trim())) {
       setRuntimeStatus({ kind: "error", text: "Add the Discord Application ID and Public Key first." });
       return;
     }
@@ -164,7 +169,7 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
       });
       setRuntimeStatus({
         kind: status.publicUrl ? "success" : "warning",
-        text: status.publicUrl ? `Bridge running at ${status.publicUrl}` : status.message,
+        text: status.publicUrl ? `${discordCloudAvailable ? "Hosted Discord connector ready at" : "Bridge running at"} ${status.publicUrl}` : status.message,
       });
     } catch (error) {
       setRuntimeStatus({ kind: "error", text: readErrorMessage(error, "Could not start the Discord bridge.") });
@@ -193,7 +198,7 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
     setCopyStatus(null);
     setRuntimeStatus({ kind: "warning", text: "Registering Discord chat commands..." });
 
-    if (!settings.applicationId.trim() || !settings.botToken.trim()) {
+    if (!discordCloudAvailable && (!settings.applicationId.trim() || !settings.botToken.trim())) {
       setRuntimeStatus({ kind: "error", text: "Add the Discord Application ID and Bot token before registering Discord chat commands." });
       return;
     }
@@ -258,7 +263,7 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
 
   return (
     <>
-      <SettingsSectionHeading detail="Connect Discord directly to Gilbert chat with slash commands, gateway chat, or channel posting." icon={MessageCircle} title="Discord" />
+      <SettingsSectionHeading detail={discordCloudAvailable ? "Hosted Discord slash commands and channel posting without ngrok." : "Connect Discord directly to Gilbert chat with slash commands, gateway chat, or channel posting."} icon={MessageCircle} title="Discord" />
 
       <div className="discord-settings-layout">
         <article className="settings-card settings-card-wide discord-bridge-card" data-enabled={settings.enabled}>
@@ -266,7 +271,7 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
             <Network size={19} aria-hidden="true" />
             <div>
               <h2>Bridge mode</h2>
-              <p>Choose how Discord connects to Gilbert before wiring the hosted receiver.</p>
+              <p>{discordCloudAvailable ? "Use the hosted connector so users do not install ngrok or run a local receiver." : "Choose how Discord connects to Gilbert before wiring the hosted receiver."}</p>
             </div>
           </div>
 
@@ -312,12 +317,12 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
           <div className="settings-card-heading">
             <Network size={19} aria-hidden="true" />
             <div>
-              <h2>Local receiver</h2>
-              <p>Runs the signed Discord Interactions receiver and starts the tunnel for this machine.</p>
+              <h2>{discordCloudAvailable ? "Hosted receiver" : "Local receiver"}</h2>
+              <p>{discordCloudAvailable ? "Runs in its own Cloud Run service and queues signed Discord interactions for this account." : "Runs the signed Discord Interactions receiver and starts the tunnel for this machine."}</p>
             </div>
           </div>
 
-          <div className="settings-row-list">
+          {!discordCloudAvailable ? <div className="settings-row-list">
             <div className="settings-row">
               <span>Auto-start bridge</span>
               <strong>{bridgeStatus?.running ? "Running now" : settings.autoStartBridge ? "On" : "Off"}</strong>
@@ -332,9 +337,9 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
                 <span />
               </button>
             </div>
-          </div>
+          </div> : null}
 
-          <div className="discord-runtime-grid">
+          {!discordCloudAvailable ? <div className="discord-runtime-grid">
             <label className="settings-field">
               <span>Local port</span>
               <input
@@ -382,12 +387,12 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
               </div>
               <small className="settings-field-note">Stored locally; on startup Gilbert passes it directly to ngrok before starting the tunnel.</small>
             </label>
-          </div>
+          </div> : null}
 
           <label className="settings-field">
             <span>Public Interactions URL</span>
             <div className="settings-url-row">
-              <input readOnly value={liveInteractionsEndpointUrl} placeholder="Start the bridge to fill this automatically" />
+              <input readOnly value={liveInteractionsEndpointUrl} placeholder={discordCloudAvailable ? "Sign in with Discord to fill this automatically" : "Start the bridge to fill this automatically"} />
               <button type="button" onClick={() => copyText(liveInteractionsEndpointUrl, "Interactions endpoint URL copied.")}>
                 <Copy size={16} aria-hidden="true" />
                 Copy
@@ -396,19 +401,19 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
           </label>
 
           <div className="settings-actions-row discord-action-row">
-            <button className="settings-primary-button" type="button" disabled={!desktopBridgeAvailable || bridgeBusy} onClick={startBridgeRuntime}>
+            <button className="settings-primary-button" type="button" disabled={!bridgeRuntimeAvailable || bridgeBusy} onClick={startBridgeRuntime}>
               <Play size={16} aria-hidden="true" />
-              Start bridge
+              {discordCloudAvailable ? "Connect Discord" : "Start bridge"}
             </button>
-            <button className="settings-ghost-button" type="button" disabled={!desktopBridgeAvailable || bridgeBusy || !bridgeStatus?.running} onClick={stopBridgeRuntime}>
+            <button className="settings-ghost-button" type="button" disabled={!bridgeRuntimeAvailable || bridgeBusy || !bridgeStatus?.running} onClick={stopBridgeRuntime}>
               <Square size={15} aria-hidden="true" />
-              Stop
+              {discordCloudAvailable ? "Disconnect" : "Stop"}
             </button>
             <button className="settings-ghost-button" type="button" disabled={bridgeBusy} onClick={refreshBridgeStatus}>
               <RefreshCw size={15} aria-hidden="true" />
               Status
             </button>
-            <button className="settings-ghost-button" type="button" disabled={!desktopBridgeAvailable || bridgeBusy} onClick={registerGilbertCommand}>
+            <button className="settings-ghost-button" type="button" disabled={!bridgeRuntimeAvailable || bridgeBusy} onClick={registerGilbertCommand}>
               <Bot size={15} aria-hidden="true" />
               Register commands
             </button>
@@ -421,9 +426,11 @@ export function DiscordSettingsPage({ settings, onSettingsChange }: DiscordSetti
           ) : null}
 
           <p className="settings-field-note" data-kind={bridgeStatus?.running ? "ready" : undefined}>
-            {desktopBridgeAvailable
-              ? bridgeStatus?.message || "Auto-start uses this receiver when the Discord bridge is enabled."
-              : "Open the desktop app to run the local Discord receiver."}
+            {discordCloudAvailable
+              ? bridgeStatus?.message || "Hosted Discord connector is ready for browser sign-in."
+              : desktopBridgeAvailable
+                ? bridgeStatus?.message || "Auto-start uses this receiver when the Discord bridge is enabled."
+                : "Open the desktop app to run the local Discord receiver."}
           </p>
         </article>
 

@@ -38,6 +38,7 @@ export interface BillingTierConfig {
   priceLabel: string;
   stripePriceLookupKey?: string;
   tagline: string;
+  trialLabel?: string;
 }
 
 export interface BillingAccessDecision {
@@ -73,9 +74,10 @@ export const BILLING_TIERS: Record<BillingTierId, BillingTierConfig> = {
     tagline: "Public free models plus your own local compute.",
   },
   plus: {
-    ctaLabel: "Preview Plus",
+    ctaLabel: "Start Plus trial",
     description: "Managed hosted models, account routes, images, and higher daily usage.",
     features: [
+      "1 month free, then $20/mo",
       "Managed hosted models and paid OpenRouter routes",
       "Subscription account routes through 9Router",
       "Image generation",
@@ -96,9 +98,10 @@ export const BILLING_TIERS: Record<BillingTierId, BillingTierConfig> = {
     priceLabel: "$20/mo",
     stripePriceLookupKey: "gilbert_plus_monthly",
     tagline: "The everyday paid plan for serious coding work.",
+    trialLabel: "1 month free",
   },
   pro: {
-    ctaLabel: "Preview Pro",
+    ctaLabel: "Start Pro",
     description: "Priority managed access, larger model budgets, and long-context work.",
     features: [
       "Everything in Plus",
@@ -167,7 +170,7 @@ export function normalizeBillingPlanSettings(value: unknown): BillingPlanSetting
     checkoutUrls,
     currentPeriodEnd: normalizeOptionalText(record.currentPeriodEnd),
     customerPortalUrl: normalizeOptionalUrl(record.customerPortalUrl),
-    source: record.source === "admin" || record.source === "stripe" || record.source === "local-preview" ? record.source : DEFAULT_BILLING_PLAN.source,
+    source: record.source === "admin" || record.source === "firebase" || record.source === "stripe" || record.source === "local-preview" ? record.source : DEFAULT_BILLING_PLAN.source,
     status: isBillingPlanStatus(record.status) ? record.status : DEFAULT_BILLING_PLAN.status,
     stripeCustomerId: normalizeOptionalText(record.stripeCustomerId),
     stripeSubscriptionId: normalizeOptionalText(record.stripeSubscriptionId),
@@ -177,7 +180,9 @@ export function normalizeBillingPlanSettings(value: unknown): BillingPlanSetting
 }
 
 export function getBillingPlanTier(plan: BillingPlanSettings | undefined): BillingTierId {
-  return normalizeBillingTierId(plan?.tier);
+  const normalizedPlan = normalizeBillingPlanSettings(plan);
+
+  return isBillingPlanEntitled(normalizedPlan) ? normalizedPlan.tier : DEFAULT_BILLING_TIER;
 }
 
 export function getBillingTierConfig(tier: BillingTierId | undefined): BillingTierConfig {
@@ -192,6 +197,20 @@ export function createLocalBillingPlanPreview(tier: BillingTierId): BillingPlanS
     tier,
     updatedAt: new Date().toISOString(),
   };
+}
+
+export function isBillingPlanEntitled(plan: BillingPlanSettings | undefined): boolean {
+  const normalizedPlan = normalizeBillingPlanSettings(plan);
+
+  if (normalizedPlan.tier === "free") {
+    return true;
+  }
+
+  if (normalizedPlan.source !== "stripe" && normalizedPlan.source !== "admin") {
+    return false;
+  }
+
+  return normalizedPlan.status === "active" || normalizedPlan.status === "trialing";
 }
 
 export function isLocalInferenceProvider(provider: ModelProviderId) {
@@ -266,7 +285,7 @@ export function getBillingPlanAccessDecision(tier: BillingTierId | undefined, pr
 }
 
 export function assertBillingPlanAllowsModel(settings: ProviderSettings, model: string) {
-  const decision = getBillingPlanAccessDecision(settings.billingPlan?.tier, settings.provider, model);
+  const decision = getBillingPlanAccessDecision(getBillingPlanTier(settings.billingPlan), settings.provider, model);
 
   if (!decision.allowed) {
     throw new Error(decision.reason || "Your current plan does not include this model route.");

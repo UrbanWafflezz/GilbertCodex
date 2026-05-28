@@ -68,6 +68,13 @@
   transform: none;
 }
 
+:root.image-viewer-open .composer-shell,
+:root.image-viewer-open .composer-ai-disclaimer {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .composer-shell:focus-within {
   border-color: var(--composer-focus-border);
 }

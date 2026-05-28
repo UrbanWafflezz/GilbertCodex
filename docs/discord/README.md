@@ -2,7 +2,7 @@
 
 This guide explains how to prepare Discord so users can chat with Gilbert Codex from Discord.
 
-Last updated: May 25, 2026 for the v0.8.2 build.
+Last updated: May 28, 2026 for the v0.8.5 build.
 
 Platform note: the bridge has native command-path handling for Windows, macOS, and Linux, including common ngrok install locations. macOS and Linux still need packaged-app launch testing before the integration is marked fully verified there, especially around ngrok process handling, local networking, notifications, and desktop permission prompts. See [Platform Support And Porting Notes](../platform/README.md).
 

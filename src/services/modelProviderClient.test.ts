@@ -15,7 +15,8 @@ import {
 import type { ChatMessage } from "../types/chat";
 import type { ProviderSettings, ReasoningEffort } from "../types/settings";
 import type { ToolDefinition } from "../toolBridge/types";
-import { createProviderRequestBody, fetchProviderModelContextLengths, fetchProviderModels, sendProviderMessage, streamProviderMessage } from "./modelProviderClient";
+import { clearNineRouterAutoRouteRepairCacheForTests, createProviderRequestBody, fetchProviderModelContextLengths, fetchProviderModels, sendProviderMessage, streamProviderMessage } from "./modelProviderClient";
+import { ProviderRequestError } from "./providerErrors";
 
 const TITLE_STRUCTURED_OUTPUT = {
   description: "A concise generated title for a chat conversation.",
@@ -41,7 +42,7 @@ function createSettings(): ProviderSettings {
       openai: "test-key",
     },
     billingPlan: {
-      source: "local-preview",
+      source: "stripe",
       status: "active",
       tier: "pro",
     },
@@ -465,6 +466,7 @@ describe("provider structured output request bodies", () => {
 
 describe("subscription route request errors", () => {
   afterEach(() => {
+    clearNineRouterAutoRouteRepairCacheForTests();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -473,7 +475,7 @@ describe("subscription route request errors", () => {
     return {
       ...defaultProviderSettings,
       billingPlan: {
-        source: "local-preview",
+        source: "stripe",
         status: "active",
         tier: "pro",
       },
@@ -632,9 +634,12 @@ describe("subscription route request errors", () => {
     expect(comboBodies).toEqual([{
       kind: "fallback",
       models: [
-        "oc/big-pickle",
-        "oc/nemotron-3-super-free",
         "oc/deepseek-v4-flash-free",
+        "oc/minimax-m2.5-free",
+        "oc/qwen3.6-plus-free",
+        "oc/mimo-v2.5-free",
+        "oc/nemotron-3-super-free",
+        "oc/big-pickle",
       ],
       name: NINE_ROUTER_ALWAYS_FREE_MODEL,
     }]);
@@ -686,6 +691,90 @@ describe("subscription route request errors", () => {
     expect(warnSpy).toHaveBeenCalledOnce();
   });
 
+  it("repairs and retries Free Auto when a stale combo falls through to provider credentials", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const comboBodies: Array<{ kind?: string; models?: string[]; name?: string }> = [];
+    let comboReadCount = 0;
+    let chatAttemptCount = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const method = (init?.method || "GET").toUpperCase();
+      const requestUrl = String(url);
+
+      if (requestUrl.endsWith("/v1/models")) {
+        return new Response(JSON.stringify({
+          data: [{ id: "oc/deepseek-v4-flash-free" }],
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+
+      if (requestUrl.endsWith("/api/combos") && method === "GET") {
+        comboReadCount += 1;
+        if (comboReadCount === 1) {
+          return new Response(JSON.stringify({ error: { message: "Unauthorized" } }), {
+            headers: { "content-type": "application/json" },
+            status: 401,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          data: [{
+            id: NINE_ROUTER_ALWAYS_FREE_MODEL,
+            models: ["openai/gpt-oss-120b:free"],
+            name: NINE_ROUTER_ALWAYS_FREE_MODEL,
+          }],
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+
+      if (requestUrl.endsWith(`/api/combos/${NINE_ROUTER_ALWAYS_FREE_MODEL}`) && method === "PUT") {
+        comboBodies.push(JSON.parse(String(init?.body ?? "{}")));
+        return new Response(JSON.stringify({ id: NINE_ROUTER_ALWAYS_FREE_MODEL }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+
+      if (requestUrl.endsWith("/v1/chat/completions") && method === "POST") {
+        chatAttemptCount += 1;
+        if (chatAttemptCount === 1) {
+          return new Response(JSON.stringify({
+            error: {
+              code: "model_not_found",
+              message: "No active credentials for provider: openai",
+              type: "invalid_request_error",
+            },
+          }), {
+            headers: { "content-type": "application/json" },
+            status: 404,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: "OK after forced repair", role: "assistant" } }],
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+
+      throw new Error(`Unexpected request ${method} ${requestUrl}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendProviderMessage(createNineRouterSettings(NINE_ROUTER_ALWAYS_FREE_MODEL), [createMessage()])).resolves.toMatchObject({
+      content: "OK after forced repair",
+    });
+    expect(chatAttemptCount).toBe(2);
+    expect(comboBodies).toHaveLength(1);
+    expect(comboBodies[0].models).toContain("oc/deepseek-v4-flash-free");
+    expect(comboBodies[0].models).not.toContain("openai/gpt-oss-120b:free");
+    expect(warnSpy).toHaveBeenCalledOnce();
+  });
+
   it("normalizes unavailable GitHub Copilot integrator models before sending", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
@@ -732,8 +821,111 @@ describe("subscription route request errors", () => {
   });
 });
 
+describe("provider request error display", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  async function captureProviderError(run: Promise<unknown>) {
+    try {
+      await run;
+    } catch (error) {
+      return error;
+    }
+
+    throw new Error("Expected provider request to fail.");
+  }
+
+  it("turns capacity 429 responses into actionable user-facing copy", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({
+        error: {
+          code: "rate_limit_exceeded",
+          message: "You have exhausted your capacity on this mode",
+          type: "rate_limit_error",
+        },
+      }),
+      {
+        headers: {
+          "content-type": "application/json",
+          "retry-after": "45",
+        },
+        status: 429,
+      },
+    )));
+
+    const error = await captureProviderError(sendProviderMessage(createSettings(), [createMessage()]));
+
+    expect(error).toBeInstanceOf(ProviderRequestError);
+    expect(error).toMatchObject({
+      kind: "capacity",
+      retryable: true,
+      status: 429,
+    });
+    expect((error as Error).message).toContain("Capacity for this mode is exhausted right now.");
+    expect((error as Error).message).toContain("Try another mode or model");
+    expect((error as Error).message).toContain("Provider details (HTTP 429, code: rate_limit_exceeded, type: rate_limit_error)");
+  });
+
+  it("turns provider auth failures into settings-focused copy", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({
+        error: {
+          code: "invalid_api_key",
+          message: "Invalid API key provided",
+          type: "authentication_error",
+        },
+      }),
+      {
+        headers: { "content-type": "application/json" },
+        status: 401,
+      },
+    )));
+
+    const error = await captureProviderError(sendProviderMessage(createSettings(), [createMessage()]));
+
+    expect(error).toBeInstanceOf(ProviderRequestError);
+    expect(error).toMatchObject({
+      kind: "authentication",
+      retryable: false,
+      status: 401,
+    });
+    expect((error as Error).message).toContain("OpenAI rejected the API key or sign-in.");
+    expect((error as Error).message).toContain("Reconnect it in Settings");
+  });
+
+  it("normalizes provider streaming error payloads too", async () => {
+    vi.stubGlobal("window", {
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => streamResponse([
+      `data: ${JSON.stringify({
+        error: {
+          code: "rate_limit_exceeded",
+          message: "Rate limit exceeded for tokens per minute",
+          type: "rate_limit_error",
+        },
+      })}`,
+      "data: [DONE]",
+    ])));
+
+    const error = await captureProviderError(streamProviderMessage(createSettings(), [createMessage()], vi.fn()));
+
+    expect(error).toBeInstanceOf(ProviderRequestError);
+    expect(error).toMatchObject({
+      kind: "rate_limit",
+      retryable: true,
+    });
+    expect((error as Error).message).toContain("OpenAI is rate limiting requests right now.");
+    expect((error as Error).message).toContain("Provider details (code: rate_limit_exceeded, type: rate_limit_error)");
+  });
+});
+
 describe("streamProviderMessage tool call parsing", () => {
   afterEach(() => {
+    clearNineRouterAutoRouteRepairCacheForTests();
     vi.unstubAllGlobals();
   });
 
@@ -834,7 +1026,7 @@ describe("streamProviderMessage tool call parsing", () => {
     });
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
       expect(init?.headers).toMatchObject({
-        "HTTP-Referer": "https://github.com/UrbanWafflezz/GilbertCodex",
+        "HTTP-Referer": "https://gilbertcodex.com",
         "X-OpenRouter-Categories": "programming-app,personal-agent",
         "X-OpenRouter-Title": "Gilbert Codex",
         "X-Title": "Gilbert Codex",
@@ -1294,7 +1486,7 @@ describe("streamProviderMessage tool call parsing", () => {
     const response = await streamProviderMessage({
       ...defaultProviderSettings,
       billingPlan: {
-        source: "local-preview",
+        source: "stripe",
         status: "active",
         tier: "pro",
       },
@@ -1307,6 +1499,74 @@ describe("streamProviderMessage tool call parsing", () => {
     }, [createImageMessage()], vi.fn());
 
     expect(response.content).toBe("subscription native");
+    expect(requestBodies).toHaveLength(1);
+  });
+
+  it("keeps image uploads native for 9Router Free Auto without requiring an OpenRouter key", async () => {
+    vi.stubGlobal("window", {
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+    });
+
+    const requestBodies: Array<Record<string, unknown>> = [];
+
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      const requestUrl = String(url);
+      const method = (init?.method || "GET").toUpperCase();
+
+      if (requestUrl.endsWith("/v1/models")) {
+        return new Response(JSON.stringify({ data: [{ id: "oc/deepseek-v4-flash-free" }] }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+
+      if (requestUrl.endsWith("/api/combos") && method === "GET") {
+        return new Response(JSON.stringify({
+          data: [{
+            id: NINE_ROUTER_ALWAYS_FREE_MODEL,
+            models: ["oc/deepseek-v4-flash-free"],
+            name: NINE_ROUTER_ALWAYS_FREE_MODEL,
+          }],
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+
+      if (requestUrl.endsWith("/v1/chat/completions") && method === "POST") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        requestBodies.push(body);
+        expect(body.model).toBe(NINE_ROUTER_ALWAYS_FREE_MODEL);
+        expect(JSON.stringify(body)).toContain("image_url");
+        expect(JSON.stringify(body)).not.toContain("Media analysis");
+        expect(body.model).not.toBe(IMAGE_REASONING_MODEL);
+
+        return streamResponse([
+          `data: ${JSON.stringify({ choices: [{ delta: { content: "free auto native" } }] })}`,
+          "data: [DONE]",
+        ]);
+      }
+
+      throw new Error(`Unexpected request ${method} ${requestUrl}`);
+    }));
+
+    const response = await streamProviderMessage({
+      ...defaultProviderSettings,
+      apiKeys: {
+        ...defaultProviderSettings.apiKeys,
+        openrouter: "",
+      },
+      model: NINE_ROUTER_ALWAYS_FREE_MODEL,
+      openRouterApiKey: "",
+      provider: "9router",
+      thinking: {
+        effort: "low",
+        enabled: false,
+      },
+    }, [createImageMessage()], vi.fn());
+
+    expect(response.content).toBe("free auto native");
     expect(requestBodies).toHaveLength(1);
   });
 
@@ -1375,7 +1635,7 @@ describe("Anthropic thinking request mapping", () => {
         anthropic: "test-key",
       },
       billingPlan: {
-        source: "local-preview",
+        source: "stripe",
         status: "active",
         tier: "pro",
       },

@@ -221,18 +221,23 @@ describe("model catalog", () => {
 
   it("keeps OpenCode Free defaults docs-backed and hidden behind Free Auto", () => {
     expect(NINE_ROUTER_OPEN_CODE_FREE_MODEL_IDS).toEqual([
-      "oc/big-pickle",
-      "oc/nemotron-3-super-free",
       "oc/deepseek-v4-flash-free",
+      "oc/minimax-m2.5-free",
+      "oc/qwen3.6-plus-free",
+      "oc/mimo-v2.5-free",
+      "oc/nemotron-3-super-free",
+      "oc/big-pickle",
     ]);
     expect(buildProviderModelOptions("9router", [
       { id: "oc/big-pickle" },
       { id: "oc/nemotron-3-super-free" },
       { id: "oc/qwen3.6-plus-free" },
+      { id: "oc/minimax-m2.5-free" },
     ]).map((option) => option.value)).not.toEqual(expect.arrayContaining([
       "oc/big-pickle",
       "oc/nemotron-3-super-free",
       "oc/qwen3.6-plus-free",
+      "oc/minimax-m2.5-free",
     ]));
     expect(normalizeNineRouterDiscoveredModelId("oc/big-pickle")).toBeUndefined();
   });
@@ -243,7 +248,8 @@ describe("model catalog", () => {
     expect(supportsModelInputModality("9router", "cx/gpt-5.5", "image")).toBe(true);
     expect(supportsModelInputModality("9router", "cx/gpt-5.3-codex-xhigh", "image")).toBe(true);
     expect(supportsModelInputModality("9router", "cx/gpt-5.3-codex-spark", "image")).toBe(true);
-    expect(supportsModelInputModality("9router", NINE_ROUTER_ALWAYS_FREE_MODEL, "image")).toBe(false);
+    expect(supportsModelInputModality("9router", NINE_ROUTER_ALWAYS_FREE_MODEL, "image")).toBe(true);
+    expect(supportsModelInputModality("9router", "oc/deepseek-v4-flash-free", "image")).toBe(true);
     expect(supportsModelInputModality("openrouter", GPT_OSS_120B_FREE_MODEL, "image")).toBe(false);
   });
 

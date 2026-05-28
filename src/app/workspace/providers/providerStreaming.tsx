@@ -5,6 +5,7 @@ import type { ContextCompactionNotice, ContextWindowUsage, compactMessagesForCon
 import type { createMessage as createMessageFn } from "../../../lib/chatUtils";
 import { mergeVisibleReasoningSummaries } from "../../../lib/reasoningSummary";
 import type { sendProviderMessage, streamProviderMessage } from "../../../services/modelProviderClient";
+import { formatProviderErrorForUser, isRetryableProviderError } from "../../../services/providerErrors";
 import type { ChatMessage, ChatProgressItem, ChatSummary } from "../../../types/chat";
 import type { ProviderSettings } from "../../../types/settings";
 import type { ProviderToolBridgeOptions } from "../../../toolBridge";
@@ -106,7 +107,7 @@ export async function runParallelSubagents(deps: ProviderStreamingDeps, tasks: L
         } catch (error) {
           return {
             content: "",
-            error: error instanceof Error ? error.message : "Sub-agent failed.",
+            error: formatProviderErrorForUser(error, "Sub-agent failed."),
             id: task.id || `subagent-${index + 1}`,
             title,
           };
@@ -234,6 +235,10 @@ export function isRetryableProviderMessageError(deps: ProviderStreamingDeps, err
 
     if (!(error instanceof Error)) {
       return false;
+    }
+
+    if (isRetryableProviderError(error)) {
+      return true;
     }
 
     const message = error.message.toLowerCase();

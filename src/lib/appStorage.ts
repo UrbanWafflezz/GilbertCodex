@@ -28,6 +28,7 @@ import { normalizeToolBridgePermissionMode } from "../toolBridge/permissions";
 import { DEFAULT_DISCORD_BRIDGE_SETTINGS, normalizeDiscordBridgeSettings } from "../types/discord";
 import { DEFAULT_TOOL_REGISTRY_SETTINGS, normalizeToolRegistrySettings } from "../types/tools";
 import { autoFinalizeDeviceDatabaseMigration, isDeviceDatabaseAvailable, loadDeviceDatabaseChat, loadDeviceDatabaseNamespace, saveDeviceDatabaseValues, type DeviceDatabaseSeed } from "./deviceDatabase";
+import { loadFirebaseAppStorage, loadFirebaseUserBillingPlan, saveFirebaseAppStorageValues } from "../firebase/cloudAppStorage";
 import { scheduleDelayedIdleTask, scheduleIdleTask } from "./idleTask";
 import { normalizeProjectRunConfig } from "./projectRunConfig";
 import { normalizeProjectGoal } from "./projectGoals";
@@ -118,6 +119,7 @@ const PDF_LIBRARY_KEY = "gilbert-codex.pdf-library.v1";
 const MAPBOX_SETTINGS_KEY = "gilbert-codex.mapbox-settings.v1";
 const WEATHER_LOCATION_KEY = "gilbert-codex.weather-location.v1";
 const USAGE_HISTORY_KEY = "gilbert-codex.usage-history.v1";
+const BILLING_USAGE_KEY = "gilbert-codex.billing-usage.v1";
 const PROJECT_TOOL_MEMORY_STORAGE_PREFIX = "gilbert-codex.project-tool-memory.v1.";
 const PERSISTED_STORAGE_KEYS = [
   CHATS_KEY,
@@ -150,6 +152,23 @@ const PERSISTED_STORAGE_KEY_PREFIXES = [PROJECT_TOOL_MEMORY_STORAGE_PREFIX, CHAT
 const LEGACY_BROWSER_ONLY_KEYS = [BROWSER_AUTH_DB_KEY];
 const PENDING_DEVICE_WRITE_PREFIX = "gilbert-codex.pending-device-write.v1.";
 const PENDING_DEVICE_WRITE_INDEX_PREFIX = "gilbert-codex.pending-device-write-index.v1.";
+const CLOUD_MIGRATION_BLOCKED_KEYS = new Set([
+  SETTINGS_KEY,
+  GITHUB_OAUTH_CLIENT_ID_KEY,
+  GOOGLE_OAUTH_SETTINGS_KEY,
+  API_KEY_VAULT_KEY,
+  DISCORD_BRIDGE_KEY,
+  USAGE_HISTORY_KEY,
+  BILLING_USAGE_KEY,
+  BROWSER_AUTH_DB_KEY,
+]);
+const CLOUD_MIGRATION_BLOCKED_PREFIXES = [
+  "gilbert-codex.nine-router.",
+  "gilbert-codex.subscription.",
+  "gilbert-codex.billing.",
+  PENDING_DEVICE_WRITE_PREFIX,
+  PENDING_DEVICE_WRITE_INDEX_PREFIX,
+];
 const PENDING_DEVICE_RECOVERY_WRITE_DELAY_MS = 250;
 const PENDING_DEVICE_RECOVERY_LEGACY_SCAN_LIMIT = 250;
 const PREFIXED_SEED_MIGRATION_MARKER_PREFIX = "gilbert-codex.prefixed-storage-seeds-migrated.v1.";
@@ -160,11 +179,16 @@ let storageNamespace = "legacy";
 let deviceDatabasePath: string | null = null;
 let deviceStorageInitialized = false;
 let deviceStorageValues = new Map<string, string>();
+let cloudStorageInitialized = false;
+let cloudStorageUserId = "";
+let cloudStorageValues = new Map<string, string>();
 let storageInitializationToken = 0;
 const deviceStorageWriteQueues = new Map<string, Promise<void>>();
 const deviceStoragePendingWrites = new Map<string, { key: string; namespace: string; value: string }>();
 const deviceStoragePendingRecoveryWrites = new Map<string, PendingDeviceStorageWrite>();
 const deviceStoragePendingRecoveryTimers = new Map<string, number>();
+const cloudStorageWriteQueues = new Map<string, Promise<void>>();
+const cloudStoragePendingWrites = new Map<string, { key: string; userId: string; value: string }>();
 let deviceStorageRecoveryFlushRegistered = false;
 const prefixedSeedMigrationNamespaces = new Set<string>();
 
@@ -264,6 +288,9 @@ export function setStorageNamespace(userId: string | null) {
   deviceDatabasePath = null;
   deviceStorageInitialized = false;
   deviceStorageValues = new Map();
+  cloudStorageInitialized = false;
+  cloudStorageUserId = "";
+  cloudStorageValues = new Map();
 }
 
 export async function initializeDeviceStorage(userId: string | null) {
@@ -302,8 +329,53 @@ export async function initializeDeviceStorage(userId: string | null) {
   }, 45_000, 5_000);
 }
 
+export async function initializeCloudStorage(userId: string | null) {
+  setStorageNamespace(userId);
+
+  const initializationToken = ++storageInitializationToken;
+  const namespace = storageNamespace;
+  const normalizedUserId = userId?.trim() ?? "";
+  deviceDatabasePath = null;
+  deviceStorageInitialized = false;
+  deviceStorageValues = new Map();
+  cloudStorageInitialized = false;
+  cloudStorageUserId = "";
+  cloudStorageValues = new Map();
+
+  if (!normalizedUserId) {
+    return;
+  }
+
+  const localSeedValues = filterCloudMigrationValues(await loadLocalStorageMigrationValues(namespace));
+  const cloudSnapshot = await loadFirebaseAppStorage(normalizedUserId);
+
+  if (initializationToken !== storageInitializationToken || namespace !== storageNamespace) {
+    return;
+  }
+
+  let nextValues = cloudSnapshot.values;
+  if (Object.keys(nextValues).length === 0 && Object.keys(localSeedValues).length > 0) {
+    await saveFirebaseAppStorageValues(
+      normalizedUserId,
+      Object.entries(localSeedValues).map(([key, value]) => ({ key, value })),
+    );
+    nextValues = localSeedValues;
+  }
+
+  const billingPlan = await loadFirebaseUserBillingPlan(normalizedUserId).catch(() => null);
+  if (billingPlan) {
+    nextValues = mergeBillingPlanIntoProviderSettings(nextValues, billingPlan);
+  }
+
+  cloudStorageUserId = normalizedUserId;
+  cloudStorageValues = new Map(Object.entries(nextValues));
+  cloudStorageInitialized = true;
+  deviceDatabasePath = null;
+  scheduleLegacyBrowserStorageCleanup();
+}
+
 export function getDeviceDatabasePath() {
-  return deviceDatabasePath;
+  return cloudStorageInitialized ? null : deviceDatabasePath;
 }
 
 export function loadChats(): ChatSummary[] {
@@ -333,7 +405,7 @@ export async function loadChatById(chatId: string): Promise<ChatSummary | null> 
     return normalizeStoredChat(cachedChat);
   }
 
-  if (isDeviceDatabaseAvailable()) {
+  if (!cloudStorageInitialized && isDeviceDatabaseAvailable()) {
     const rawChat = await loadDeviceDatabaseChat(storageNamespace, normalizedChatId);
 
     if (rawChat) {
@@ -723,6 +795,25 @@ function writeJson(key: string, value: unknown) {
   writeString(key, JSON.stringify(value));
 }
 
+function mergeBillingPlanIntoProviderSettings(values: Record<string, string>, billingPlan: unknown) {
+  const normalizedBillingPlan = normalizeBillingPlanSettings(billingPlan);
+  let providerSettings: Record<string, unknown> = {};
+
+  try {
+    providerSettings = values[SETTINGS_KEY] ? JSON.parse(values[SETTINGS_KEY]) as Record<string, unknown> : {};
+  } catch {
+    providerSettings = {};
+  }
+
+  return {
+    ...values,
+    [SETTINGS_KEY]: JSON.stringify({
+      ...providerSettings,
+      billingPlan: normalizedBillingPlan,
+    }),
+  };
+}
+
 function normalizeGoogleOAuthSettings(settings: Partial<GoogleOAuthSettings> | null | undefined): GoogleOAuthSettings {
   return {
     clientId: typeof settings?.clientId === "string" ? settings.clientId.trim() : "",
@@ -817,6 +908,10 @@ function normalizeIsoDate(value: unknown, fallback: string) {
 
 function readString(key: string) {
   try {
+    if (cloudStorageInitialized) {
+      return cloudStorageValues.get(key) ?? null;
+    }
+
     if (deviceStorageInitialized && deviceStorageValues.has(key)) {
       return deviceStorageValues.get(key) ?? null;
     }
@@ -828,6 +923,12 @@ function readString(key: string) {
 }
 
 function writeString(key: string, value: string) {
+  if (cloudStorageInitialized && cloudStorageUserId) {
+    cloudStorageValues.set(key, value);
+    queueCloudStorageWrite(cloudStorageUserId, key, value);
+    return;
+  }
+
   if (deviceStorageInitialized && isDeviceDatabaseAvailable()) {
     queuePendingDeviceStorageRecovery(storageNamespace, key, value);
     deviceStorageValues.set(key, value);
@@ -840,6 +941,73 @@ function writeString(key: string, value: string) {
   } catch {
     return;
   }
+}
+
+function queueCloudStorageWrite(userId: string, key: string, value: string) {
+  const pendingKey = `${userId}\0${key}`;
+  cloudStoragePendingWrites.set(pendingKey, { key, userId, value });
+  scheduleCloudStorageWriteQueue(userId);
+}
+
+function scheduleCloudStorageWriteQueue(userId: string) {
+  if (cloudStorageWriteQueues.has(userId)) {
+    return;
+  }
+
+  const queuedWrite = drainCloudStorageWriteQueue(userId).finally(() => {
+    cloudStorageWriteQueues.delete(userId);
+
+    if (hasPendingCloudStorageWrites(userId)) {
+      scheduleCloudStorageWriteQueue(userId);
+    }
+  });
+
+  cloudStorageWriteQueues.set(userId, queuedWrite);
+  void queuedWrite.catch(() => undefined);
+}
+
+async function drainCloudStorageWriteQueue(userId: string) {
+  while (hasPendingCloudStorageWrites(userId)) {
+    const pendingWrites = takePendingCloudStorageWrites(userId);
+
+    if (pendingWrites.length === 0) {
+      return;
+    }
+
+    try {
+      await saveFirebaseAppStorageValues(userId, pendingWrites.map((pendingWrite) => ({ key: pendingWrite.key, value: pendingWrite.value })));
+    } catch {
+      for (const pendingWrite of pendingWrites) {
+        cloudStoragePendingWrites.set(`${pendingWrite.userId}\0${pendingWrite.key}`, pendingWrite);
+      }
+      return;
+    }
+  }
+}
+
+function hasPendingCloudStorageWrites(userId: string) {
+  for (const pendingWrite of cloudStoragePendingWrites.values()) {
+    if (pendingWrite.userId === userId) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function takePendingCloudStorageWrites(userId: string) {
+  const pendingWrites: Array<{ key: string; userId: string; value: string }> = [];
+
+  for (const [pendingKey, pendingWrite] of cloudStoragePendingWrites.entries()) {
+    if (pendingWrite.userId !== userId) {
+      continue;
+    }
+
+    cloudStoragePendingWrites.delete(pendingKey);
+    pendingWrites.push(pendingWrite);
+  }
+
+  return pendingWrites;
 }
 
 function queueDeviceStorageWrite(namespace: string, key: string, value: string) {
@@ -1212,6 +1380,113 @@ function collectStartupLocalStorageSeeds(): DeviceDatabaseSeed[] {
   }
 
   return Array.from(seeds.entries()).map(([key, value]) => ({ key, value }));
+}
+
+async function loadLocalStorageMigrationValues(namespace: string) {
+  const seedMap = new Map<string, string>();
+  for (const seed of collectStartupLocalStorageSeeds()) {
+    seedMap.set(seed.key, seed.value);
+  }
+
+  for (const seed of collectPrefixedLocalStorageSeeds(namespace)) {
+    seedMap.set(seed.key, seed.value);
+  }
+
+  for (const seed of collectAllGilbertLocalStorageSeeds(namespace)) {
+    seedMap.set(seed.key, seed.value);
+  }
+
+  if (!isDeviceDatabaseAvailable()) {
+    return Object.fromEntries(seedMap.entries());
+  }
+
+  try {
+    const snapshot = await loadDeviceDatabaseNamespace(namespace, Array.from(seedMap.entries()).map(([key, value]) => ({ key, value })));
+    for (const [key, value] of Object.entries(snapshot?.values ?? {})) {
+      seedMap.set(key, value);
+    }
+  } catch {
+    // A cloud account should still boot even if legacy local migration fails.
+  }
+
+  return Object.fromEntries(seedMap.entries());
+}
+
+function filterCloudMigrationValues(values: Record<string, string>) {
+  return Object.fromEntries(
+    Object.entries(values).filter(([key]) => isCloudMigrationSafeStorageKey(key)),
+  );
+}
+
+function isCloudMigrationSafeStorageKey(key: string) {
+  if (CLOUD_MIGRATION_BLOCKED_KEYS.has(key)) {
+    return false;
+  }
+
+  return !CLOUD_MIGRATION_BLOCKED_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
+function collectPrefixedLocalStorageSeeds(namespace: string) {
+  const seeds: DeviceDatabaseSeed[] = [];
+
+  if (typeof window === "undefined") {
+    return seeds;
+  }
+
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const seed = createPrefixedLocalStorageSeed(namespace, window.localStorage.key(index));
+      if (seed) {
+        seeds.push(seed);
+      }
+    }
+  } catch {
+    return seeds;
+  }
+
+  return seeds;
+}
+
+function collectAllGilbertLocalStorageSeeds(namespace: string) {
+  const seeds: DeviceDatabaseSeed[] = [];
+
+  if (typeof window === "undefined") {
+    return seeds;
+  }
+
+  const namespaceSuffix = namespace === "legacy" ? "" : `.${namespace}`;
+
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const rawKey = window.localStorage.key(index);
+      if (!rawKey || !rawKey.startsWith("gilbert-codex.")) {
+        continue;
+      }
+
+      if (rawKey.startsWith(PENDING_DEVICE_WRITE_PREFIX) || rawKey.startsWith(PENDING_DEVICE_WRITE_INDEX_PREFIX) || rawKey.startsWith(PREFIXED_SEED_MIGRATION_MARKER_PREFIX)) {
+        continue;
+      }
+
+      const key = namespaceSuffix
+        ? rawKey.endsWith(namespaceSuffix)
+          ? rawKey.slice(0, -namespaceSuffix.length)
+          : ""
+        : rawKey;
+
+      if (!key || LEGACY_BROWSER_ONLY_KEYS.includes(key)) {
+        continue;
+      }
+
+      const value = window.localStorage.getItem(rawKey);
+      if (value !== null) {
+        seeds.push({ key, value });
+      }
+    }
+  } catch {
+    return seeds;
+  }
+
+  return seeds;
 }
 
 function schedulePrefixedLocalStorageSeedMigration(namespace: string) {
