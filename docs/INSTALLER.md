@@ -57,6 +57,8 @@ Add these repository secrets before publishing any updater release:
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` when the key is password-protected
 - `GCP_RELEASE_SERVICE_ACCOUNT_KEY` as a Google service-account JSON key with Storage Object Admin access to the Firebase release bucket
 
+The official private line uses the updater public key embedded in `src-tauri/tauri.conf.json`. Keep the matching private key and password in a password manager and in GitHub Actions secrets. The local working copy can keep emergency copies under `.local-secrets/`, which is ignored by Git. If that private key or password is lost, installed builds that trust this public key cannot receive future signed updates.
+
 Add these additional repository secrets before publishing trusted, notarized macOS release artifacts:
 
 - `APPLE_CERTIFICATE`
@@ -74,9 +76,9 @@ plugins/
 .agents/plugins/
 ```
 
-`src/toolBridge/index.ts` is required for release builds. `plugins/` and `.agents/plugins/` are optional, but if they exist in the private overlay they are copied into the build workspace before the installer is compiled.
+`src/toolBridge/index.ts` is required for release builds and is committed directly to the private official repo. Optional plugin bundles can still live in `plugins/` or `.agents/plugins/` when they are meant to ship with the product build.
 
-The release workflow does not require GitHub OAuth, Google OAuth, provider-key, or other app-user credentials. GitHub and Google OAuth setup is entered by each user in Settings, and provider keys stay in local app storage. Do not add app-user OAuth client secrets, tokens, downloaded Google credential JSON, provider keys, or private account data to release variables.
+The release workflow does not require GitHub OAuth, Google OAuth, provider-key, or other app-user credentials. GitHub and Google OAuth setup is entered by each user in Settings, and provider keys stay in local app storage. Do not add app-user OAuth client secrets, tokens, downloaded Google credential JSON, provider keys, private account data, or local databases to release variables.
 
 The current macOS local bundle config uses ad-hoc signing (`signingIdentity = "-"`) so builds can still be inspected without Apple credentials. The GitHub Release workflow publishes ad-hoc signed, unnotarized macOS artifacts until a Developer ID Application certificate and Apple notarization secrets are available.
 
@@ -94,7 +96,7 @@ Offline dictation is prepared during the Windows release build. The workflow dow
 
 ## What Stays Local
 
-Provider API keys, OAuth client secrets, GitHub tokens, Discord settings, local accounts, logs, local databases, workspace files, local scan artifacts, release signing credentials, updater private keys, and private release overlay repository credentials are not bundled into public installers. Those are created or connected by the user after installation or used only by GitHub Actions during packaging.
+Provider API keys, OAuth client secrets, GitHub tokens, Discord settings, local accounts, logs, local databases, workspace files, local scan artifacts, release signing credentials, and updater private keys are not bundled into public installers. Those are created or connected by the user after installation or used only by GitHub Actions during packaging.
 
 ## Light And Dark Mode
 
