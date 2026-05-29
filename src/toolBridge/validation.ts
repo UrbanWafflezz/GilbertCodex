@@ -19,6 +19,10 @@ interface BridgeJsonSchema {
 
 export function validateToolArguments(tool: ToolDefinition, args: unknown): ToolValidationResult {
   if (typeof args === "string") {
+    if (tool.id === "terminal_run") {
+      return validateNormalizedToolArguments(tool, normalizeTerminalRunArgs(stringToTerminalRunArgs(args)));
+    }
+
     return {
       error: `Tool ${tool.id} received arguments that could not be parsed as JSON.`,
       ok: false,
@@ -26,6 +30,10 @@ export function validateToolArguments(tool: ToolDefinition, args: unknown): Tool
   }
 
   const compatibleArgs = normalizeKnownToolArguments(tool.id, args ?? {});
+  return validateNormalizedToolArguments(tool, compatibleArgs);
+}
+
+function validateNormalizedToolArguments(tool: ToolDefinition, compatibleArgs: unknown): ToolValidationResult {
   const normalizedArgs = normalizeValueForSchema(compatibleArgs, tool.inputSchema as BridgeJsonSchema);
   const errors: string[] = [];
   validateValue(normalizedArgs, tool.inputSchema as BridgeJsonSchema, "arguments", errors);
@@ -60,6 +68,10 @@ function normalizeKnownToolArguments(toolId: string, args: unknown): unknown {
     return normalizeFilesWriteManyArgs(args);
   }
 
+  if (toolId === "terminal_run") {
+    return normalizeTerminalRunArgs(args);
+  }
+
   if (toolId.startsWith("files_")) {
     const next = { ...args };
     normalizeSingleFileEditArgs(toolId, next);
@@ -76,6 +88,286 @@ function normalizeKnownToolArguments(toolId: string, args: unknown): unknown {
   }
 
   return args;
+}
+
+function normalizeTerminalRunArgs(args: Record<string, unknown>) {
+  const next = unwrapTerminalArgsEnvelope(args);
+
+  applyAliases(next, {
+    background_wait_ms: "backgroundWaitMs",
+    command_text: "command",
+    command_to_run: "command",
+    command_line: "command",
+    commandLine: "command",
+    commandToRun: "command",
+    commandline: "command",
+    commandLineText: "command",
+    commandText: "command",
+    cmd: "command",
+    cmdline: "command",
+    executable: "program",
+    preview_url: "previewUrl",
+    run: "command",
+    script: "command",
+    shell_command: "command",
+    shellCommand: "command",
+    terminal_command: "command",
+    terminalCommand: "command",
+    timeout: "timeoutMs",
+    timeout_ms: "timeoutMs",
+    working_directory: "workingDirectory",
+    workingDir: "workingDirectory",
+  });
+
+  applyTerminalCommandFallbacks(next);
+  stripTerminalRunEnvelopeMetadata(next);
+
+  return next;
+}
+
+function unwrapTerminalArgsEnvelope(args: Record<string, unknown>) {
+  let next = { ...args };
+
+  for (let depth = 0; depth < 5; depth += 1) {
+    if (hasTerminalCommandCandidate(next)) {
+      return next;
+    }
+
+    const functionValue = next.function;
+    if (isObject(functionValue)) {
+      const functionArgs = functionValue.arguments ?? functionValue.parameters ?? functionValue.args ?? functionValue.input;
+      const parsedFunctionArgs = typeof functionArgs === "string" ? parseMaybeJsonObject(functionArgs) : functionArgs;
+      if (isObject(parsedFunctionArgs)) {
+        const outer = { ...next };
+        delete outer.function;
+        next = { ...parsedFunctionArgs, ...outer };
+        continue;
+      }
+      if (typeof functionArgs === "string" && functionArgs.trim()) {
+        const outer = { ...next };
+        delete outer.function;
+        return { ...outer, command: functionArgs };
+      }
+    }
+
+    let unwrapped = false;
+    for (const key of ["arguments", "args", "input", "parameters", "params", "request", "payload", "data"]) {
+      const value = next[key];
+      const parsedValue = typeof value === "string" ? parseMaybeJsonObject(value) : value;
+
+      if (!isObject(parsedValue)) {
+        if (typeof value === "string" && value.trim()) {
+          const outer = { ...next };
+          delete outer[key];
+          return { ...outer, command: value };
+        }
+
+        continue;
+      }
+
+      const outer = { ...next };
+      delete outer[key];
+      next = { ...parsedValue, ...outer };
+      unwrapped = true;
+      break;
+    }
+
+    if (!unwrapped) {
+      return next;
+    }
+  }
+
+  return next;
+}
+
+function stringToTerminalRunArgs(value: string) {
+  const parsedValue = parseMaybeJsonObject(value);
+  return isObject(parsedValue) ? parsedValue : { command: value };
+}
+
+function parseMaybeJsonObject(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed.startsWith("{")) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    return isObject(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function hasTerminalCommandCandidate(args: Record<string, unknown>) {
+  return [
+    "command",
+    "command_line",
+    "commandLine",
+    "commandText",
+    "command_text",
+    "command_to_run",
+    "commandToRun",
+    "cmd",
+    "cmdline",
+    "commands",
+    "run",
+    "script",
+    "shell_command",
+    "shellCommand",
+    "terminal_command",
+    "terminalCommand",
+  ].some((key) => args[key] !== undefined)
+    || (args.program !== undefined && args.args !== undefined)
+    || (args.program !== undefined && args.arguments !== undefined)
+    || (args.executable !== undefined && args.args !== undefined)
+    || (args.executable !== undefined && args.arguments !== undefined);
+}
+
+function applyTerminalCommandFallbacks(args: Record<string, unknown>) {
+  if (typeof args.command !== "string" || !args.command.trim()) {
+    const sequence = normalizeTerminalCommandSequence(args.commands, args.shell);
+    if (sequence) {
+      args.command = sequence;
+    }
+  }
+
+  if (typeof args.command !== "string" || !args.command.trim()) {
+    const programCommand = normalizeTerminalProgramCommand(args);
+    if (programCommand) {
+      args.command = programCommand;
+    }
+  } else {
+    const appendedCommand = appendTerminalCommandArguments(args.command, args.args ?? args.arguments);
+    if (appendedCommand) {
+      args.command = appendedCommand;
+    }
+  }
+
+  delete args.arguments;
+  delete args.args;
+  delete args.commands;
+  delete args.program;
+}
+
+function normalizeTerminalCommandSequence(value: unknown, shell: unknown) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const commands = value.flatMap((item) => {
+    if (typeof item === "string") {
+      const trimmed = item.trim();
+      return trimmed ? [trimmed] : [];
+    }
+    if (!isObject(item)) {
+      return [];
+    }
+
+    const normalized = normalizeTerminalRunArgs(item);
+    const command = typeof normalized.command === "string" ? normalized.command.trim() : "";
+    return command ? [command] : [];
+  });
+
+  if (commands.length === 0) {
+    return undefined;
+  }
+
+  return commands.join(getTerminalCommandSequenceSeparator(shell));
+}
+
+function getTerminalCommandSequenceSeparator(shell: unknown) {
+  if (shell === "bash" || shell === "sh" || shell === "zsh" || shell === "wsl") {
+    return " && ";
+  }
+  if (shell === "cmd") {
+    return " & ";
+  }
+  return "; ";
+}
+
+function normalizeTerminalProgramCommand(args: Record<string, unknown>) {
+  const program = stringifyCommandPart(args.program);
+  if (!program) {
+    return undefined;
+  }
+
+  const extraArgs = normalizeTerminalArgumentParts(args.args ?? args.arguments);
+  return [program, ...extraArgs].join(" ").trim() || undefined;
+}
+
+function appendTerminalCommandArguments(command: string, rawArgs: unknown) {
+  const extraArgs = normalizeTerminalArgumentParts(rawArgs);
+  if (extraArgs.length === 0) {
+    return undefined;
+  }
+
+  return [command.trim(), ...extraArgs].filter(Boolean).join(" ");
+}
+
+function normalizeTerminalArgumentParts(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => {
+      const part = stringifyCommandPart(item);
+      return part ? [quoteCommandPart(part)] : [];
+    });
+  }
+
+  const part = stringifyCommandPart(value);
+  return part ? [part] : [];
+}
+
+function stringifyCommandPart(value: unknown) {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return undefined;
+}
+
+function quoteCommandPart(value: string) {
+  if (!/[\s"'`]/.test(value) || /^(['"]).*\1$/.test(value)) {
+    return value;
+  }
+
+  return JSON.stringify(value);
+}
+
+function stripTerminalRunEnvelopeMetadata(args: Record<string, unknown>) {
+  delete args.executable;
+  delete args.function;
+  delete args.id;
+  delete args.input;
+  delete args.name;
+  delete args.params;
+  delete args.parameters;
+  delete args.payload;
+  delete args.request;
+  delete args.data;
+  delete args.tool;
+  delete args.call_id;
+  delete args.tool_call_id;
+  delete args.type;
+
+  const allowedKeys = new Set([
+    "background",
+    "backgroundWaitMs",
+    "command",
+    "cwd",
+    "dryRun",
+    "previewUrl",
+    "shell",
+    "timeoutMs",
+    "workingDirectory",
+  ]);
+  for (const key of Object.keys(args)) {
+    if (!allowedKeys.has(key)) {
+      delete args[key];
+    }
+  }
 }
 
 function normalizeGmailArgs(toolId: string, args: Record<string, unknown>) {

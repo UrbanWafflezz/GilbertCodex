@@ -19,6 +19,8 @@ const FILE_PATH_PATTERN = /(?:^|[\s"'`])[\w./\\-]+\.(?:astro|c|cpp|cs|css|dart|g
 const FILE_CONTEXT_PATTERN = /\b(app|avatar|camera|canvas|code|codebase|component|config(?:uration)?|controls?|crafting|debug|dir|directory|file|folder|gameplay|hud|input|instruction|inventory|levels?|line|local|map|model|physics|player|plugin|plugins|prompt|prompts|providers?|registry|render(?:er|ing)?|resources?|runtime|scene|selector|service|settings?|simulation|source|support(?:ed)?|tool|tools|bridge|project|read|repo|repository|three(?:\.js|js)?|voxel|webgl|world|workspace)\b/i;
 const INSPECT_PROMPT_PATTERN = /\b(audit|check|count|find|find out|figure out|grep|inspect|list|look at|look into|read|review|search|show|trace|tree|where)\b/i;
 const EDIT_PROMPT_PATTERN = /\b(add|append|apply|change|copy|delete|edit|fix|implement|improve|insert|modi(?:fy|fy|y)|patch|polish|refactor|remove|replace|restyle|revamp|style|tweak|update|upgrade|write)\b/i;
+const PROJECT_SCAFFOLD_PROMPT_PATTERN =
+  /\b(?:build|bootstrap|create|generate|make|scaffold|set\s*up|setup|start)\b[\s\S]{0,180}\b(?:app|frontend|game|project|react|site|vite|web|website)\b|\b(?:app|frontend|game|project|site|web|website)\b[\s\S]{0,180}\b(?:react|vite|npm|pnpm|yarn)\b|\b(?:build|bootstrap|create|generate|make|scaffold|set\s*up|setup|start)\b[\s\S]{0,180}\b(?:clone)\b[\s\S]{0,180}\b(?:react|vite|npm|pnpm|yarn)\b/i;
 const DESIGN_EDIT_PROMPT_PATTERN = /\b(?:better|cleaner|clearer|design|layout|party|polished?|readable|readability|theme|ui|visual)\b/i;
 const APP_BEHAVIOR_CHANGE_PROMPT_PATTERN =
   /\b(?:when|if|after|on)\b[\s\S]{0,220}\b(?:should|shouldn['’]?t|should\s+not|needs?\s+to|must|has\s+to|have\s+to)\b[\s\S]{0,220}\b(?:go\s+to|navigate|route|open|show|display|render|switch|send|land|take|work|create|start)\b|\b(?:should|shouldn['’]?t|should\s+not|needs?\s+to|must|has\s+to|have\s+to)\b[\s\S]{0,220}\b(?:go\s+to|navigate|route|open|show|display|render|switch|send|land|take|work|create|start)\b/i;
@@ -465,7 +467,8 @@ function selectToolIds(
   const gitOnlyPrompt = looksLikeLocalGitWork && !FILE_PATH_PATTERN.test(prompt) && !/\b(code|file|folder|workspace|src|edit|fix|implement|refactor|test|build)\b/i.test(prompt);
   const looksLikeDesignEditWork = DESIGN_EDIT_PROMPT_PATTERN.test(prompt) && /\b(?:app|avatar|canvas|card|component|css|design|file|game|gameplay|hud|layout|level|page|player|screen|scene|style|theme|ui|visual|world|workspace|src[\\/]|\.css\b|\.jsx?\b|\.tsx?\b)\b/i.test(prompt);
   const looksLikeBehaviorEditWork = (APP_BEHAVIOR_CHANGE_PROMPT_PATTERN.test(prompt) || GAME_BEHAVIOR_CHANGE_PROMPT_PATTERN.test(prompt)) && LOCAL_UI_BEHAVIOR_TARGET_PATTERN.test(prompt);
-  const looksLikeEditWork = !gitOnlyPrompt && !looksLikePureConnectedAppWork && (EDIT_PROMPT_PATTERN.test(prompt) || looksLikeDesignEditWork || looksLikeBehaviorEditWork || MAKE_BETTER_PROMPT_PATTERN.test(prompt) || MAKE_LOCAL_TARGET_WORK_PATTERN.test(prompt) || CREATE_FOLDER_PATTERN.test(prompt) || MOVE_PROMPT_PATTERN.test(prompt));
+  const looksLikeProjectScaffoldWork = !IMAGE_GENERATION_PROMPT_PATTERN.test(prompt) && PROJECT_SCAFFOLD_PROMPT_PATTERN.test(prompt);
+  const looksLikeEditWork = !gitOnlyPrompt && !looksLikePureConnectedAppWork && (EDIT_PROMPT_PATTERN.test(prompt) || looksLikeProjectScaffoldWork || looksLikeDesignEditWork || looksLikeBehaviorEditWork || MAKE_BETTER_PROMPT_PATTERN.test(prompt) || MAKE_LOCAL_TARGET_WORK_PATTERN.test(prompt) || CREATE_FOLDER_PATTERN.test(prompt) || MOVE_PROMPT_PATTERN.test(prompt));
 
   if (options.memoryEnabled && (looksLikeInspectWork || looksLikeEditWork || looksLikeContextAwareGmailComposition || looksLikeLocalGitWork || looksLikeLocalGitReviewWork || TERMINAL_PROMPT_PATTERN.test(prompt) || MEMORY_PROMPT_PATTERN.test(prompt))) {
     ids.add("memory_search");
@@ -478,7 +481,7 @@ function selectToolIds(
   if (looksLikeEditWork) {
     addAll(ids, EDIT_TOOL_IDS);
 
-    if (CREATE_FOLDER_PATTERN.test(prompt)) {
+    if (CREATE_FOLDER_PATTERN.test(prompt) || looksLikeProjectScaffoldWork) {
       ids.add("files_create_directory");
     }
 

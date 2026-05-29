@@ -56,19 +56,20 @@ export function createToolCallRequest(
 
   const trimmedName = name.trim();
   const parsed = parseToolCallArgumentsDetailed(args);
+  const allowPlainStringArguments = parsed.error && typeof parsed.value === "string" && isPlainStringArgumentTool(trimmedName);
   // Trim provider IDs so dedupe, telemetry, and result-message correlation ignore surrounding whitespace.
   const trimmedId = typeof id === "string" ? id.trim() : "";
   const resolvedId = trimmedId ? trimmedId : nextFallbackToolCallId(trimmedName);
 
   const request: ToolCallRequest = {
-    arguments: parsed.error ? {} : parsed.value,
+    arguments: parsed.error && !allowPlainStringArguments ? {} : parsed.value,
     id: resolvedId,
     name: trimmedName,
     provider,
     raw,
   };
 
-  if (parsed.error) {
+  if (parsed.error && !allowPlainStringArguments) {
     request.argumentsParseError = parsed.error;
   }
 
@@ -83,6 +84,10 @@ function nextFallbackToolCallId(name: string): string {
 
 export function __resetToolCallIdCounterForTests() {
   toolCallIdCounter = 0;
+}
+
+function isPlainStringArgumentTool(name: string) {
+  return /^(?:terminal_run|terminal|terminal_command|terminal_exec|terminal\.run|terminal\.run_command|terminal_run_command|run_command|run_terminal|shell_command)$/i.test(name.trim());
 }
 
 function repairLikelyJsonString(value: string) {

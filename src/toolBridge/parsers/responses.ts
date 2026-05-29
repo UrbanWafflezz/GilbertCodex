@@ -3,10 +3,13 @@ import type { ToolCallRequest } from "../types";
 import { createToolCallRequest } from "./common";
 
 interface ResponsesFunctionCall {
-  arguments?: string;
+  arguments?: unknown;
+  args?: unknown;
   call_id?: string;
   id?: string;
+  input?: unknown;
   name?: string;
+  parameters?: unknown;
   type?: string;
 }
 
@@ -27,7 +30,7 @@ export function parseResponsesToolCalls(payload: unknown, provider: ModelProvide
       return [];
     }
 
-    const parsed = createToolCallRequest(provider, item.call_id ?? item.id, item.name, item.arguments, item);
+    const parsed = createToolCallRequest(provider, item.call_id ?? item.id, item.name, getResponsesFunctionCallArguments(item), item);
     return parsed ? [{ ...parsed, id: parsed.id || `function-call-${index + 1}` }] : [];
   });
 }
@@ -44,7 +47,7 @@ export function parseResponsesStreamToolCalls(event: unknown, provider: ModelPro
   }
 
   if (payload.item?.type === "function_call") {
-    const parsed = createToolCallRequest(provider, payload.item.call_id ?? payload.item.id, payload.item.name, payload.item.arguments, payload.item);
+    const parsed = createToolCallRequest(provider, payload.item.call_id ?? payload.item.id, payload.item.name, getResponsesFunctionCallArguments(payload.item), payload.item);
     return parsed ? [parsed] : [];
   }
 
@@ -65,7 +68,7 @@ export function parseResponsesStreamToolCallDeltas(event: unknown): ResponsesToo
 
   if (payload.item?.type === "function_call") {
     return [{
-      argumentsDelta: payload.item.arguments ?? "",
+      argumentsDelta: typeof payload.item.arguments === "string" ? payload.item.arguments : "",
       id: payload.item.call_id ?? payload.item.id,
       index,
       name: payload.item.name,
@@ -91,4 +94,8 @@ export function parseResponsesStreamToolCallDeltas(event: unknown): ResponsesToo
   }
 
   return [];
+}
+
+function getResponsesFunctionCallArguments(item: ResponsesFunctionCall) {
+  return item.arguments ?? item.parameters ?? item.args ?? item.input;
 }

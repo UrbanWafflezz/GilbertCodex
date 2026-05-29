@@ -161,6 +161,27 @@ describe("tool bridge permissions and registry", () => {
     expect(selected).toContain("files_apply_patch");
   });
 
+  it("advertises edit and terminal tools for new Vite React game scaffold prompts", () => {
+    const registry = createDefaultToolRegistry();
+    const baseTools = registry.listForContext(context, "openai-compatible", { includePendingApproval: true });
+    const selected = selectAdvertisedBridgeTools(baseTools, {
+      browserPreviewEnabled: true,
+      editingEnabled: true,
+      fileToolsEnabled: true,
+      gitEnabled: true,
+      prompt: "I want to create a GTA 6 clone vite react surprise me npm build and install and i will run myself",
+      terminalEnabled: true,
+      webSearchEnabled: false,
+    }).map((tool) => tool.id);
+
+    expect(selected).toContain("files_search");
+    expect(selected).toContain("files_read_many");
+    expect(selected).toContain("files_write_many");
+    expect(selected).toContain("files_apply_patch");
+    expect(selected).toContain("files_create_directory");
+    expect(selected).toContain("terminal_run");
+  });
+
   it("advertises workspace edit tools for natural app navigation behavior requests", () => {
     const registry = createDefaultToolRegistry();
     const baseTools = registry.listForContext(context, "openai-compatible", { includePendingApproval: true });
@@ -854,6 +875,37 @@ describe("tool bridge permissions and registry", () => {
     expect(plan.canCallProvider).toBe(false);
     expect(plan.toolChoice).toBe("none");
     expect(plan.blockedReasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "required_family_unavailable", family: "editing" }),
+    ]));
+  });
+
+  it("allows mutation-required new project scaffold passes when editing tools are enabled", () => {
+    const registry = createDefaultToolRegistry();
+    const baseTools = registry.listForContext(context, "openai-compatible", { includePendingApproval: true });
+    const plan = selectToolCapabilityPlan({
+      availableTools: baseTools,
+      browserPreviewEnabled: true,
+      editingEnabled: true,
+      fileToolsEnabled: true,
+      gitEnabled: true,
+      mustUseTools: true,
+      prompt: "I want to create a GTA 6 clone vite react surprise me npm build and install and i will run myself",
+      providerFormat: "openai-compatible",
+      requiredFamilies: ["files", "editing", "git", "github", "terminal", "browser"],
+      terminalEnabled: true,
+      toolIntent: ["workspace_evidence", "workspace_mutation"],
+      webSearchEnabled: false,
+    });
+
+    expect(plan.canCallProvider).toBe(true);
+    expect(plan.toolChoice).toBe("required");
+    expect(plan.providerVisibleToolIds).toEqual(expect.arrayContaining([
+      "files_read_many",
+      "files_write_many",
+      "files_apply_patch",
+      "terminal_run",
+    ]));
+    expect(plan.blockedReasons).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "required_family_unavailable", family: "editing" }),
     ]));
   });
@@ -1989,6 +2041,50 @@ describe("tool bridge parsers", () => {
     expect(calls[0]?.argumentsParseError).toBeUndefined();
   });
 
+  it("parses OpenAI-compatible function parameters as tool arguments", () => {
+    const calls = parseOpenAiCompatibleToolCalls(
+      {
+        tool_calls: [
+          {
+            function: { name: "terminal_run", parameters: { command: "npm.cmd run build", cwd: "." } },
+            id: "call-openai-parameters",
+            type: "function",
+          },
+        ],
+      },
+      "openai",
+    );
+
+    expect(calls[0]).toMatchObject({
+      arguments: { command: "npm.cmd run build", cwd: "." },
+      id: "call-openai-parameters",
+      name: "terminal_run",
+    });
+    expect(calls[0]?.argumentsParseError).toBeUndefined();
+  });
+
+  it("allows plain terminal command strings from providers", () => {
+    const calls = parseOpenAiCompatibleToolCalls(
+      {
+        tool_calls: [
+          {
+            function: { arguments: "npm.cmd run build", name: "terminal_run" },
+            id: "call-openai-terminal-string",
+            type: "function",
+          },
+        ],
+      },
+      "openai",
+    );
+
+    expect(calls[0]).toMatchObject({
+      arguments: "npm.cmd run build",
+      id: "call-openai-terminal-string",
+      name: "terminal_run",
+    });
+    expect(calls[0]?.argumentsParseError).toBeUndefined();
+  });
+
   it("parses Anthropic tool_use blocks", () => {
     const calls = parseAnthropicToolCalls(
       {
@@ -2009,6 +2105,17 @@ describe("tool bridge parsers", () => {
     );
 
     expect(calls[0]).toMatchObject({ arguments: { values: [1, 2] }, id: "call-responses", name: "bridge_sum" });
+  });
+
+  it("parses Responses function_call parameters output", () => {
+    const calls = parseResponsesToolCalls(
+      {
+        output: [{ call_id: "call-responses-parameters", name: "terminal_run", parameters: { command: "npm.cmd install" }, type: "function_call" }],
+      },
+      "openai",
+    );
+
+    expect(calls[0]).toMatchObject({ arguments: { command: "npm.cmd install" }, id: "call-responses-parameters", name: "terminal_run" });
   });
 
   it("surfaces a JSON parse error when arguments cannot be decoded", () => {
@@ -2107,6 +2214,17 @@ export default function App() {
       arguments: { path: "src/app/App.tsx" },
       id: "call-1",
       name: "files_read",
+    });
+  });
+
+  it("recovers visible function parameters as tool arguments", () => {
+    const content = String.raw`{"tool_calls":[{"id":"call-terminal","type":"function","function":{"name":"terminal_run","parameters":{"command":"npm.cmd run build","cwd":"."}}}]}`;
+    const calls = parseVisibleTextToolCalls(content, "openrouter");
+
+    expect(calls[0]).toMatchObject({
+      arguments: { command: "npm.cmd run build", cwd: "." },
+      id: "call-terminal",
+      name: "terminal_run",
     });
   });
 

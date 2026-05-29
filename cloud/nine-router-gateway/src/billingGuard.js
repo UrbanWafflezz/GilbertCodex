@@ -1,5 +1,10 @@
 import { FieldValue } from "firebase-admin/firestore";
 
+import {
+  estimateImageGenerations,
+  isBillableImageRequest,
+  normalizeUsageAmount,
+} from "./billingUsage.js";
 import { getFirebaseDb } from "./firebaseAuth.js";
 import {
   isAllowedFreeTierComboMutation,
@@ -15,24 +20,28 @@ const BILLING_TIERS = {
   free: {
     chatRequestsPerDay: 50,
     chatRequestsPerMinute: 20,
+    imageGenerationsPerDay: 0,
     tokensPerDay: 150_000,
     tokensPerMinute: 40_000,
   },
   plus: {
     chatRequestsPerDay: 1_000,
     chatRequestsPerMinute: 60,
+    imageGenerationsPerDay: 25,
     tokensPerDay: 5_000_000,
     tokensPerMinute: 500_000,
   },
   pro: {
     chatRequestsPerDay: 5_000,
     chatRequestsPerMinute: 120,
+    imageGenerationsPerDay: 100,
     tokensPerDay: 25_000_000,
     tokensPerMinute: 2_000_000,
   },
   teams: {
     chatRequestsPerDay: null,
     chatRequestsPerMinute: null,
+    imageGenerationsPerDay: null,
     tokensPerDay: null,
     tokensPerMinute: null,
   },
@@ -48,6 +57,18 @@ export async function enforceNineRouterBilling(decodedToken, req, requestUrl, bo
   }
 
   if (!isBillableModelRequest(req.method, pathname)) {
+    if (!isBillableImageRequest(req.method, pathname)) {
+      return allow(plan, tier);
+    }
+
+    if (tier === "free") {
+      return deny(402, "Image generation requires Plus or Pro.");
+    }
+
+    await recordUsage(decodedToken.uid, tier, {
+      imageGenerations: estimateImageGenerations(body),
+    });
+
     return allow(plan, tier);
   }
 
@@ -116,16 +137,22 @@ async function recordUsage(uid, tier, usage) {
   const windows = createUsageWindows();
   const counters = [
     {
-      amount: usage.chatRequests,
+      amount: normalizeUsageAmount(usage.chatRequests),
       bucket: "chatRequests",
       dayLimit: limits.chatRequestsPerDay,
       minuteLimit: limits.chatRequestsPerMinute,
     },
     {
-      amount: usage.tokens,
+      amount: normalizeUsageAmount(usage.tokens),
       bucket: "tokens",
       dayLimit: limits.tokensPerDay,
       minuteLimit: limits.tokensPerMinute,
+    },
+    {
+      amount: normalizeUsageAmount(usage.imageGenerations),
+      bucket: "imageGenerations",
+      dayLimit: limits.imageGenerationsPerDay,
+      minuteLimit: null,
     },
   ].filter((counter) => counter.amount > 0);
 
@@ -192,7 +219,11 @@ function createUsagePayload(uid, tier, window, key, writes) {
 }
 
 function createLimitError(bucket, limit, window) {
-  const label = bucket === "chatRequests" ? "managed chat requests" : "managed tokens";
+  const label = bucket === "chatRequests"
+    ? "managed chat requests"
+    : bucket === "imageGenerations"
+      ? "image generations"
+      : "managed tokens";
   const error = new Error(`Plan limit reached for ${label}: ${limit.toLocaleString()} per ${window}.`);
   error.statusCode = 429;
   error.payload = {

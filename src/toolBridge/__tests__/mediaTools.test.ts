@@ -1,15 +1,37 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { executeToolBridgeCalls, ToolRegistry } from "../index";
 import { createImageGenerateTool, type NineRouterImageBackend } from "../tools/media";
 import type { NineRouterLocalStatus } from "../../app/tauriClient";
+import { NINE_ROUTER_FIREBASE_ID_TOKEN_HEADER } from "../../services/nineRouterCloud";
 import type { ToolExecutionContext } from "../types";
+
+vi.mock("../../firebase", () => ({
+  getGilbertFirebaseAuth: () => ({
+    currentUser: {
+      getIdToken: vi.fn(async () => "firebase-id-token"),
+    },
+  }),
+}));
 
 const context: ToolExecutionContext = {
   model: "cx/gpt-5.5",
   permissionMode: "default",
   provider: "9router",
 };
+
+beforeEach(() => {
+  vi.stubEnv("VITE_GILBERT_NINE_ROUTER_BASE_URL", "");
+  vi.stubEnv("VITE_GILBERT_NINE_ROUTER_DASHBOARD_URL", "");
+  vi.stubEnv("VITE_GILBERT_NINE_ROUTER_MODE", "");
+  vi.stubEnv("VITE_GILBERT_REQUIRE_CLOUD_SUBSCRIPTIONS", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 function makeStatus(overrides: Partial<NineRouterLocalStatus> = {}): NineRouterLocalStatus {
   return {
@@ -103,6 +125,56 @@ describe("image_generate", () => {
       width: 1024,
     });
     expect(data.artifacts?.[0]?.title).toMatch(/\.png$/);
+  });
+
+  it("uses authenticated cloud 9Router image routing when cloud subscriptions are configured", async () => {
+    vi.stubEnv("VITE_GILBERT_NINE_ROUTER_BASE_URL", "https://router.example.com/subscriptions/v1");
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      const headers = new Headers(init?.headers);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+
+      expect(requestUrl).toBe("https://router.example.com/subscriptions/v1/images/generations");
+      expect(init?.method).toBe("POST");
+      expect(headers.get("Content-Type")).toBe("application/json");
+      expect(headers.get(NINE_ROUTER_FIREBASE_ID_TOKEN_HEADER)).toBe("firebase-id-token");
+      expect(body).toMatchObject({
+        model: "cx/gpt-5.5-image",
+        n: 1,
+        prompt: "A soft watercolor cow standing in a sunny green pasture",
+        response_format: "b64_json",
+      });
+
+      return new Response(JSON.stringify({ data: [{ b64_json: "iVBORw0KGgo=" }] }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const registry = new ToolRegistry([createImageGenerateTool()]);
+
+    const batch = await executeToolBridgeCalls({
+      calls: [
+        {
+          arguments: {
+            prompt: "A soft watercolor cow standing in a sunny green pasture",
+          },
+          id: "call-image-cloud",
+          name: "image_generate",
+          provider: "openai",
+        },
+      ],
+      context,
+      registry,
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(batch.toolCalls[0]).toMatchObject({ status: "complete", toolId: "image_generate" });
+    expect(batch.resultMessages[0]?.result.ok).toBe(true);
   });
 
   it("reports 9Router API errors as failed tool results", async () => {

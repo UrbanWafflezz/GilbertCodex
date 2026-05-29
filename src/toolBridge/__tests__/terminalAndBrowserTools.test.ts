@@ -121,6 +121,200 @@ describe("terminal_run", () => {
     expect(batch.resultMessages[0]?.result.content).toContain("Exit code: 0");
   });
 
+  it("accepts provider-wrapped terminal arguments before validation", async () => {
+    const runCommand = vi.fn(makeTerminalBackend().runCommand);
+    const tool = createTerminalRunTool(makeTerminalBackend({ runCommand }));
+    const registry = new ToolRegistry([tool]);
+
+    const batch = await executeToolBridgeCalls({
+      approval: async () => ({ approved: true }),
+      calls: [
+        {
+          arguments: {
+            arguments: {
+              command_line: "npm.cmd run build",
+              timeout_ms: "120000",
+              working_directory: ".",
+            },
+          },
+          id: "call-terminal-wrapped",
+          name: "terminal_run",
+          provider: "openai",
+        },
+      ],
+      context: makeContext(),
+      registry,
+    });
+
+    expect(runCommand).toHaveBeenCalledWith({
+      command: "npm.cmd run build",
+      shell: HOST_DEFAULT_TERMINAL_SHELL,
+      timeoutMs: 120_000,
+      workingDirectory: ROOT,
+    });
+    expect(batch.toolCalls[0]).toMatchObject({
+      status: "complete",
+      terminal: {
+        command: "npm.cmd run build",
+        workingDirectory: ROOT,
+      },
+    });
+    expect(batch.resultMessages[0]?.result.error).toBeUndefined();
+  });
+
+  it("accepts terminal command strings in provider argument envelopes", async () => {
+    const runCommand = vi.fn(makeTerminalBackend().runCommand);
+    const tool = createTerminalRunTool(makeTerminalBackend({ runCommand }));
+    const registry = new ToolRegistry([tool]);
+
+    const batch = await executeToolBridgeCalls({
+      approval: async () => ({ approved: true }),
+      calls: [
+        {
+          arguments: {
+            arguments: "npm.cmd install",
+            working_directory: ".",
+          },
+          id: "call-terminal-string-envelope",
+          name: "terminal_run",
+          provider: "openai",
+        },
+      ],
+      context: makeContext(),
+      registry,
+    });
+
+    expect(runCommand).toHaveBeenCalledWith({
+      command: "npm.cmd install",
+      shell: HOST_DEFAULT_TERMINAL_SHELL,
+      timeoutMs: 45_000,
+      workingDirectory: ROOT,
+    });
+    expect(batch.toolCalls[0]).toMatchObject({
+      status: "complete",
+      terminal: {
+        command: "npm.cmd install",
+        workingDirectory: ROOT,
+      },
+    });
+    expect(batch.resultMessages[0]?.result.error).toBeUndefined();
+  });
+
+  it("accepts direct string terminal arguments as the command", async () => {
+    const runCommand = vi.fn(makeTerminalBackend().runCommand);
+    const tool = createTerminalRunTool(makeTerminalBackend({ runCommand }));
+    const registry = new ToolRegistry([tool]);
+
+    const batch = await executeToolBridgeCalls({
+      approval: async () => ({ approved: true }),
+      calls: [
+        {
+          arguments: "npm.cmd run build",
+          id: "call-terminal-direct-string",
+          name: "terminal_run",
+          provider: "openai",
+        },
+      ],
+      context: makeContext(),
+      registry,
+    });
+
+    expect(runCommand).toHaveBeenCalledWith({
+      command: "npm.cmd run build",
+      shell: HOST_DEFAULT_TERMINAL_SHELL,
+      timeoutMs: 45_000,
+      workingDirectory: ROOT,
+    });
+    expect(batch.toolCalls[0]).toMatchObject({
+      status: "complete",
+      terminal: {
+        command: "npm.cmd run build",
+        workingDirectory: ROOT,
+      },
+    });
+    expect(batch.resultMessages[0]?.result.error).toBeUndefined();
+  });
+
+  it("accepts deeply nested terminal argument envelopes", async () => {
+    const runCommand = vi.fn(makeTerminalBackend().runCommand);
+    const tool = createTerminalRunTool(makeTerminalBackend({ runCommand }));
+    const registry = new ToolRegistry([tool]);
+
+    const batch = await executeToolBridgeCalls({
+      approval: async () => ({ approved: true }),
+      calls: [
+        {
+          arguments: {
+            arguments: {
+              input: {
+                function: {
+                  parameters: {
+                    command_line: "npm.cmd run build",
+                    timeout_ms: "120000",
+                    working_directory: ".",
+                  },
+                },
+              },
+            },
+          },
+          id: "call-terminal-deep-envelope",
+          name: "terminal_run",
+          provider: "openai",
+        },
+      ],
+      context: makeContext(),
+      registry,
+    });
+
+    expect(runCommand).toHaveBeenCalledWith({
+      command: "npm.cmd run build",
+      shell: HOST_DEFAULT_TERMINAL_SHELL,
+      timeoutMs: 120_000,
+      workingDirectory: ROOT,
+    });
+    expect(batch.resultMessages[0]?.result.error).toBeUndefined();
+  });
+
+  it("accepts terminal program/args and commands-array shapes", async () => {
+    const runCommand = vi.fn(makeTerminalBackend().runCommand);
+    const tool = createTerminalRunTool(makeTerminalBackend({ runCommand }));
+    const registry = new ToolRegistry([tool]);
+
+    const batch = await executeToolBridgeCalls({
+      approval: async () => ({ approved: true }),
+      calls: [
+        {
+          arguments: { args: ["run", "build"], program: "npm.cmd", workingDir: "." },
+          id: "call-terminal-program-args",
+          name: "terminal_run",
+          provider: "openai",
+        },
+        {
+          arguments: { commands: ["npm.cmd install", "npm.cmd run build"], shell: "powershell", working_directory: "." },
+          id: "call-terminal-commands-array",
+          name: "terminal_run",
+          provider: "openai",
+        },
+      ],
+      context: makeContext(),
+      registry,
+    });
+
+    expect(runCommand).toHaveBeenNthCalledWith(1, {
+      command: "npm.cmd run build",
+      shell: HOST_DEFAULT_TERMINAL_SHELL,
+      timeoutMs: 45_000,
+      workingDirectory: ROOT,
+    });
+    expect(runCommand).toHaveBeenNthCalledWith(2, {
+      command: "npm.cmd install; npm.cmd run build",
+      shell: "powershell",
+      timeoutMs: 45_000,
+      workingDirectory: ROOT,
+    });
+    expect(batch.resultMessages.every((message) => message.result.error === undefined)).toBe(true);
+  });
+
   it("normalizes a leading cd wrapper into cwd before running the terminal command", async () => {
     const runCommand = vi.fn(makeTerminalBackend().runCommand);
     const tool = createTerminalRunTool(makeTerminalBackend({ runCommand }));

@@ -1,5 +1,13 @@
 import { ensureNineRouterLocal, nineRouterLocalHttp, type NineRouterHttpRequest, type NineRouterHttpResponse, type NineRouterLocalStatus } from "../../../app/tauriClient";
 import { joinLocalUrl, NINE_ROUTER_DASHBOARD_FALLBACK } from "../../../services/nineRouterClient";
+import {
+  getConfiguredNineRouterBaseUrl,
+  getConfiguredNineRouterDashboardUrl,
+  isConfiguredNineRouterCloudEnabled,
+  isNineRouterCloudRequired,
+  isNineRouterNativeBridgeUrl,
+  withNineRouterCloudAuthHeaders,
+} from "../../../services/nineRouterCloud";
 import { recordPlanUsage } from "../../../services/planUsageLimiter";
 import type { ChatArtifact } from "../../../types/chat";
 import type { JsonValue, ToolDefinition, ToolExecutionContext, ToolExecutionResult } from "../../types";
@@ -38,14 +46,14 @@ type ImageQuality = (typeof IMAGE_QUALITY_VALUES)[number];
 type ImageOutputFormat = (typeof IMAGE_OUTPUT_FORMAT_VALUES)[number];
 
 export const defaultNineRouterImageBackend: NineRouterImageBackend = {
-  ensureLocal: ensureNineRouterLocal,
-  http: nineRouterLocalHttp,
+  ensureLocal: ensureNineRouterImageBackendReady,
+  http: nineRouterImageHttp,
 };
 
 export function createImageGenerateTool(backend: NineRouterImageBackend = defaultNineRouterImageBackend): ToolDefinition {
   return {
     description:
-      "Generate an image through the local 9Router subscription helper. " +
+      "Generate an image through the 9Router subscription router. " +
       "Use this when the user asks to create, generate, draw, render, or produce a visual image, picture, photo, logo, icon, avatar, poster, or illustration. " +
       "Write a specific visual prompt with the subject, style or medium, composition, colors, lighting, text requirements, and constraints. " +
       "Use n/count for up to 4 variations when the user asks for multiple options. The generated images are returned as chat artifacts; do not paste base64 into the visible answer.",
@@ -123,6 +131,86 @@ export function createMediaTools(backend: NineRouterImageBackend = defaultNineRo
 }
 
 export const mediaTools: ToolDefinition[] = createMediaTools();
+
+async function ensureNineRouterImageBackendReady(): Promise<NineRouterLocalStatus> {
+  if (!isNineRouterImageCloudMode()) {
+    return ensureNineRouterLocal();
+  }
+
+  const baseUrl = getConfiguredNineRouterBaseUrl("");
+  if (!baseUrl || isNineRouterNativeBridgeUrl(baseUrl)) {
+    throw new Error("Cloud Subscriptions image routing is enabled, but the 9Router cloud URL is not configured.");
+  }
+
+  return createCloudNineRouterImageStatus(baseUrl);
+}
+
+async function nineRouterImageHttp(request: NineRouterHttpRequest): Promise<NineRouterHttpResponse> {
+  if (isNineRouterNativeBridgeUrl(request.url)) {
+    return nineRouterLocalHttp(request);
+  }
+
+  const controller = new AbortController();
+  const timeoutMs = request.timeoutMs ?? 180_000;
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const init = await withNineRouterCloudAuthHeaders(request.url, {
+      body: request.body,
+      headers: request.headers,
+      method: request.method,
+    });
+    const response = await fetch(request.url, {
+      ...init,
+      signal: controller.signal,
+    });
+
+    return {
+      body: await response.text(),
+      headers: Object.fromEntries(response.headers.entries()),
+      status: response.status,
+    };
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error(`9Router image generation timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+    }
+
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
+}
+
+function isNineRouterImageCloudMode() {
+  return isConfiguredNineRouterCloudEnabled() || isNineRouterCloudRequired();
+}
+
+function createCloudNineRouterImageStatus(baseUrl: string): NineRouterLocalStatus {
+  const dashboardUrl = getConfiguredNineRouterDashboardUrl(stripNineRouterV1Path(baseUrl)) || stripNineRouterV1Path(baseUrl) || baseUrl;
+
+  return {
+    autoStartEnabled: true,
+    baseUrl,
+    built: true,
+    dashboardUrl,
+    dataDir: null,
+    dockerVersion: null,
+    gitVersion: null,
+    installDir: null,
+    installed: true,
+    launchSupported: true,
+    launched: false,
+    message: "Cloud Subscriptions image routing is configured.",
+    nodeVersion: null,
+    npmVersion: null,
+    pid: null,
+    running: true,
+  };
+}
+
+function stripNineRouterV1Path(baseUrl: string) {
+  return baseUrl.replace(/\/v1\/?$/i, "");
+}
 
 async function executeImageGenerateTool(
   args: Record<string, unknown>,

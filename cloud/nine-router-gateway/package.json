@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Cloud Run gateway for Firebase-authenticated, tenant-isolated 9Router runtimes.",
   "scripts": {
-    "check": "node --check src/billingGuard.js && node --check src/firebaseAuth.js && node --check src/freeAutoRouting.js && node --check src/headers.js && node --check src/http.js && node --check src/server.js && node --check src/tenantRouter.js && node --check src/tenantStorage.js",
+    "check": "node --check src/billingGuard.js && node --check src/billingUsage.js && node --check src/firebaseAuth.js && node --check src/freeAutoRouting.js && node --check src/headers.js && node --check src/http.js && node --check src/server.js && node --check src/tenantRouter.js && node --check src/tenantStorage.js",
+    "test": "node --test src/*.test.js",
     "start": "node src/server.js"
   },
   "engines": {

@@ -93,8 +93,8 @@ function parseJsonToolCalls(content: string, provider: ModelProviderId) {
         : fn && typeof fn === "object" && !Array.isArray(fn)
           ? (fn as { name?: unknown }).name
           : undefined;
-      const args = typeof fn === "object" && fn !== null && !Array.isArray(fn) && "arguments" in fn
-        ? (fn as { arguments?: unknown }).arguments
+      const args = typeof fn === "object" && fn !== null && !Array.isArray(fn)
+        ? getVisibleFunctionArguments(fn as Record<string, unknown>) ?? record.parameters ?? record.arguments ?? {}
         : record.parameters ?? record.arguments ?? {};
       const request = createToolCallRequest(provider, record.id ?? `visible-tool-call-${index + 1}`, name, args, call);
 
@@ -103,6 +103,10 @@ function parseJsonToolCalls(content: string, provider: ModelProviderId) {
   } catch {
     return [];
   }
+}
+
+function getVisibleFunctionArguments(fn: Record<string, unknown>) {
+  return fn.arguments ?? fn.parameters ?? fn.args ?? fn.input;
 }
 
 function parseLooseToolCalls(content: string, provider: ModelProviderId) {
