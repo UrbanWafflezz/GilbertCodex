@@ -166,6 +166,18 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       ? (event) => updateCodingRun((run) => withCodingTelemetryEvent(run, event))
       : undefined;
 
+    function rememberBridgeToolResults(
+      resultMessages: ToolResultMessage[],
+      providerTurnId: number,
+      reasoningState?: ProviderReasoningState,
+    ) {
+      bridgeToolResultMessages.push(...resultMessages.map((message) => ({
+        ...message,
+        providerTurnId,
+        reasoningState,
+      })));
+    }
+
     function createActiveBridgeToolPreviews(calls: ToolCallRequest[], activePassIndex: number): ChatToolCall[] {
       return stampLocalToolCallIds(
         calls.map((call) =>
@@ -931,21 +943,22 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       return `${run.executedCount} of ${handledCount} ${pluralNoun} ran`;
     }
 
-    function serializeBridgeToolApprovalResume(calls: ToolCallRequest[]) {
+    function serializeBridgeToolApprovalResume(calls: ToolCallRequest[], reasoningState?: ProviderReasoningState) {
       return JSON.stringify({
         calls,
         kind: BRIDGE_TOOL_APPROVAL_RESUME_KIND,
+        reasoningState,
         version: 1,
       });
     }
 
-    function parseBridgeToolApprovalResume(content: string | undefined): { calls: ToolCallRequest[] } | null {
+    function parseBridgeToolApprovalResume(content: string | undefined): { calls: ToolCallRequest[]; reasoningState?: ProviderReasoningState } | null {
       if (!content) {
         return null;
       }
 
       try {
-        const parsed = JSON.parse(content) as { calls?: unknown; kind?: unknown };
+        const parsed = JSON.parse(content) as { calls?: unknown; kind?: unknown; reasoningState?: unknown };
 
         if (parsed.kind !== BRIDGE_TOOL_APPROVAL_RESUME_KIND || !Array.isArray(parsed.calls)) {
           return null;
@@ -960,14 +973,25 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
               typeof (call as ToolCallRequest).provider === "string",
           ),
         );
+        const reasoningState = isProviderReasoningState(parsed.reasoningState) ? parsed.reasoningState : undefined;
 
-        return calls.length > 0 ? { calls } : null;
+        return calls.length > 0 ? { calls, reasoningState } : null;
       } catch {
         return null;
       }
     }
 
-    function createBridgeApprovalShell(call: ToolCallRequest, tool: ToolDefinition, preview?: string): AgentApproval {
+    function isProviderReasoningState(value: unknown): value is ProviderReasoningState {
+      return Boolean(
+        value &&
+          typeof value === "object" &&
+          Array.isArray((value as ProviderReasoningState).entries) &&
+          typeof (value as ProviderReasoningState).format === "string" &&
+          typeof (value as ProviderReasoningState).provider === "string",
+      );
+    }
+
+    function createBridgeApprovalShell(call: ToolCallRequest, tool: ToolDefinition, preview?: string, reasoningState?: ProviderReasoningState): AgentApproval {
       const args = typeof call.arguments === "object" && call.arguments !== null && !Array.isArray(call.arguments) ? call.arguments as Record<string, unknown> : undefined;
       const command = formatBridgeApprovalCommand(args);
       const path = formatBridgeApprovalPath(args);
@@ -982,7 +1006,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         kind,
         path,
         preview,
-        resumeToolCallContent: serializeBridgeToolApprovalResume([call]),
+        resumeToolCallContent: serializeBridgeToolApprovalResume([call], reasoningState),
         risk: bridgeApprovalRisk(tool),
         status: "pending",
         title: tool.title,
@@ -1160,7 +1184,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         }
 
         const normalizedCall = validation.args ? { ...call, arguments: validation.args } : call;
-        const shell = createBridgeApprovalShell(normalizedCall, tool);
+        const shell = createBridgeApprovalShell(normalizedCall, tool, undefined, bridgeReasoningState);
         const reusableDecision = runtimeDecisions[createApprovalSessionDecisionKey(shell)];
 
         if (reusableDecision?.status === "approved") {
@@ -1168,7 +1192,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         }
 
         const preview = await createBridgeApprovalPreview(tool, normalizedCall, bridgeContext);
-        const approval = createBridgeApprovalShell(normalizedCall, tool, preview);
+        const approval = createBridgeApprovalShell(normalizedCall, tool, preview, bridgeReasoningState);
         approvals.push(approval);
         waitingToolCalls.push(createBridgeChatToolCall(
           normalizedCall,
@@ -1191,7 +1215,36 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
 
       const [firstCall, ...restCalls] = calls;
 
-      return firstCall ? [{ ...firstCall, arguments: decision.editedArgs }, ...restCalls] : calls;
+      return firstCall
+        ? [{ ...firstCall, arguments: decision.editedArgs, raw: undefined }, ...restCalls]
+        : calls;
+    }
+
+    function bridgeApprovalEditRequiresProviderRevision(calls: ToolCallRequest[], decision?: AgentApprovalDecision) {
+      return Boolean(
+        decision?.status === "edited" &&
+          decision.editedArgs &&
+          calls.some((call) => call.provider === "google" && hasGoogleThoughtSignature(call.raw)),
+      );
+    }
+
+    function hasGoogleThoughtSignature(raw: unknown) {
+      if (!raw || typeof raw !== "object") {
+        return false;
+      }
+
+      const extraContent = (raw as { extra_content?: unknown }).extra_content;
+      if (!extraContent || typeof extraContent !== "object") {
+        return false;
+      }
+
+      const google = (extraContent as { google?: unknown }).google;
+      return Boolean(
+        google &&
+          typeof google === "object" &&
+          typeof (google as { thought_signature?: unknown }).thought_signature === "string" &&
+          (google as { thought_signature: string }).thought_signature.trim(),
+      );
     }
 
     function getBridgeCallFamilies(calls: ToolCallRequest[]): ToolBridgeToolFamily[] {
@@ -1401,6 +1454,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
 
     if (approvedBridgeResume) {
       const submittedDecision = Object.values(approvalDecisions ?? {})[0];
+      bridgeReasoningState = approvedBridgeResume.reasoningState ?? bridgeReasoningState;
 
       if (submittedDecision?.status === "denied") {
         const deniedProgress = createLocalComputerProgress("complete", "Approved tool action was denied");
@@ -1421,13 +1475,17 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       const revisionNote = submittedDecision?.status === "edited" && !submittedDecision.editedArgs
         ? submittedDecision.note?.trim()
         : "";
+      const signedEditRequiresProviderRevision = bridgeApprovalEditRequiresProviderRevision(approvedBridgeResume.calls, submittedDecision);
 
-      if (revisionNote) {
+      if (revisionNote || signedEditRequiresProviderRevision) {
+        const revisionInstruction = revisionNote
+          ? `User requested changes: ${revisionNote}`
+          : `User edited the pending tool arguments to this JSON. Reissue the tool call with these arguments so the provider can create a fresh signed call: ${JSON.stringify(submittedDecision?.editedArgs ?? {})}`;
         const revisionProgress = createLocalComputerProgress("active", "Revising approved tool action");
         approvalRevisionPrompt = [
           prompt,
           "Revise the pending approval tool arguments.",
-          `User requested changes: ${revisionNote}`,
+          revisionInstruction,
           "Original pending tool call JSON:",
           formatFallbackRevisionOriginalCalls(approvedBridgeResume.calls),
         ].join("\n");
@@ -1435,7 +1493,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         approvalRevisionRequiresToolCall = true;
         pendingApprovalRevision = {
           calls: approvedBridgeResume.calls,
-          note: revisionNote,
+          note: revisionNote || revisionInstruction,
           requiredFamilies: approvalRevisionRequiredFamilies,
         };
 
@@ -1451,7 +1509,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
           createMessage("user", [
             "REVISE PENDING TOOL ACTION",
             "The previous tool action was not approved as written.",
-            `User requested changes: ${revisionNote}`,
+            revisionInstruction,
             "Original pending tool call JSON:",
             formatFallbackRevisionOriginalCalls(approvedBridgeResume.calls),
             "You must call the appropriate attached tool again with revised arguments. Do not answer with a plain-text draft or prose confirmation. The app will show a new approval card before anything runs.",
@@ -1514,7 +1572,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
       const completedBridgeToolCalls = stampLocalToolCallIds(bridgeRun.toolCalls, passIndex);
       updateCodingRun((run) => withCodingBridgeBatch(run, completedBridgeToolCalls));
       totalExecutedToolCalls += getBridgeHandledCount(bridgeRun);
-      bridgeToolResultMessages.push(...bridgeRun.resultMessages);
+      rememberBridgeToolResults(bridgeRun.resultMessages, passIndex, bridgeReasoningState);
       rememberProjectToolMemoryFromBridgeRun(chatId, workspaceSettings, prompt, bridgeRun);
       allToolCalls = [...allToolCalls, ...completedBridgeToolCalls];
       applyBridgeRunSideEffects(bridgeRun, completedBridgeToolCalls);
@@ -2144,7 +2202,7 @@ export async function streamAssistantWithLocalTools(deps: WorkspaceRuntimeDeps, 
         const completedBridgeToolCalls = stampLocalToolCallIds(bridgeRun.toolCalls, passIndex);
         updateCodingRun((run) => withCodingBridgeBatch(run, completedBridgeToolCalls));
         totalExecutedToolCalls += getBridgeHandledCount(bridgeRun);
-        bridgeToolResultMessages.push(...bridgeRun.resultMessages);
+        rememberBridgeToolResults(bridgeRun.resultMessages, passIndex, bridgeReasoningState);
         rememberProjectToolMemoryFromBridgeRun(chatId, workspaceSettings, prompt, bridgeRun);
         allToolCalls = [...allToolCalls, ...completedBridgeToolCalls];
         applyBridgeRunSideEffects(bridgeRun, completedBridgeToolCalls);

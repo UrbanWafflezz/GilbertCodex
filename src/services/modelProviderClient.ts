@@ -2429,12 +2429,44 @@ function applyStreamToolCallDelta(accumulator: Map<number, StreamToolCallAccumul
       argumentsText: `${existing.argumentsText}${toolDelta.argumentsDelta ?? ""}`,
       id: toolDelta.id ?? existing.id,
       name: toolDelta.name ?? existing.name,
-      raw: toolDelta.raw ?? existing.raw,
+      raw: mergeStreamToolCallRaw(existing.raw, toolDelta.raw),
     });
     changed = true;
   }
 
   return changed;
+}
+
+function mergeStreamToolCallRaw(existing: unknown, next: unknown, path: string[] = []): unknown {
+  if (next === undefined) {
+    return existing;
+  }
+  if (existing === undefined) {
+    return next;
+  }
+  if (
+    typeof existing === "string"
+    && typeof next === "string"
+    && path[path.length - 1] === "arguments"
+  ) {
+    return `${existing}${next}`;
+  }
+  if (
+    existing === null
+    || next === null
+    || Array.isArray(existing)
+    || Array.isArray(next)
+    || typeof existing !== "object"
+    || typeof next !== "object"
+  ) {
+    return next;
+  }
+
+  const merged: Record<string, unknown> = { ...(existing as Record<string, unknown>) };
+  for (const [key, value] of Object.entries(next as Record<string, unknown>)) {
+    merged[key] = mergeStreamToolCallRaw(merged[key], value, [...path, key]);
+  }
+  return merged;
 }
 
 function findStreamToolCallAccumulatorKey(
@@ -2595,27 +2627,39 @@ function createStreamProviderReasoningState(
   trimmed = false,
 ) {
   if (provider === "anthropic") {
-    const thinking = [
-      ...entries
-        .filter((entry) => entry.type === "thinking_delta")
-        .map((entry) => entry.value)
-        .filter((value): value is string => typeof value === "string"),
-      reasoning,
-    ].join("");
+    const redactedThinkingBlocks = entries
+      .filter((entry) => entry.type === "redacted_thinking")
+      .map((entry) => entry.value);
+    const streamedThinking = entries
+      .filter((entry) => entry.type === "thinking_delta")
+      .map((entry) => entry.value)
+      .filter((value): value is string => typeof value === "string")
+      .join("");
+    const thinking = streamedThinking || reasoning;
     const signature = entries
       .filter((entry) => entry.type === "signature_delta")
       .map((entry) => entry.value)
       .filter((value): value is string => typeof value === "string")
       .join("");
 
-    return createProviderReasoningState(provider, "anthropic-thinking", thinking || signature ? [{
-      type: "thinking",
-      value: {
-        signature: signature || undefined,
-        thinking,
-        type: "thinking",
-      },
-    }] : []);
+    const thinkingBlock = thinking || signature
+      ? [{
+          type: "thinking",
+          value: {
+            signature: signature || undefined,
+            thinking,
+            type: "thinking",
+          },
+        }]
+      : [];
+
+    return createProviderReasoningState(provider, "anthropic-thinking", [
+      ...redactedThinkingBlocks.map((value) => ({
+        type: "redacted_thinking",
+        value,
+      })),
+      ...thinkingBlock,
+    ]);
   }
 
   if (provider === "openrouter") {

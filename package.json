@@ -21,11 +21,12 @@
     "workspace"
   ],
   "scripts": {
-    "dev": "vite --host localhost --port 1420",
-    "typecheck": "tsc --noEmit",
+    "prepare:tool-bridge": "node scripts/prepare-public-toolbridge-shim.mjs",
+    "dev": "npm run prepare:tool-bridge && vite --host localhost --port 1420",
+    "typecheck": "npm run prepare:tool-bridge && tsc --noEmit",
     "build": "npm run typecheck && vite build",
-    "test": "vitest run src",
-    "test:tool-bridge": "vitest run src/toolBridge src/coding src/components/coding",
+    "test": "npm run prepare:tool-bridge && vitest run src",
+    "test:tool-bridge": "npm run prepare:tool-bridge && vitest run src/toolBridge src/coding src/components/coding",
     "preview": "vite preview --host localhost --port 4173",
     "rust:fmt:check": "cargo fmt --manifest-path src-tauri/Cargo.toml --check",
     "rust:check": "node scripts/run-cargo-check.mjs",

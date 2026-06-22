@@ -7,14 +7,74 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $toolBridgeRoot = Join-Path $repoRoot "src\toolBridge"
 $indexPath = Join-Path $toolBridgeRoot "index.ts"
+$markerPath = Join-Path $toolBridgeRoot ".public-shim"
+$parsersPath = Join-Path $toolBridgeRoot "parsers.ts"
+$markerVersion = "gilbert-codex-public-toolbridge-shim-v2"
+$legacyMarkerVersion = "gilbert-codex-public-toolbridge-shim-v1"
 
-if ((Test-Path $indexPath) -and -not $Force) {
+function Test-LegacyPublicShim {
+  if (-not (Test-Path $indexPath) -or -not (Test-Path $parsersPath)) {
+    return $false
+  }
+
+  $index = Get-Content -LiteralPath $indexPath -Raw
+  $parsers = Get-Content -LiteralPath $parsersPath -Raw
+  $hasLegacyParserStubs = (
+    $parsers -match 'export function parseAnthropicToolCalls\([^)]*\)[^{]*\{\s*return \[\];\s*\}' -and
+    $parsers -match 'export function parseResponsesToolCalls\([^)]*\)[^{]*\{\s*return \[\];\s*\}'
+  )
+  $hasLegacyIndexStub = (
+    $index -match 'Provider tool bridge is not bundled in this public build\.' -and
+    $index -match 'export function selectAdvertisedBridgeTools\([^)]*\)[^{]*\{\s*return \[\] as ToolDefinition\[\];\s*\}'
+  )
+  return ($hasLegacyParserStubs -and $hasLegacyIndexStub)
+}
+
+function Test-ManagedPublicShim {
+  if (-not (Test-Path $markerPath)) {
+    return $false
+  }
+
+  try {
+    $markerContent = Get-Content -LiteralPath $markerPath -Raw
+    if ($markerContent.Trim() -eq $legacyMarkerVersion) {
+      return $true
+    }
+
+    $marker = $markerContent | ConvertFrom-Json
+    if ($marker.version -ne $markerVersion -or $null -eq $marker.files) {
+      return Test-LegacyPublicShim
+    }
+
+    foreach ($file in $marker.files) {
+      $target = Join-Path $toolBridgeRoot $file.path
+      if (-not (Test-Path $target)) {
+        return $false
+      }
+      $hash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+      if ($hash -ne $file.sha256) {
+        return $false
+      }
+    }
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+$isPublicShim = Test-ManagedPublicShim
+if (-not $isPublicShim) {
+  $isPublicShim = Test-LegacyPublicShim
+}
+
+if ((Test-Path $indexPath) -and -not $Force -and -not $isPublicShim) {
   Write-Host "Existing local tool bridge found; public shim not needed."
   exit 0
 }
 
 New-Item -ItemType Directory -Force -Path $toolBridgeRoot | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $toolBridgeRoot "adapters") | Out-Null
+$shimFiles = @()
 
 function Write-ShimFile {
   param(
@@ -26,6 +86,7 @@ function Write-ShimFile {
   $targetDir = Split-Path -Parent $target
   New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
   Set-Content -LiteralPath $target -Value $Content -Encoding utf8
+  $script:shimFiles += $RelativePath
 }
 
 Write-ShimFile "types.ts" @'
@@ -164,7 +225,9 @@ export interface ToolResultMessage {
   arguments: unknown;
   callId: string;
   name: string;
+  providerTurnId?: number;
   rawCall?: unknown;
+  reasoningState?: ProviderReasoningState;
   result: ToolExecutionResult;
 }
 
@@ -359,12 +422,27 @@ export function createInlineToolResultMessage(result: ToolResultMessage, remaini
   };
 }
 
+export function createBudgetedToolResultMessages(results: ToolResultMessage[], maxChars: number | null | undefined) {
+  const finalized = new Array<ReturnType<typeof createInlineToolResultMessage>>(results.length);
+  let remaining = normalizeRemainingChars(maxChars);
+
+  for (let index = results.length - 1; index >= 0; index -= 1) {
+    const result = results[index];
+    if (!result) {
+      continue;
+    }
+    const message = createInlineToolResultMessage(result, remaining);
+    remaining = decrementRemainingChars(remaining, message.providerRawCharCount);
+    finalized[index] = message;
+  }
+
+  return finalized;
+}
+
 export function appendInlineUserToolResultMessages(currentMessages: unknown, results: ToolResultMessage[], options: { maxToolResultContentChars?: number | null }) {
   const messages = Array.isArray(currentMessages) ? [...currentMessages] : [];
-  let remaining = normalizeRemainingChars(options.maxToolResultContentChars);
-  for (const result of results) {
-    const inlineResult = createInlineToolResultMessage(result, remaining);
-    remaining = decrementRemainingChars(remaining, inlineResult.providerRawCharCount);
+  const finalized = createBudgetedToolResultMessages(results, options.maxToolResultContentChars);
+  for (const inlineResult of finalized) {
     messages.push({ content: inlineResult.content, role: "user" });
   }
   return messages;
@@ -380,10 +458,295 @@ export function createProviderVisibleToolSchema(tool: ToolDefinition) {
 '@
 
 Write-ShimFile "adapters\index.ts" @'
-import type { ProviderToolBridgeOptions, ToolBridgeProviderFormat } from "../types";
+import type { ProviderReasoningState } from "../../types/reasoning";
+import type { ProviderToolBridgeOptions, ToolBridgeProviderFormat, ToolDefinition } from "../types";
+import { isToolCompatibleWithProvider } from "../registry";
+import {
+  appendInlineUserToolResultMessages,
+  createBudgetedToolResultMessages,
+} from "./sharedUtils";
 
-export function applyToolBridgeToProviderRequest<T>(body: T, _format: ToolBridgeProviderFormat, _toolBridge?: ProviderToolBridgeOptions): T {
+export function applyToolBridgeToProviderRequest<T>(body: T, format: ToolBridgeProviderFormat, toolBridge?: ProviderToolBridgeOptions): T {
+  if (!toolBridge) {
+    return body;
+  }
+
+  const record = body && typeof body === "object" ? body as Record<string, unknown> : {};
+  appendToolResults(record, format, toolBridge);
+
+  if (!toolBridge.tools?.length || toolBridge.toolChoice === "none") {
+    return body;
+  }
+
+  const providerVisibleToolIds = toolBridge.providerVisibleToolIds
+    ? new Set(toolBridge.providerVisibleToolIds)
+    : undefined;
+  const tools = toolBridge.tools.filter((tool) =>
+    (!providerVisibleToolIds || providerVisibleToolIds.has(tool.id))
+      && isToolCompatibleWithProvider(tool, format),
+  );
+
+  if (tools.length === 0) {
+    return body;
+  }
+
+  if (format === "anthropic-messages") {
+    record.tools = tools.map(toAnthropicTool);
+  } else if (format === "openai-responses") {
+    record.tools = tools.map(toResponsesTool);
+  } else {
+    record.tools = tools.map(toOpenAiCompatibleTool);
+  }
+
+  if (format === "anthropic-messages" && toolBridge.toolChoice === "required") {
+    record.tool_choice = record.thinking ? { type: "auto" } : { type: "any" };
+  } else if (toolBridge.toolChoice && toolBridge.toolChoice !== "auto") {
+    record.tool_choice = toolBridge.toolChoice;
+  }
+
   return body;
+}
+
+function appendToolResults(
+  record: Record<string, unknown>,
+  format: ToolBridgeProviderFormat,
+  toolBridge: ProviderToolBridgeOptions,
+) {
+  const results = toolBridge.toolResultMessages ?? [];
+  if (results.length === 0) {
+    return;
+  }
+
+  if (toolBridge.toolResultDelivery === "inline-user-message") {
+    const key = format === "openai-responses" ? "input" : "messages";
+    record[key] = appendInlineUserToolResultMessages(record[key], results, toolBridge);
+    return;
+  }
+
+  const finalized = createBudgetedToolResultMessages(
+    results,
+    toolBridge.maxToolResultContentChars,
+  ).map((message, index) => ({
+    content: message.content,
+    result: results[index]!,
+  }));
+  const includeAssistantTurn = !toolBridge.resultsHistoryAlreadyContainsAssistantTurns;
+  const turns = groupFinalizedToolResultsByProviderTurn(finalized, toolBridge.reasoningState);
+
+  if (format === "openai-responses") {
+    const input = Array.isArray(record.input) ? [...record.input] : [];
+    for (const turn of turns) {
+      if (includeAssistantTurn) {
+        input.push(...createResponsesReasoningItems(turn.reasoningState));
+        input.push(...turn.results.map(({ result }) => createResponsesFunctionCall(result)));
+      }
+      input.push(...turn.results.map(({ result, content }) => ({
+        call_id: result.callId,
+        output: content,
+        type: "function_call_output",
+      })));
+    }
+    record.input = input;
+    return;
+  }
+
+  const messages = Array.isArray(record.messages) ? [...record.messages] : [];
+  if (format === "anthropic-messages") {
+    for (const turn of turns) {
+      if (includeAssistantTurn) {
+        messages.push({
+          content: [
+            ...createAnthropicReasoningBlocks(turn.reasoningState),
+            ...turn.results.map(({ result }) => createAnthropicToolUse(result)),
+          ],
+          role: "assistant",
+        });
+      }
+      messages.push({
+        content: turn.results.map(({ result, content }) => ({
+          content,
+          is_error: !result.result.ok,
+          tool_use_id: result.callId,
+          type: "tool_result",
+        })),
+        role: "user",
+      });
+    }
+  } else {
+    for (const turn of turns) {
+      if (includeAssistantTurn) {
+        messages.push(createOpenAiCompatibleAssistantTurn(
+          turn.results.map(({ result }) => result),
+          turn.reasoningState,
+        ));
+      }
+      messages.push(...turn.results.map(({ result, content }) => ({
+        content,
+        role: "tool",
+        tool_call_id: result.callId,
+      })));
+    }
+  }
+  record.messages = messages;
+}
+
+function groupFinalizedToolResultsByProviderTurn(
+  finalized: Array<{
+    content: string;
+    result: NonNullable<ProviderToolBridgeOptions["toolResultMessages"]>[number];
+  }>,
+  fallbackReasoningState?: ProviderReasoningState,
+) {
+  const turns: Array<{
+    providerTurnId?: number;
+    reasoningState?: ProviderReasoningState;
+    results: typeof finalized;
+  }> = [];
+
+  for (const item of finalized) {
+    const current = turns[turns.length - 1];
+    if (!current || current.providerTurnId !== item.result.providerTurnId) {
+      turns.push({
+        providerTurnId: item.result.providerTurnId,
+        reasoningState: item.result.reasoningState ?? fallbackReasoningState,
+        results: [item],
+      });
+    } else {
+      current.results.push(item);
+    }
+  }
+  return turns;
+}
+
+function createAnthropicReasoningBlocks(reasoningState?: ProviderReasoningState) {
+  if (reasoningState?.format !== "anthropic-thinking") {
+    return [];
+  }
+  return reasoningState.entries.map((entry) => entry.value);
+}
+
+function createAnthropicToolUse(result: NonNullable<ProviderToolBridgeOptions["toolResultMessages"]>[number]) {
+  const raw = readRecord(result.rawCall);
+  return raw.type === "tool_use" && argumentsMatch(raw.input, result.arguments)
+    ? raw
+    : {
+        id: result.callId,
+        input: result.arguments,
+        name: result.name,
+        type: "tool_use",
+      };
+}
+
+function createResponsesReasoningItems(reasoningState?: ProviderReasoningState) {
+  if (reasoningState?.format !== "openai-responses") {
+    return [];
+  }
+  return reasoningState.entries.map((entry) => entry.value);
+}
+
+function createResponsesFunctionCall(result: NonNullable<ProviderToolBridgeOptions["toolResultMessages"]>[number]) {
+  const raw = readRecord(result.rawCall);
+  return raw.type === "function_call" && argumentsMatch(raw.arguments, result.arguments)
+    ? raw
+    : {
+        arguments: stringifyArguments(result.arguments),
+        call_id: result.callId,
+        name: result.name,
+        type: "function_call",
+      };
+}
+
+function createOpenAiCompatibleAssistantTurn(
+  results: NonNullable<ProviderToolBridgeOptions["toolResultMessages"]>,
+  reasoningState?: ProviderReasoningState,
+) {
+  const message: Record<string, unknown> = {
+    content: null,
+    role: "assistant",
+    tool_calls: results.map((result) => {
+      const raw = readRecord(result.rawCall);
+      const rawFunction = readRecord(raw.function);
+      return raw.type === "function"
+        && typeof rawFunction.name === "string"
+        && argumentsMatch(rawFunction.arguments, result.arguments)
+        ? normalizeOpenAiCompatibleToolCallRaw(raw)
+        : {
+            function: {
+              arguments: stringifyArguments(result.arguments),
+              name: result.name,
+            },
+            id: result.callId,
+            type: "function",
+          };
+    }),
+  };
+
+  for (const entry of reasoningState?.entries ?? []) {
+    if (entry.type === "reasoning_details" || entry.type === "reasoning_content" || entry.type === "reasoning" || entry.type === "thinking") {
+      const existing = message[entry.type];
+      if (typeof existing === "string" && typeof entry.value === "string") {
+        message[entry.type] = existing + entry.value;
+      } else if (Array.isArray(existing) && Array.isArray(entry.value)) {
+        message[entry.type] = [...existing, ...entry.value];
+      } else if (existing === undefined) {
+        message[entry.type] = entry.value;
+      }
+    }
+  }
+  return message;
+}
+
+function normalizeOpenAiCompatibleToolCallRaw(raw: Record<string, unknown>) {
+  const { index: _index, ...normalized } = raw;
+  return normalized;
+}
+
+function argumentsMatch(rawArguments: unknown, executedArguments: unknown) {
+  let normalizedRaw = rawArguments;
+  if (typeof rawArguments === "string") {
+    try {
+      normalizedRaw = JSON.parse(rawArguments);
+    } catch {
+      return false;
+    }
+  }
+  return stringifyArguments(normalizedRaw) === stringifyArguments(executedArguments);
+}
+
+function stringifyArguments(value: unknown) {
+  return typeof value === "string" ? value : JSON.stringify(value ?? {});
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function toOpenAiCompatibleTool(tool: ToolDefinition) {
+  return {
+    function: {
+      description: tool.description,
+      name: tool.id,
+      parameters: tool.inputSchema,
+    },
+    type: "function",
+  };
+}
+
+function toResponsesTool(tool: ToolDefinition) {
+  return {
+    description: tool.description,
+    name: tool.id,
+    parameters: tool.inputSchema,
+    type: "function",
+  };
+}
+
+function toAnthropicTool(tool: ToolDefinition) {
+  return {
+    description: tool.description,
+    input_schema: tool.inputSchema,
+    name: tool.id,
+  };
 }
 '@
 
@@ -399,11 +762,25 @@ export function normalizeToolBridgePermissionMode(value: unknown): LocalPermissi
   return value === "auto-review" || value === "full-access" || value === "default" ? value : "default";
 }
 
-export function resolveToolPermission(_tool: ToolDefinition, _context: Pick<ToolExecutionContext, "automationScope" | "permissionMode">): ToolPermissionDecision {
+export function resolveToolPermission(tool: ToolDefinition, context: Pick<ToolExecutionContext, "automationScope" | "permissionMode">): ToolPermissionDecision {
+  if (context.permissionMode === "full-access") {
+    return {
+      allowed: true,
+      requiresApproval: false,
+    };
+  }
+
+  if (tool.permission === "diagnostic" || tool.permission === "read-only") {
+    return {
+      allowed: true,
+      requiresApproval: false,
+    };
+  }
+
   return {
     allowed: false,
-    reason: "Provider tool bridge is not bundled in this public build.",
-    requiresApproval: false,
+    reason: "Tool requires approval before execution.",
+    requiresApproval: true,
   };
 }
 
@@ -477,45 +854,200 @@ import type { ModelProviderId } from "../types/settings";
 import type { ToolCallRequest } from "./types";
 
 export function createToolCallRequest(provider: ModelProviderId, id: string, name: string, args: unknown, raw?: unknown): ToolCallRequest {
-  return {
+  const request: ToolCallRequest = {
     arguments: args,
     id,
     name,
     provider,
     raw,
   };
+
+  if (typeof args === "string") {
+    const parsed = parseJsonArguments(args);
+    request.arguments = parsed.ok ? parsed.value : {};
+    request.argumentsParseError = parsed.ok ? undefined : parsed.error;
+  }
+
+  return request;
 }
 
 export function parseVisibleTextToolCalls(): ToolCallRequest[] {
   return [];
 }
 
-export function parseAnthropicStreamToolCallDelta(..._args: unknown[]): { argumentsDelta?: string; argumentsParseError?: string; argumentsSnapshot?: unknown; id?: string; index: number; name?: string; raw?: unknown } | undefined {
+export function parseAnthropicStreamToolCallDelta(payload: unknown): { argumentsDelta?: string; argumentsParseError?: string; argumentsSnapshot?: unknown; id?: string; index: number; name?: string; raw?: unknown } | undefined {
+  const record = readRecord(payload);
+  const index = typeof record.index === "number" ? record.index : 0;
+  const block = readRecord(record.content_block);
+  if (record.type === "content_block_start" && block.type === "tool_use") {
+    const input = readRecord(block.input);
+    return {
+      argumentsSnapshot: Object.keys(input).length > 0 ? input : undefined,
+      id: typeof block.id === "string" ? block.id : undefined,
+      index,
+      name: typeof block.name === "string" ? block.name : undefined,
+      raw: payload,
+    };
+  }
+
+  const delta = readRecord(record.delta);
+  if (record.type === "content_block_delta" && delta.type === "input_json_delta") {
+    return {
+      argumentsDelta: typeof delta.partial_json === "string" ? delta.partial_json : "",
+      index,
+      raw: payload,
+    };
+  }
+
   return undefined;
 }
 
-export function parseAnthropicToolCalls(..._args: unknown[]): ToolCallRequest[] {
+export function parseAnthropicToolCalls(payload: unknown, provider: ModelProviderId): ToolCallRequest[] {
+  return readArray(readRecord(payload).content).flatMap((rawCall, index) => {
+    const call = readRecord(rawCall);
+    const name = typeof call.name === "string" ? call.name : "";
+    if (call.type !== "tool_use" || !name) {
+      return [];
+    }
+
+    return [createToolCallRequest(
+      provider,
+      typeof call.id === "string" ? call.id : `${name}-${index + 1}`,
+      name,
+      call.input ?? {},
+      rawCall,
+    )];
+  });
+}
+
+export function parseOpenAiCompatibleStreamToolCallDeltas(payload: unknown): Array<{ argumentsDelta?: string; argumentsParseError?: string; argumentsSnapshot?: unknown; id?: string; index: number; name?: string; raw?: unknown }> {
+  const choice = readArray(readRecord(payload).choices)[0];
+  const delta = readRecord(readRecord(choice).delta);
+  return readArray(delta.tool_calls).map((rawCall, fallbackIndex) => {
+    const call = readRecord(rawCall);
+    const fn = readRecord(call.function);
+    return {
+      argumentsDelta: typeof fn.arguments === "string" ? fn.arguments : undefined,
+      id: typeof call.id === "string" ? call.id : undefined,
+      index: typeof call.index === "number" ? call.index : fallbackIndex,
+      name: typeof fn.name === "string" ? fn.name : undefined,
+      raw: rawCall,
+    };
+  });
+}
+
+export function parseOpenAiCompatibleToolCalls(message: unknown, provider: ModelProviderId): ToolCallRequest[] {
+  return readArray(readRecord(message).tool_calls).flatMap((rawCall, index) => {
+    const call = readRecord(rawCall);
+    const fn = readRecord(call.function);
+    const name = typeof fn.name === "string" ? fn.name : "";
+    if (!name) {
+      return [];
+    }
+
+    return [createToolCallRequest(
+      provider,
+      typeof call.id === "string" ? call.id : `${name}-${index + 1}`,
+      name,
+      fn.arguments ?? {},
+      rawCall,
+    )];
+  });
+}
+
+export function parseResponsesStreamToolCallDeltas(payload: unknown): Array<{ argumentsDelta?: string; argumentsParseError?: string; argumentsSnapshot?: unknown; id?: string; index: number; name?: string; raw?: unknown }> {
+  const record = readRecord(payload);
+  const type = typeof record.type === "string" ? record.type : "";
+  const index = typeof record.output_index === "number" ? record.output_index : 0;
+
+  if (type === "response.output_item.added") {
+    const item = readRecord(record.item);
+    if (item.type !== "function_call") {
+      return [];
+    }
+
+    return [{
+      argumentsDelta: typeof item.arguments === "string" ? item.arguments : undefined,
+      id: typeof item.call_id === "string" ? item.call_id : typeof item.id === "string" ? item.id : undefined,
+      index,
+      name: typeof item.name === "string" ? item.name : undefined,
+      raw: item,
+    }];
+  }
+
+  if (type === "response.function_call_arguments.delta") {
+    return [{
+      argumentsDelta: typeof record.delta === "string" ? record.delta : "",
+      index,
+      raw: { arguments: typeof record.delta === "string" ? record.delta : "" },
+    }];
+  }
+
+  if (type === "response.function_call_arguments.done") {
+    const parsed = typeof record.arguments === "string" ? parseJsonArguments(record.arguments) : undefined;
+    return [{
+      argumentsParseError: parsed && !parsed.ok ? parsed.error : undefined,
+      argumentsSnapshot: parsed?.ok ? parsed.value : undefined,
+      index,
+      name: typeof record.name === "string" ? record.name : undefined,
+      raw: typeof record.name === "string" ? { name: record.name } : undefined,
+    }];
+  }
+
   return [];
 }
 
-export function parseOpenAiCompatibleStreamToolCallDeltas(..._args: unknown[]): Array<{ argumentsDelta?: string; argumentsParseError?: string; argumentsSnapshot?: unknown; id?: string; index: number; name?: string; raw?: unknown }> {
-  return [];
+export function parseResponsesStreamToolCalls(payload: unknown, provider: ModelProviderId): ToolCallRequest[] {
+  const response = readRecord(readRecord(payload).response);
+  return parseResponsesOutput(response.output, provider);
 }
 
-export function parseOpenAiCompatibleToolCalls(..._args: unknown[]): ToolCallRequest[] {
-  return [];
+export function parseResponsesToolCalls(payload: unknown, provider: ModelProviderId): ToolCallRequest[] {
+  return parseResponsesOutput(readRecord(payload).output, provider);
 }
 
-export function parseResponsesStreamToolCallDeltas(..._args: unknown[]): Array<{ argumentsDelta?: string; argumentsParseError?: string; argumentsSnapshot?: unknown; id?: string; index: number; name?: string; raw?: unknown }> {
-  return [];
+function parseResponsesOutput(output: unknown, provider: ModelProviderId): ToolCallRequest[] {
+  return readArray(output).flatMap((rawCall, index) => {
+    const call = readRecord(rawCall);
+    const name = typeof call.name === "string" ? call.name : "";
+    if (call.type !== "function_call" || !name) {
+      return [];
+    }
+
+    return [createToolCallRequest(
+      provider,
+      typeof call.call_id === "string"
+        ? call.call_id
+        : typeof call.id === "string" ? call.id : `${name}-${index + 1}`,
+      name,
+      call.arguments ?? {},
+      rawCall,
+    )];
+  });
 }
 
-export function parseResponsesStreamToolCalls(..._args: unknown[]): ToolCallRequest[] {
-  return [];
+function parseJsonArguments(value: string): { ok: true; value: unknown } | { error: string; ok: false } {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { ok: true, value: {} };
+  }
+
+  try {
+    return { ok: true, value: JSON.parse(trimmed) };
+  } catch (error) {
+    return {
+      error: `Could not parse tool arguments as JSON: ${error instanceof Error ? error.message : String(error)}`,
+      ok: false,
+    };
+  }
 }
 
-export function parseResponsesToolCalls(..._args: unknown[]): ToolCallRequest[] {
-  return [];
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function readArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 '@
 
@@ -752,5 +1284,17 @@ export interface ProjectToolMemoryStorage {
   save?: (key: string, value: string) => void;
 }
 '@
+
+$markerFiles = $shimFiles | ForEach-Object {
+  $target = Join-Path $toolBridgeRoot $_
+  @{
+    path = $_
+    sha256 = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+  }
+}
+@{
+  files = @($markerFiles)
+  version = $markerVersion
+} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $markerPath -Encoding utf8
 
 Write-Host "Generated public-safe tool bridge shim for CI/release builds."
